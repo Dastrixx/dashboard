@@ -57,7 +57,7 @@ function useOnecReports(period: Period | 10 = 10) {
         setError("");
 
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-reports?top=${period}&references=false`,
+          `${API_URL}/api/dashboard/onec-reports?top=500&days=${period}&references=false`,
           { signal: controller.signal },
         );
         const data = (await response.json()) as OnecPayload;
