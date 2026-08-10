@@ -1,7 +1,7 @@
 import cors from "cors";
 import express from "express";
 import { dashboardData } from "./data.mjs";
-import { onecGet, onecMetadata } from "./onec.mjs";
+import { onecGet, onecGetByKey, onecMetadata } from "./onec.mjs";
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -84,25 +84,30 @@ async function loadReferencesByKeys(entity, keys, select) {
     ),
   ];
 
-  const batches = [];
+  const references = [];
 
-  for (let index = 0; index < uniqueKeys.length; index += 15) {
-    const chunk = uniqueKeys.slice(index, index + 15);
-    const filter = chunk
-      .map((key) => `Ref_Key eq guid'${key}'`)
-      .join(" or ");
-
-    batches.push(
-      onecGet(entity, {
-        $top: chunk.length,
-        $select: select,
-        $filter: filter,
+  for (let index = 0; index < uniqueKeys.length; index += 5) {
+    const chunk = uniqueKeys.slice(index, index + 5);
+    const chunkResults = await Promise.all(
+      chunk.map(async (key) => {
+        try {
+          return await onecGetByKey(entity, key, {
+            $select: select,
+          });
+        } catch (error) {
+          console.warn(
+            `Не удалось получить ${entity} с ключом ${key}:`,
+            error instanceof Error ? error.message : error,
+          );
+          return null;
+        }
       }),
     );
+
+    references.push(...chunkResults.filter(Boolean));
   }
 
-  const results = await Promise.all(batches);
-  return results.flat();
+  return references;
 }
 
 app.get("/api/dashboard/onec-reports", async (request, response) => {
