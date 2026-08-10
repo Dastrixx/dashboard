@@ -30,6 +30,35 @@ type OnecPayload = {
   message?: string;
 };
 
+type StockBalance = {
+  Склад_Key: string;
+  Номенклатура_Key: string;
+  КоличествоBalance: number;
+  РезервBalance: number;
+  ор_СебестоимостьBalance?: number;
+};
+
+type StockReference = {
+  Ref_Key: string;
+  Code?: string;
+  Description?: string;
+  НаименованиеПолное?: string;
+  Артикул?: string;
+  ТоварнаяГруппа_Key?: string;
+  ТипСклада?: string;
+};
+
+type StockPayload = {
+  items?: StockBalance[];
+  references?: {
+    products?: StockReference[];
+    warehouses?: StockReference[];
+    categories?: StockReference[];
+  };
+  meta?: { loaded?: number; asOf?: string; source?: string };
+  message?: string;
+};
+
 const API_URL = "http://localhost:4000";
 const ZERO_GUID = "00000000-0000-0000-0000-000000000000";
 
@@ -324,12 +353,340 @@ function MissingSource({
 }
 
 export function OnecStock() {
+  const [payload, setPayload] = useState<StockPayload>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [warehouseMode, setWarehouseMode] = useState("all");
+  const [category, setCategory] = useState("all");
+  const [status, setStatus] = useState("all");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function load() {
+      try {
+        setLoading(true);
+        setError("");
+        const response = await fetch(
+          `${API_URL}/api/dashboard/onec-stock?top=5000`,
+          { signal: controller.signal },
+        );
+        const data = (await response.json()) as StockPayload;
+        if (!response.ok) {
+          throw new Error(data.message || `Ошибка HTTP ${response.status}`);
+        }
+        setPayload(data);
+      } catch (loadError) {
+        if (loadError instanceof DOMException && loadError.name === "AbortError") {
+          return;
+        }
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Не удалось получить остатки из 1С",
+        );
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    load();
+    return () => controller.abort();
+  }, []);
+
+  const view = useMemo(() => {
+    const balances = payload.items || [];
+    const products = new Map(
+      (payload.references?.products || []).map((item) => [item.Ref_Key, item]),
+    );
+    const warehouses = new Map(
+      (payload.references?.warehouses || []).map((item) => [item.Ref_Key, item]),
+    );
+    const categories = new Map(
+      (payload.references?.categories || []).map((item) => [item.Ref_Key, item]),
+    );
+
+    const matchesWarehouse = (key: string) => {
+      if (warehouseMode === "all") return true;
+      const kind = warehouses.get(key)?.ТипСклада || "";
+      if (warehouseMode === "sales-floor") return kind === "ТорговыйЗал";
+      return kind === "СкладскоеПомещение";
+    };
+
+    const grouped = new Map<
+      string,
+      {
+        key: string;
+        sku: string;
+        name: string;
+        categoryKey: string;
+        category: string;
+        quantity: number;
+        reserved: number;
+        cost: number;
+        locations: Set<string>;
+      }
+    >();
+
+    balances.filter((item) => matchesWarehouse(item.Склад_Key)).forEach((item) => {
+      const product = products.get(item.Номенклатура_Key);
+      const categoryKey = product?.ТоварнаяГруппа_Key || "";
+      const current = grouped.get(item.Номенклатура_Key) || {
+        key: item.Номенклатура_Key,
+        sku: product?.Артикул || product?.Code || "Без артикула",
+        name:
+          product?.НаименованиеПолное ||
+          product?.Description ||
+          `Товар ${item.Номенклатура_Key.slice(0, 8)}`,
+        categoryKey,
+        category: categories.get(categoryKey)?.Description || "Без категории",
+        quantity: 0,
+        reserved: 0,
+        cost: 0,
+        locations: new Set<string>(),
+      };
+      current.quantity += Number(item.КоличествоBalance || 0);
+      current.reserved += Number(item.РезервBalance || 0);
+      current.cost += Number(item.ор_СебестоимостьBalance || 0);
+      current.locations.add(
+        warehouses.get(item.Склад_Key)?.Description || "Склад не определён",
+      );
+      grouped.set(item.Номенклатура_Key, current);
+    });
+
+    const rows = [...grouped.values()].map((item) => {
+      const available = Math.max(item.quantity - item.reserved, 0);
+      const itemStatus =
+        item.quantity <= 0 ? "zero" : available <= 5 ? "low" : "available";
+      const recommendation =
+        item.quantity <= 0
+          ? "Проверить закуп"
+          : available <= 5
+            ? "Дозаказать"
+            : item.reserved / item.quantity >= 0.5
+              ? "Высокий резерв"
+              : "Запас достаточный";
+      return {
+        ...item,
+        locations: [...item.locations].join(", "),
+        available,
+        status: itemStatus,
+        recommendation,
+      };
+    });
+    const query = search.trim().toLowerCase();
+    const filtered = rows
+      .filter((item) => category === "all" || item.categoryKey === category)
+      .filter((item) => status === "all" || item.status === status)
+      .filter(
+        (item) =>
+          !query ||
+          `${item.sku} ${item.name} ${item.locations}`.toLowerCase().includes(query),
+      )
+      .sort((left, right) => left.available - right.available);
+
+    return {
+      rows,
+      filtered,
+      categories: [...categories.values()].sort((left, right) =>
+        (left.Description || "").localeCompare(right.Description || "", "ru"),
+      ),
+      totalQuantity: rows.reduce((sum, item) => sum + item.quantity, 0),
+      totalReserved: rows.reduce((sum, item) => sum + item.reserved, 0),
+      zero: rows.filter((item) => item.status === "zero").length,
+      low: rows.filter((item) => item.status === "low").length,
+    };
+  }, [payload, warehouseMode, category, status, search]);
+
+  useEffect(() => setPage(1), [warehouseMode, category, status, search]);
+
+  if (loading || error || !(payload.items || []).length) {
+    return (
+      <div className="page-stack">
+        <DataState
+          loading={loading}
+          error={error}
+          empty={!loading && !error && !(payload.items || []).length}
+        />
+      </div>
+    );
+  }
+
+  const pageSize = 20;
+  const pages = Math.max(Math.ceil(view.filtered.length / pageSize), 1);
+  const currentPage = Math.min(page, pages);
+  const visibleRows = view.filtered.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize,
+  );
+
   return (
-    <MissingSource
-      title="Склад и остатки"
-      description="Раздел ожидает текущие остатки из регистра накопления"
-      source="Нужно подключить виртуальную таблицу AccumulationRegister_ТоварыНаСкладах/Balance. Обычные движения регистра не используются как текущий остаток."
-    />
+    <div className="page-stack onec-stock-workspace">
+      <section className="onec-source-panel">
+        <div>
+          <span className="onec-source-kicker">Фактические данные 1С</span>
+          <h2>Остатки по складам</h2>
+          <p>
+            Виртуальная таблица «Товары на складах / Balance» · обновлено{" "}
+            {payload.meta?.asOf
+              ? new Date(payload.meta.asOf).toLocaleString("ru-RU")
+              : "только что"}
+          </p>
+        </div>
+        <div className="warehouse-selector" aria-label="Выбор типа склада">
+          {[
+            ["all", "Все"],
+            ["sales-floor", "Торговый зал"],
+            ["warehouse", "Склад"],
+          ].map(([value, label]) => (
+            <button
+              className={warehouseMode === value ? "active" : ""}
+              key={value}
+              onClick={() => setWarehouseMode(value)}
+              type="button"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="kpi-grid stock-kpis">
+        <article className="kpi-card">
+          <div className="kpi-top"><span>SKU с остатком</span></div>
+          <strong>{number.format(view.rows.length)}</strong>
+          <p>позиций вернул регистр 1С</p>
+        </article>
+        <article className="kpi-card">
+          <div className="kpi-top"><span>Остаток, единиц</span></div>
+          <strong>{number.format(view.totalQuantity)}</strong>
+          <p>по выбранным складам</p>
+        </article>
+        <article className="kpi-card">
+          <div className="kpi-top"><span>Осталось мало</span></div>
+          <strong>{number.format(view.low)}</strong>
+          <p>доступно не более 5 единиц</p>
+        </article>
+        <article className="kpi-card">
+          <div className="kpi-top"><span>В резерве</span></div>
+          <strong>{number.format(view.totalReserved)}</strong>
+          <p>{view.zero} позиций с нулевым остатком</p>
+        </article>
+      </section>
+
+      <section className="panel onec-stock-panel">
+        <div className="stock-toolbar">
+          <div>
+            <h2>Остатки по номенклатуре</h2>
+            <p>{view.filtered.length} позиций после фильтрации</p>
+          </div>
+          <div className="stock-controls">
+            <label className="search onec-stock-search">
+              <span aria-hidden>⌕</span>
+              <input
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Название, артикул или склад"
+                type="search"
+                value={search}
+              />
+            </label>
+            <select value={category} onChange={(event) => setCategory(event.target.value)}>
+              <option value="all">Все категории</option>
+              {view.categories.map((item) => (
+                <option key={item.Ref_Key} value={item.Ref_Key}>
+                  {item.Description || "Без названия"}
+                </option>
+              ))}
+            </select>
+            <select value={status} onChange={(event) => setStatus(event.target.value)}>
+              <option value="all">Все статусы</option>
+              <option value="available">В наличии</option>
+              <option value="low">Мало</option>
+              <option value="zero">Нет в наличии</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="onec-table-wrap">
+          <table className="onec-table stock-table">
+            <thead>
+              <tr>
+                <th>Артикул</th>
+                <th>Товар</th>
+                <th>Расположение</th>
+                <th>Категория</th>
+                <th>Остаток</th>
+                <th>Резерв</th>
+                <th>Доступно</th>
+                <th>Статус</th>
+                <th>Рекомендация</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.map((item) => (
+                <tr key={item.key}>
+                  <td><code>{item.sku}</code></td>
+                  <td><strong>{item.name}</strong></td>
+                  <td>{item.locations}</td>
+                  <td>{item.category}</td>
+                  <td>{number.format(item.quantity)}</td>
+                  <td>{number.format(item.reserved)}</td>
+                  <td><strong>{number.format(item.available)}</strong></td>
+                  <td>
+                    <span className={`stock-status ${item.status}`}>
+                      {item.status === "zero"
+                        ? "Нет в наличии"
+                        : item.status === "low"
+                          ? "Мало"
+                          : "В наличии"}
+                    </span>
+                  </td>
+                  <td>{item.recommendation}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="onec-pagination stock-pagination">
+          <span>
+            Показано {visibleRows.length} из {view.filtered.length}
+          </span>
+          <nav aria-label="Пагинация остатков">
+            <button
+              disabled={currentPage === 1}
+              onClick={() => setPage((value) => Math.max(value - 1, 1))}
+              type="button"
+            >
+              ←
+            </button>
+            <span>{currentPage} / {pages}</span>
+            <button
+              disabled={currentPage === pages}
+              onClick={() => setPage((value) => Math.min(value + 1, pages))}
+              type="button"
+            >
+              →
+            </button>
+          </nav>
+        </div>
+      </section>
+
+      <section className="stock-next-grid">
+        <article className="panel stock-next-card">
+          <span>Следующий источник</span>
+          <h3>Поступления товаров</h3>
+          <p>Подключим документы «ПоступлениеТоваров» для графика приходов и последних поставок.</p>
+        </article>
+        <article className="panel stock-next-card">
+          <span>Следующий источник</span>
+          <h3>Пересчёт и расхождения</h3>
+          <p>Подключим «ПересчетТоваров» и акты расхождений. До этого значения не подменяются демо-данными.</p>
+        </article>
+      </section>
+    </div>
   );
 }
 
