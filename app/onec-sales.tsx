@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useState } from "react";
 
 type OnecProductLine = {
@@ -24,11 +26,10 @@ type OnecRetailReport = {
 
 type OnecResponse = {
   items: OnecRetailReport[];
+  message?: string;
 };
 
-const API_URL = (
-  import.meta.env.VITE_API_URL || "http://localhost:4000"
-).replace(/\/$/, "");
+const API_URL = "http://localhost:4000";
 
 const money = new Intl.NumberFormat("ru-RU", {
   style: "currency",
@@ -55,21 +56,17 @@ export function OnecSales() {
         setError("");
 
         const response = await fetch(
-          `${API_URL}/api/onec/retail-reports?top=1`,
+          `${API_URL}/api/dashboard/onec-reports?top=1`,
           { signal: controller.signal },
         );
 
-        const data = (await response.json()) as
-          | OnecResponse
-          | { message?: string };
+        const data = (await response.json()) as Partial<OnecResponse>;
 
         if (!response.ok) {
-          throw new Error(
-            "message" in data ? data.message : "Ошибка получения данных",
-          );
+          throw new Error(data.message || `Ошибка HTTP ${response.status}`);
         }
 
-        setReports((data as OnecResponse).items);
+        setReports(Array.isArray(data.items) ? data.items : []);
       } catch (loadError) {
         if (
           loadError instanceof DOMException &&
@@ -157,7 +154,7 @@ export function OnecSales() {
               </thead>
 
               <tbody>
-                {report.Товары.map((item) => (
+                {(report.Товары ?? []).map((item) => (
                   <tr key={`${report.Ref_Key}-${item.LineNumber}`}>
                     <td>{item.LineNumber}</td>
                     <td>
