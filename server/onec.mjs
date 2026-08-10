@@ -147,3 +147,29 @@ export function onecBalance(register, options = {}) {
     $select: options.select,
   });
 }
+
+export function onecTurnovers(register, options = {}) {
+  if (!/^AccumulationRegister_[\p{L}\p{N}_]+$/u.test(register)) {
+    throw new Error("Недопустимое имя регистра накопления 1С");
+  }
+
+  const toDateTime = (value) =>
+    new Date(value).toISOString().replace(/\.\d{3}Z$/, "");
+  const startPeriod = toDateTime(options.startPeriod);
+  const endPeriod = toDateTime(options.endPeriod);
+  const condition = quoteOdataString(options.condition || "");
+  const dimensions = quoteOdataString(options.dimensions || "");
+  const path = [
+    `${register}/Turnovers(`,
+    `Condition=${condition},`,
+    `Dimensions=${dimensions},`,
+    `EndPeriod=datetime'${endPeriod}',`,
+    `StartPeriod=datetime'${startPeriod}')`,
+  ].join("");
+
+  return onecRequest(path, {
+    $format: "json",
+    $top: options.top,
+    $select: options.select,
+  });
+}
