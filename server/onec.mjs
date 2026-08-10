@@ -44,7 +44,10 @@ async function onecRequest(path, params = {}, accept = "application/json") {
   const body = await response.text();
 
   if (!response.ok) {
-    throw new Error(`1С OData вернула HTTP ${response.status}`);
+    const details = body.replace(/\\s+/g, " ").trim().slice(0, 800);
+    throw new Error(
+      `1С OData вернула HTTP ${response.status}${details ? `: ${details}` : ""}`,
+    );
   }
 
   if (accept.includes("xml")) {
@@ -69,6 +72,26 @@ export function onecGet(entity, params = {}) {
   }
 
   return onecRequest(entity, {
+    $format: "json",
+    ...params,
+  });
+}
+
+
+export function onecGetByKey(entity, key, params = {}) {
+  if (!/^[\p{L}\p{N}_]+$/u.test(entity)) {
+    throw new Error("Недопустимое имя сущности 1С");
+  }
+
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      key,
+    )
+  ) {
+    throw new Error("Недопустимый ключ сущности 1С");
+  }
+
+  return onecRequest(`${entity}(guid'${key}')`, {
     $format: "json",
     ...params,
   });
