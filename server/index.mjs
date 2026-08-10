@@ -76,23 +76,43 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
       10,
     );
 
-    const items = await onecGet("Document_ОтчетОРозничныхПродажах", {
-      $top: top,
-      $select: [
-        "Ref_Key",
-        "Number",
-        "Date",
-        "Posted",
-        "СуммаДокумента",
-        "СуммаВозвратов",
-        "Магазин_Key",
-        "КассаККМ_Key",
-        "Товары",
-      ].join(","),
-      $orderby: "Date desc",
-    });
+    const [items, products, warehouses] = await Promise.all([
+      onecGet("Document_ОтчетОРозничныхПродажах", {
+        $top: top,
+        $select: [
+          "Ref_Key",
+          "Number",
+          "Date",
+          "Posted",
+          "СуммаДокумента",
+          "СуммаВозвратов",
+          "Магазин_Key",
+          "КассаККМ_Key",
+          "Товары",
+        ].join(","),
+        $orderby: "Date desc",
+      }),
+      onecGet("Catalog_Номенклатура", {
+        $top: 500,
+        $select: "Ref_Key,Code,Description,Артикул",
+        $filter: "IsFolder eq false and DeletionMark eq false",
+        $orderby: "Description",
+      }),
+      onecGet("Catalog_Склады", {
+        $top: 100,
+        $select: "Ref_Key,Code,Description,ТипСклада,Магазин_Key",
+        $filter: "IsFolder eq false and DeletionMark eq false",
+        $orderby: "Description",
+      }),
+    ]);
 
-    response.json({ items });
+    response.json({
+      items,
+      references: {
+        products,
+        warehouses,
+      },
+    });
   } catch (error) {
     console.error("Ошибка загрузки отчётов 1С:", error);
 
