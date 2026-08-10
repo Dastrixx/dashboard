@@ -44,7 +44,7 @@ async function onecRequest(path, params = {}, accept = "application/json") {
   const body = await response.text();
 
   if (!response.ok) {
-    const details = body.replace(/\\s+/g, " ").trim().slice(0, 800);
+    const details = body.replace(/\s+/g, " ").trim().slice(0, 800);
     throw new Error(
       `1С OData вернула HTTP ${response.status}${details ? `: ${details}` : ""}`,
     );
