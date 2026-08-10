@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+type AnalyticsPeriod = "day" | "week" | "month";
+
 type OnecProductLine = {
   LineNumber: string;
   Номенклатура_Key: string;
@@ -30,6 +32,7 @@ type OnecProductReference = {
   Description: string;
   НаименованиеПолное: string;
   Артикул: string;
+  ТоварнаяГруппа_Key: string;
 };
 
 type OnecWarehouseReference = {
@@ -40,35 +43,73 @@ type OnecWarehouseReference = {
   Магазин_Key: string;
 };
 
+type OnecCategoryReference = {
+  Ref_Key: string;
+  Code: string;
+  Description: string;
+};
+
 type OnecResponse = {
   items: OnecRetailReport[];
   references: {
     products: OnecProductReference[];
     warehouses: OnecWarehouseReference[];
+    categories: OnecCategoryReference[];
   };
   message?: string;
 };
 
+type ProductRow = {
+  key: string;
+  article: string;
+  name: string;
+  category: string;
+  revenue: number;
+  sold: number;
+  share: number;
+  abc: "A" | "B" | "C";
+};
+
 const API_URL = "http://localhost:4000";
-const ZERO_GUID = "00000000-0000-0000-0000-000000000000";
+const DAY_MS = 86_400_000;
+
+const PERIODS: Record<
+  AnalyticsPeriod,
+  { label: string; days: number; caption: string }
+> = {
+  day: { label: "День", days: 1, caption: "за день" },
+  week: { label: "Неделя", days: 7, caption: "за неделю" },
+  month: { label: "Месяц", days: 30, caption: "за 30 дней" },
+};
 
 const money = new Intl.NumberFormat("ru-RU", {
   style: "currency",
   currency: "KGS",
+  maximumFractionDigits: 0,
+});
+
+const number = new Intl.NumberFormat("ru-RU", {
   maximumFractionDigits: 2,
 });
 
-const date = new Intl.DateTimeFormat("ru-RU", {
-  dateStyle: "medium",
-  timeStyle: "short",
+const shortDate = new Intl.DateTimeFormat("ru-RU", {
+  day: "2-digit",
+  month: "2-digit",
 });
+
+function inRange(value: string, from: number, to: number) {
+  const timestamp = new Date(value).getTime();
+  return timestamp >= from && timestamp <= to;
+}
 
 export function OnecSales() {
   const [reports, setReports] = useState<OnecRetailReport[]>([]);
   const [products, setProducts] = useState<OnecProductReference[]>([]);
   const [warehouses, setWarehouses] = useState<OnecWarehouseReference[]>([]);
-  const [selectedReportKey, setSelectedReportKey] = useState("");
+  const [categories, setCategories] = useState<OnecCategoryReference[]>([]);
+  const [period, setPeriod] = useState<AnalyticsPeriod>("month");
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -81,18 +122,20 @@ export function OnecSales() {
         setError("");
 
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-reports?top=1`,
+          `${API_URL}/api/dashboard/onec-reports?top=500`,
           { signal: controller.signal },
         );
-
         const data = (await response.json()) as Partial<OnecResponse>;
 
         if (!response.ok) {
           throw new Error(data.message || `Ошибка HTTP ${response.status}`);
         }
 
-        const loadedReports = Array.isArray(data.items) ? data.items : [];
-        setReports(loadedReports);
+        setReports(
+          Array.isArray(data.items)
+            ? data.items.filter((item) => item.Posted)
+            : [],
+        );
         setProducts(
           Array.isArray(data.references?.products)
             ? data.references.products
@@ -103,7 +146,11 @@ export function OnecSales() {
             ? data.references.warehouses
             : [],
         );
-        setSelectedReportKey(loadedReports[0]?.Ref_Key ?? "");
+        setCategories(
+          Array.isArray(data.references?.categories)
+            ? data.references.categories
+            : [],
+        );
       } catch (loadError) {
         if (
           loadError instanceof DOMException &&
@@ -123,48 +170,187 @@ export function OnecSales() {
     }
 
     loadReports();
-
     return () => controller.abort();
   }, []);
 
-  const productByKey = useMemo(
-    () => new Map(products.map((item) => [item.Ref_Key, item])),
-    [products],
-  );
+  const analytics = useMemo(() => {
+    const latestTimestamp = Math.max(
+      ...reports.map((report) => new Date(report.Date).getTime()),
+      0,
+    );
 
-  const warehouseByKey = useMemo(
-    () => new Map(warehouses.map((item) => [item.Ref_Key, item])),
-    [warehouses],
-  );
+    if (!latestTimestamp) return null;
 
-  const report =
-    reports.find((item) => item.Ref_Key === selectedReportKey) ?? reports[0];
+    const duration = PERIODS[period].days * DAY_MS;
+    const currentFrom = latestTimestamp - duration + 1;
+    const previousTo = currentFrom - 1;
+    const previousFrom = previousTo - duration + 1;
 
-  const lines = useMemo(() => {
-    if (!report) return [];
+    const currentReports = reports.filter((report) =>
+      inRange(report.Date, currentFrom, latestTimestamp),
+    );
+    const previousReports = reports.filter((report) =>
+      inRange(report.Date, previousFrom, previousTo),
+    );
+
+    const productByKey = new Map(
+      products.map((product) => [product.Ref_Key, product]),
+    );
+    const categoryByKey = new Map(
+      categories.map((item) => [item.Ref_Key, item.Description]),
+    );
+
+    const revenue = currentReports.reduce(
+      (sum, report) => sum + Number(report.СуммаДокумента || 0),
+      0,
+    );
+    const previousRevenue = previousReports.reduce(
+      (sum, report) => sum + Number(report.СуммаДокумента || 0),
+      0,
+    );
+    const lines = currentReports.flatMap((report) => report.Товары || []);
+    const sold = lines.reduce(
+      (sum, line) => sum + Number(line.Количество || 0),
+      0,
+    );
+
+    const aggregate = new Map<
+      string,
+      { revenue: number; sold: number }
+    >();
+
+    lines.forEach((line) => {
+      const current = aggregate.get(line.Номенклатура_Key) || {
+        revenue: 0,
+        sold: 0,
+      };
+      current.revenue += Number(line.Сумма || 0);
+      current.sold += Number(line.Количество || 0);
+      aggregate.set(line.Номенклатура_Key, current);
+    });
+
+    const totalProductRevenue =
+      [...aggregate.values()].reduce(
+        (sum, item) => sum + item.revenue,
+        0,
+      ) || 1;
+
+    let cumulative = 0;
+    const rows: ProductRow[] = [...aggregate.entries()]
+      .map(([key, value]) => {
+        const product = productByKey.get(key);
+        const categoryName =
+          categoryByKey.get(product?.ТоварнаяГруппа_Key || "") ||
+          "Без категории";
+
+        return {
+          key,
+          article: product?.Артикул || product?.Code || "—",
+          name:
+            product?.Description ||
+            product?.НаименованиеПолное ||
+            "Название не найдено",
+          category: categoryName,
+          revenue: value.revenue,
+          sold: value.sold,
+          share: 0,
+          abc: "C" as const,
+        };
+      })
+      .sort((left, right) => right.revenue - left.revenue)
+      .map((row) => {
+        const share = (row.revenue / totalProductRevenue) * 100;
+        cumulative += share;
+        return {
+          ...row,
+          share,
+          abc:
+            cumulative <= 80
+              ? ("A" as const)
+              : cumulative <= 95
+                ? ("B" as const)
+                : ("C" as const),
+        };
+      });
+
+    const categoryMap = new Map<string, number>();
+    rows.forEach((row) => {
+      categoryMap.set(
+        row.category,
+        (categoryMap.get(row.category) || 0) + row.revenue,
+      );
+    });
+    const categoryRows = [...categoryMap.entries()]
+      .map(([label, value]) => ({
+        label,
+        value,
+        share: (value / totalProductRevenue) * 100,
+      }))
+      .sort((left, right) => right.value - left.value);
+
+    const bucketCount =
+      period === "day" ? 6 : period === "week" ? 7 : 5;
+    const bucketSize = duration / bucketCount;
+
+    const makeBuckets = (
+      source: OnecRetailReport[],
+      rangeStart: number,
+    ) =>
+      Array.from({ length: bucketCount }, (_, index) => ({
+        label:
+          period === "month"
+            ? `${index + 1} нед.`
+            : period === "week"
+              ? shortDate.format(new Date(rangeStart + index * bucketSize))
+              : `${index * 4}–${(index + 1) * 4}ч`,
+        value: 0,
+      })).map((bucket, index, buckets) => {
+        source.forEach((report) => {
+          const reportTime = new Date(report.Date).getTime();
+          const bucketIndex = Math.min(
+            Math.floor((reportTime - rangeStart) / bucketSize),
+            buckets.length - 1,
+          );
+          if (bucketIndex === index) {
+            bucket.value += Number(report.СуммаДокумента || 0);
+          }
+        });
+        return bucket;
+      });
+
+    return {
+      latestTimestamp,
+      currentReports,
+      revenue,
+      previousRevenue,
+      sold,
+      averagePrice: sold ? revenue / sold : 0,
+      activeSku: aggregate.size,
+      rows,
+      categoryRows,
+      currentBuckets: makeBuckets(currentReports, currentFrom),
+      previousBuckets: makeBuckets(previousReports, previousFrom),
+      growth:
+        previousRevenue > 0
+          ? ((revenue - previousRevenue) / previousRevenue) * 100
+          : null,
+    };
+  }, [categories, period, products, reports]);
+
+  const visibleRows = useMemo(() => {
+    if (!analytics) return [];
 
     const normalizedQuery = query.trim().toLowerCase();
 
-    return (report.Товары ?? []).filter((item) => {
-      if (!normalizedQuery) return true;
-
-      const product = productByKey.get(item.Номенклатура_Key);
-      const warehouse = warehouseByKey.get(item.Склад_Key);
-
-      return [
-        product?.Description,
-        product?.НаименованиеПолное,
-        product?.Артикул,
-        product?.Code,
-        warehouse?.Description,
-        item.Номенклатура_Key,
-      ]
-        .filter(Boolean)
-        .some((value) =>
-          String(value).toLowerCase().includes(normalizedQuery),
-        );
-    });
-  }, [productByKey, query, report, warehouseByKey]);
+    return analytics.rows.filter(
+      (row) =>
+        (!category || row.category === category) &&
+        (!normalizedQuery ||
+          `${row.name} ${row.article}`
+            .toLowerCase()
+            .includes(normalizedQuery)),
+    );
+  }, [analytics, category, query]);
 
   if (loading) {
     return (
@@ -172,8 +358,8 @@ export function OnecSales() {
         <section className="onec-state panel">
           <span className="onec-spinner" />
           <div>
-            <strong>Получаем данные из 1С</strong>
-            <p>Загружаем последние отчёты и справочники…</p>
+            <strong>Формируем аналитику из 1С</strong>
+            <p>Загружаем отчёты, номенклатуру и категории…</p>
           </div>
         </section>
       </div>
@@ -193,98 +379,190 @@ export function OnecSales() {
     );
   }
 
-  if (!report) {
+  if (!analytics) {
     return (
       <div className="page-stack">
         <section className="onec-state panel">
           <div>
-            <strong>Отчётов пока нет</strong>
-            <p>В 1С не найдено отчётов о розничных продажах.</p>
+            <strong>Нет данных</strong>
+            <p>1С не вернула проведённых отчётов о продажах.</p>
           </div>
         </section>
       </div>
     );
   }
 
+  const maxChartValue = Math.max(
+    ...analytics.currentBuckets.map((item) => item.value),
+    ...analytics.previousBuckets.map((item) => item.value),
+    1,
+  );
+
   return (
-    <div className="page-stack onec-workspace">
-      <section className="onec-source-panel">
-        <div>
-          <span className="onec-source-kicker">Данные из 1С</span>
-          <h2>Отчёт о розничных продажах</h2>
-          <p>
-            Документ №{report.Number} · {date.format(new Date(report.Date))}
-          </p>
+    <div className="page-stack onec-product-analytics">
+      <section className="analytics-filter-bar">
+        <div className="filter-copy">
+          <span>Период анализа</span>
+          <strong>{PERIODS[period].label}</strong>
         </div>
-
-        <div className="onec-source-actions">
-          <span className={report.Posted ? "onec-posted" : "onec-draft"}>
-            {report.Posted ? "Проведён" : "Не проведён"}
-          </span>
-
-          {reports.length > 1 && (
-            <label className="onec-report-select">
-              <span>Документ</span>
-              <select
-                value={report.Ref_Key}
-                onChange={(event) =>
-                  setSelectedReportKey(event.target.value)
-                }
-              >
-                {reports.map((item) => (
-                  <option value={item.Ref_Key} key={item.Ref_Key}>
-                    №{item.Number} · {date.format(new Date(item.Date))}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
+        <div className="period-switch" role="group" aria-label="Период анализа">
+          {(Object.keys(PERIODS) as AnalyticsPeriod[]).map((key) => (
+            <button
+              key={key}
+              className={period === key ? "active" : ""}
+              onClick={() => setPeriod(key)}
+            >
+              {PERIODS[key].label}
+            </button>
+          ))}
         </div>
+        <span className="onec-period-note">
+          Данные по состоянию на{" "}
+          {new Date(analytics.latestTimestamp).toLocaleDateString("ru-RU")}
+        </span>
       </section>
 
       <section className="kpi-grid product-kpis">
         <article className="kpi-card">
           <div className="kpi-top">
-            <span>Сумма документа</span>
+            <span>Выручка {PERIODS[period].caption}</span>
+            {analytics.growth !== null && (
+              <b className={analytics.growth >= 0 ? "trend" : "trend neutral"}>
+                {analytics.growth >= 0 ? "+" : ""}
+                {analytics.growth.toFixed(1)}%
+              </b>
+            )}
           </div>
-          <strong>{money.format(report.СуммаДокумента)}</strong>
-          <p>поле 1С «СуммаДокумента»</p>
+          <strong>{money.format(analytics.revenue)}</strong>
+          <p>по проведённым отчётам 1С</p>
         </article>
 
         <article className="kpi-card">
-          <div className="kpi-top">
-            <span>Возвраты</span>
-          </div>
-          <strong>{money.format(report.СуммаВозвратов)}</strong>
-          <p>поле 1С «СуммаВозвратов»</p>
+          <div className="kpi-top"><span>Продано</span></div>
+          <strong>{number.format(analytics.sold)} ед.</strong>
+          <p>по товарным строкам документов</p>
         </article>
 
         <article className="kpi-card">
-          <div className="kpi-top">
-            <span>Строк товаров</span>
-          </div>
-          <strong>{report.Товары?.length ?? 0}</strong>
-          <p>табличная часть документа</p>
+          <div className="kpi-top"><span>Средняя цена продажи</span></div>
+          <strong>{money.format(analytics.averagePrice)}</strong>
+          <p>выручка на проданную единицу</p>
         </article>
 
         <article className="kpi-card">
-          <div className="kpi-top">
-            <span>Источник</span>
-          </div>
-          <strong className="onec-source-value">1С OData</strong>
-          <p>реальные данные без расчётов</p>
+          <div className="kpi-top"><span>Активных SKU</span></div>
+          <strong>{number.format(analytics.activeSku)}</strong>
+          <p>были продажи за период</p>
         </article>
       </section>
 
-      <section className="panel onec-products-panel">
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>Сравнительный анализ</h2>
+            <p>Текущий период против предыдущего</p>
+          </div>
+          <div className="chart-key compact">
+            <span><i className="actual" />Текущий</span>
+            <span><i className="previous" />Предыдущий</span>
+          </div>
+        </div>
+        <div className="onec-comparison">
+          {analytics.currentBuckets.map((current, index) => {
+            const previous = analytics.previousBuckets[index];
+            return (
+              <div className="onec-comparison-group" key={current.label}>
+                <div className="onec-comparison-bars">
+                  <div>
+                    <b>{money.format(current.value)}</b>
+                    <i
+                      className="current"
+                      style={{
+                        height: `${Math.max((current.value / maxChartValue) * 100, current.value ? 3 : 0)}%`,
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <b>{money.format(previous.value)}</b>
+                    <i
+                      className="previous"
+                      style={{
+                        height: `${Math.max((previous.value / maxChartValue) * 100, previous.value ? 3 : 0)}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+                <span>{current.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="charts-grid">
+        <article className="panel wide">
+          <div className="panel-head">
+            <div>
+              <h2>Продажи по категориям</h2>
+              <p>Доля в выручке за выбранный период</p>
+            </div>
+          </div>
+          <div className="onec-category-list">
+            {analytics.categoryRows.map((item) => (
+              <div key={item.label}>
+                <div>
+                  <strong>{item.label}</strong>
+                  <span>
+                    {money.format(item.value)} · {item.share.toFixed(1)}%
+                  </span>
+                </div>
+                <i><b style={{ width: `${item.share}%` }} /></i>
+              </div>
+            ))}
+          </div>
+        </article>
+
+        <article className="panel insights">
+          <div className="panel-head">
+            <div>
+              <h2>Источник расчёта</h2>
+              <p>Без демонстрационных значений</p>
+            </div>
+          </div>
+          <div className="insight good">
+            <b>Выручка</b>
+            <span>ОтчетОРозничныхПродажах.СуммаДокумента</span>
+          </div>
+          <div className="insight good">
+            <b>Количество и товары</b>
+            <span>Табличная часть документа «Товары»</span>
+          </div>
+          <div className="insight">
+            <b>Категории</b>
+            <span>Справочник «Товарные группы»; незаполненные — «Без категории»</span>
+          </div>
+        </article>
+      </section>
+
+      <section className="panel onec-abc-panel">
         <div className="inventory-head">
           <div>
-            <h2>Товары документа</h2>
-            <p>
-              Номенклатура, количество, цена и склад непосредственно из 1С
-            </p>
+            <h2>Таблица ABC-анализа</h2>
+            <p>{visibleRows.length} позиций · реальные продажи 1С</p>
           </div>
-          <span>{lines.length} позиций</span>
+          <label className="select-control">
+            <select
+              value={category}
+              onChange={(event) => setCategory(event.target.value)}
+            >
+              <option value="">Все категории</option>
+              {analytics.categoryRows.map((item) => (
+                <option value={item.label} key={item.label}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <div className="inventory-controls">
@@ -293,64 +571,51 @@ export function OnecSales() {
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Поиск по товару, артикулу или складу"
+              placeholder="Поиск по названию или артикулу"
             />
           </label>
         </div>
 
         <div className="onec-table-wrap">
-          <table className="onec-table">
+          <table className="onec-table onec-abc-table">
             <thead>
               <tr>
-                <th>№</th>
-                <th>Товар</th>
                 <th>Артикул</th>
-                <th>Количество</th>
-                <th>Цена</th>
-                <th>Сумма</th>
-                <th>Склад</th>
-                <th>Продавец</th>
+                <th>Товар</th>
+                <th>Категория</th>
+                <th>Выручка</th>
+                <th>Продано</th>
+                <th>Доля</th>
+                <th>ABC</th>
               </tr>
             </thead>
             <tbody>
-              {lines.map((item) => {
-                const product = productByKey.get(item.Номенклатура_Key);
-                const warehouse = warehouseByKey.get(item.Склад_Key);
-
-                return (
-                  <tr key={`${report.Ref_Key}-${item.LineNumber}`}>
-                    <td>{item.LineNumber}</td>
-                    <td>
-                      <strong>
-                        {product?.Description ||
-                          product?.НаименованиеПолное ||
-                          "Название не найдено в справочнике"}
-                      </strong>
-                      <small className="onec-key">
-                        {item.Номенклатура_Key}
-                      </small>
-                    </td>
-                    <td>{product?.Артикул || product?.Code || "—"}</td>
-                    <td>{item.Количество}</td>
-                    <td>{money.format(item.Цена)}</td>
-                    <td>
-                      <strong>{money.format(item.Сумма)}</strong>
-                    </td>
-                    <td>
-                      {warehouse?.Description || item.Склад_Key}
-                    </td>
-                    <td>
-                      {item.Продавец_Key &&
-                      item.Продавец_Key !== ZERO_GUID
-                        ? item.Продавец_Key
-                        : "Не указан"}
-                    </td>
-                  </tr>
-                );
-              })}
+              {visibleRows.map((row) => (
+                <tr key={row.key}>
+                  <td><code>{row.article}</code></td>
+                  <td>
+                    <strong>{row.name}</strong>
+                    <small className="onec-key">{row.key}</small>
+                  </td>
+                  <td>{row.category}</td>
+                  <td>{money.format(row.revenue)}</td>
+                  <td>{number.format(row.sold)} ед.</td>
+                  <td>{row.share.toFixed(1)}%</td>
+                  <td>
+                    <span className={`abc-badge ${row.abc.toLowerCase()}`}>
+                      {row.abc}
+                    </span>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section className="onec-document-footnote">
+        <span>Получено документов: {analytics.currentReports.length}</span>
+        <span>Складов в справочнике: {warehouses.length}</span>
       </section>
     </div>
   );
