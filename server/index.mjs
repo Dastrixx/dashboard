@@ -1,7 +1,12 @@
 import cors from "cors";
 import express from "express";
 import { dashboardData } from "./data.mjs";
-import { onecGet, onecGetByKey, onecMetadata } from "./onec.mjs";
+import {
+  onecBalance,
+  onecGet,
+  onecGetByKey,
+  onecMetadata,
+} from "./onec.mjs";
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -197,6 +202,124 @@ async function loadReferencesByKeys(entity, keys, select) {
 
   return references;
 }
+
+async function loadReferencesByKeysBatched(entity, keys, select) {
+  const uniqueKeys = [
+    ...new Set(
+      keys.filter(
+        (key) =>
+          typeof key === "string" &&
+          GUID_PATTERN.test(key) &&
+          key !== "00000000-0000-0000-0000-000000000000",
+      ),
+    ),
+  ];
+  const result = [];
+  const missing = [];
+
+  uniqueKeys.forEach((key) => {
+    const cached = referenceCache.get(`${entity}:${key}`);
+    if (cached) result.push(cached);
+    else missing.push(key);
+  });
+
+  for (let index = 0; index < missing.length; index += 15) {
+    const chunk = missing.slice(index, index + 15);
+    const filter = chunk
+      .map((key) => `Ref_Key eq guid'${key}'`)
+      .join(" or ");
+
+    try {
+      const items = await onecGet(entity, {
+        $top: chunk.length,
+        $select: select,
+        $filter: filter,
+      });
+
+      for (const item of items) {
+        referenceCache.set(`${entity}:${item.Ref_Key}`, item);
+        result.push(item);
+      }
+    } catch (error) {
+      console.warn(
+        `1С не приняла пакетный запрос ${entity}, используем запросы по ключам:`,
+        error instanceof Error ? error.message : error,
+      );
+      result.push(...(await loadReferencesByKeys(entity, chunk, select)));
+    }
+  }
+
+  return result;
+}
+
+app.get("/api/dashboard/onec-stock", async (request, response) => {
+  try {
+    const top = Math.min(
+      Math.max(Number(request.query.top) || 5000, 1),
+      10000,
+    );
+    const balances = await onecBalance(
+      "AccumulationRegister_ТоварыНаСкладах",
+      {
+        period: request.query.period || new Date(),
+        dimensions: "Склад,Номенклатура",
+        top,
+        select: [
+          "Склад_Key",
+          "Номенклатура_Key",
+          "КоличествоBalance",
+          "РезервBalance",
+          "ор_СебестоимостьBalance",
+        ].join(","),
+      },
+    );
+
+    const productKeys = balances.map((item) => item.Номенклатура_Key);
+    const warehouseKeys = balances.map((item) => item.Склад_Key);
+    const [products, warehouses] = await Promise.all([
+      loadReferencesByKeysBatched(
+        "Catalog_Номенклатура",
+        productKeys,
+        [
+          "Ref_Key",
+          "Code",
+          "Description",
+          "НаименованиеПолное",
+          "Артикул",
+          "ТоварнаяГруппа_Key",
+        ].join(","),
+      ),
+      loadReferencesByKeysBatched(
+        "Catalog_Склады",
+        warehouseKeys,
+        "Ref_Key,Code,Description,ТипСклада,Магазин_Key",
+      ),
+    ]);
+    const categories = await loadReferencesByKeysBatched(
+      "Catalog_ТоварныеГруппы",
+      products.map((item) => item.ТоварнаяГруппа_Key),
+      "Ref_Key,Code,Description",
+    );
+
+    response.json({
+      items: balances,
+      references: { products, warehouses, categories },
+      meta: {
+        loaded: balances.length,
+        asOf: new Date().toISOString(),
+        source: "AccumulationRegister_ТоварыНаСкладах/Balance",
+      },
+    });
+  } catch (error) {
+    console.error("Ошибка загрузки остатков 1С:", error);
+    response.status(502).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : "Не удалось получить остатки из 1С",
+    });
+  }
+});
 
 app.get("/api/dashboard/onec-reports", async (request, response) => {
   try {
