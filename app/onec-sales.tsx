@@ -72,6 +72,7 @@ type ProductRow = {
 
 const API_URL = "http://localhost:4000";
 const DAY_MS = 86_400_000;
+const TABLE_PAGE_SIZE = 20;
 
 const PERIODS: Record<
   AnalyticsPeriod,
@@ -110,6 +111,7 @@ export function OnecSales() {
   const [period, setPeriod] = useState<AnalyticsPeriod>("month");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
+  const [tablePage, setTablePage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -352,6 +354,31 @@ export function OnecSales() {
     );
   }, [analytics, category, query]);
 
+  const tablePageCount = Math.max(
+    1,
+    Math.ceil(visibleRows.length / TABLE_PAGE_SIZE),
+  );
+  const currentTablePage = Math.min(tablePage, tablePageCount);
+  const tableRows = visibleRows.slice(
+    (currentTablePage - 1) * TABLE_PAGE_SIZE,
+    currentTablePage * TABLE_PAGE_SIZE,
+  );
+  const firstVisibleRow = visibleRows.length
+    ? (currentTablePage - 1) * TABLE_PAGE_SIZE + 1
+    : 0;
+  const lastVisibleRow = Math.min(
+    currentTablePage * TABLE_PAGE_SIZE,
+    visibleRows.length,
+  );
+  const firstPageButton = Math.max(
+    1,
+    Math.min(currentTablePage - 2, tablePageCount - 4),
+  );
+  const pageButtons = Array.from(
+    { length: Math.min(5, tablePageCount) },
+    (_, index) => firstPageButton + index,
+  );
+
   if (loading) {
     return (
       <div className="page-stack">
@@ -410,7 +437,10 @@ export function OnecSales() {
             <button
               key={key}
               className={period === key ? "active" : ""}
-              onClick={() => setPeriod(key)}
+              onClick={() => {
+                setPeriod(key);
+                setTablePage(1);
+              }}
             >
               {PERIODS[key].label}
             </button>
@@ -548,12 +578,17 @@ export function OnecSales() {
         <div className="inventory-head">
           <div>
             <h2>Таблица ABC-анализа</h2>
-            <p>{visibleRows.length} позиций · реальные продажи 1С</p>
+            <p>
+              {visibleRows.length} позиций · по {TABLE_PAGE_SIZE} на странице
+            </p>
           </div>
           <label className="select-control">
             <select
               value={category}
-              onChange={(event) => setCategory(event.target.value)}
+              onChange={(event) => {
+                setCategory(event.target.value);
+                setTablePage(1);
+              }}
             >
               <option value="">Все категории</option>
               {analytics.categoryRows.map((item) => (
@@ -570,7 +605,10 @@ export function OnecSales() {
             <span aria-hidden>⌕</span>
             <input
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setTablePage(1);
+              }}
               placeholder="Поиск по названию или артикулу"
             />
           </label>
@@ -590,7 +628,7 @@ export function OnecSales() {
               </tr>
             </thead>
             <tbody>
-              {visibleRows.map((row) => (
+              {tableRows.map((row) => (
                 <tr key={row.key}>
                   <td><code>{row.article}</code></td>
                   <td>
@@ -611,6 +649,44 @@ export function OnecSales() {
             </tbody>
           </table>
         </div>
+
+        <footer className="onec-pagination">
+          <span>
+            Показано {firstVisibleRow}–{lastVisibleRow} из {visibleRows.length}
+          </span>
+          <nav aria-label="Пагинация таблицы ABC">
+            <button
+              type="button"
+              aria-label="Предыдущая страница"
+              disabled={currentTablePage === 1}
+              onClick={() => setTablePage(currentTablePage - 1)}
+            >
+              ←
+            </button>
+            {pageButtons.map((pageNumber) => (
+              <button
+                type="button"
+                key={pageNumber}
+                className={pageNumber === currentTablePage ? "active" : ""}
+                aria-label={`Страница ${pageNumber}`}
+                aria-current={
+                  pageNumber === currentTablePage ? "page" : undefined
+                }
+                onClick={() => setTablePage(pageNumber)}
+              >
+                {pageNumber}
+              </button>
+            ))}
+            <button
+              type="button"
+              aria-label="Следующая страница"
+              disabled={currentTablePage === tablePageCount}
+              onClick={() => setTablePage(currentTablePage + 1)}
+            >
+              →
+            </button>
+          </nav>
+        </footer>
       </section>
 
       <section className="onec-document-footnote">
