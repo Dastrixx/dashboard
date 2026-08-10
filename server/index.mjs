@@ -129,7 +129,7 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
   try {
     const top = Math.min(
       Math.max(Number(request.query.top) || 1, 1),
-      100,
+      500,
     );
 
     const items = await onecGet(
