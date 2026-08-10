@@ -3,7 +3,8 @@ function getConfig() {
     baseUrl: process.env.ONEC_ODATA_URL?.replace(/\/$/, ""),
     username: process.env.ONEC_USER,
     password: process.env.ONEC_PASSWORD,
-    timeoutMs: Number(process.env.ONEC_TIMEOUT_MS || 20_000),
+    timeoutMs: Number(process.env.ONEC_TIMEOUT_MS || 30_000),
+    retries: Math.max(Number(process.env.ONEC_RETRIES ?? 1), 0),
   };
 }
 
@@ -16,7 +17,7 @@ function getAuthorization(username, password) {
 }
 
 async function onecRequest(path, params = {}, accept = "application/json") {
-  const { baseUrl, username, password, timeoutMs } = getConfig();
+  const { baseUrl, username, password, timeoutMs, retries } = getConfig();
 
   if (!baseUrl || !username || !password) {
     throw new Error(
@@ -33,32 +34,53 @@ async function onecRequest(path, params = {}, accept = "application/json") {
     }
   }
 
-  const response = await fetch(url, {
-    headers: {
-      Authorization: getAuthorization(username, password),
-      Accept: accept,
-    },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          Authorization: getAuthorization(username, password),
+          Accept: accept,
+        },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
 
-  const body = await response.text();
+      const body = await response.text();
 
-  if (!response.ok) {
-    const details = body.replace(/\s+/g, " ").trim().slice(0, 800);
-    throw new Error(
-      `1С OData вернула HTTP ${response.status}${details ? `: ${details}` : ""}`,
-    );
-  }
+      if (!response.ok) {
+        const details = body.replace(/\s+/g, " ").trim().slice(0, 800);
+        throw new Error(
+          `1С OData вернула HTTP ${response.status}${details ? `: ${details}` : ""}`,
+        );
+      }
 
-  if (accept.includes("xml")) {
-    return body;
-  }
+      if (accept.includes("xml")) {
+        return body;
+      }
 
-  try {
-    const data = JSON.parse(body);
-    return data.value ?? data;
-  } catch {
-    throw new Error("1С вернула некорректный JSON");
+      try {
+        const data = JSON.parse(body);
+        return data.value ?? data;
+      } catch {
+        throw new Error("1С вернула некорректный JSON");
+      }
+    } catch (error) {
+      const retryable =
+        error?.name === "TimeoutError" || error instanceof TypeError;
+
+      if (!retryable || attempt === retries) {
+        if (error?.name === "TimeoutError") {
+          throw new Error(
+            `1С не ответила за ${Math.round(timeoutMs / 1000)} секунд. Уменьшите ONEC_PAGE_SIZE или увеличьте ONEC_TIMEOUT_MS.`,
+          );
+        }
+
+        throw error;
+      }
+
+      await new Promise((resolve) =>
+        setTimeout(resolve, 350 * (attempt + 1)),
+      );
+    }
   }
 }
 
@@ -76,7 +98,6 @@ export function onecGet(entity, params = {}) {
     ...params,
   });
 }
-
 
 export function onecGetByKey(entity, key, params = {}) {
   if (!/^[\p{L}\p{N}_]+$/u.test(entity)) {
