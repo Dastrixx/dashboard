@@ -396,6 +396,8 @@ export function OnecStock() {
   const [status, setStatus] = useState("all");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [writeOffPage, setWriteOffPage] = useState(1);
+  const [recountPage, setRecountPage] = useState(1);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -626,6 +628,10 @@ export function OnecStock() {
   }, [payload, warehouseMode, warehouseKey, category, status, search]);
 
   useEffect(() => setPage(1), [warehouseMode, warehouseKey, category, status, search]);
+  useEffect(() => {
+    setWriteOffPage(1);
+    setRecountPage(1);
+  }, [warehouseMode, warehouseKey]);
 
   if (loading || error || !(payload.items || []).length) {
     return (
@@ -645,6 +651,25 @@ export function OnecStock() {
   const visibleRows = view.filtered.slice(
     (currentPage - 1) * pageSize,
     currentPage * pageSize,
+  );
+  const qualityPageSize = 10;
+  const writeOffPages = Math.max(
+    Math.ceil(view.writeOffRows.length / qualityPageSize),
+    1,
+  );
+  const currentWriteOffPage = Math.min(writeOffPage, writeOffPages);
+  const visibleWriteOffRows = view.writeOffRows.slice(
+    (currentWriteOffPage - 1) * qualityPageSize,
+    currentWriteOffPage * qualityPageSize,
+  );
+  const recountPages = Math.max(
+    Math.ceil(view.recountRows.length / qualityPageSize),
+    1,
+  );
+  const currentRecountPage = Math.min(recountPage, recountPages);
+  const visibleRecountRows = view.recountRows.slice(
+    (currentRecountPage - 1) * qualityPageSize,
+    currentRecountPage * qualityPageSize,
   );
 
   return (
@@ -914,7 +939,7 @@ export function OnecStock() {
               <table className="stock-compact-table">
                 <thead><tr><th>Товар</th><th>Кол-во</th><th>Причина</th></tr></thead>
                 <tbody>
-                  {view.writeOffRows.slice(0, 8).map((item) => (
+                  {visibleWriteOffRows.map((item) => (
                     <tr key={item.key}>
                       <td><strong>{item.name}</strong><small>{item.sku}</small></td>
                       <td>{number.format(item.quantity)}</td>
@@ -931,6 +956,30 @@ export function OnecStock() {
                 {payload.meta?.operationErrors?.writeOffs ||
                   "Проведённые документы списания не найдены."}
               </span>
+            </div>
+          )}
+          {view.writeOffRows.length > qualityPageSize && (
+            <div className="onec-pagination stock-quality-pagination">
+              <span>
+                Показано {visibleWriteOffRows.length} из {view.writeOffRows.length}
+              </span>
+              <nav aria-label="Пагинация брака и списаний">
+                <button
+                  disabled={currentWriteOffPage === 1}
+                  onClick={() => setWriteOffPage((value) => Math.max(value - 1, 1))}
+                  type="button"
+                >
+                  ←
+                </button>
+                <span>{currentWriteOffPage} / {writeOffPages}</span>
+                <button
+                  disabled={currentWriteOffPage === writeOffPages}
+                  onClick={() => setWriteOffPage((value) => Math.min(value + 1, writeOffPages))}
+                  type="button"
+                >
+                  →
+                </button>
+              </nav>
             </div>
           )}
         </article>
@@ -950,7 +999,7 @@ export function OnecStock() {
               <table className="stock-compact-table">
                 <thead><tr><th>Товар</th><th>По базе</th><th>Факт</th><th>Разница</th></tr></thead>
                 <tbody>
-                  {view.recountRows.slice(0, 8).map((item) => (
+                  {visibleRecountRows.map((item) => (
                     <tr key={item.key}>
                       <td><strong>{item.name}</strong><small>{item.sku}</small></td>
                       <td>{number.format(item.accounting)}</td>
@@ -972,6 +1021,30 @@ export function OnecStock() {
                 {payload.meta?.operationErrors?.recounts ||
                   "Документы пересчёта для выбранного склада не найдены."}
               </span>
+            </div>
+          )}
+          {view.recountRows.length > qualityPageSize && (
+            <div className="onec-pagination stock-quality-pagination">
+              <span>
+                Показано {visibleRecountRows.length} из {view.recountRows.length}
+              </span>
+              <nav aria-label="Пагинация сверки остатков">
+                <button
+                  disabled={currentRecountPage === 1}
+                  onClick={() => setRecountPage((value) => Math.max(value - 1, 1))}
+                  type="button"
+                >
+                  ←
+                </button>
+                <span>{currentRecountPage} / {recountPages}</span>
+                <button
+                  disabled={currentRecountPage === recountPages}
+                  onClick={() => setRecountPage((value) => Math.min(value + 1, recountPages))}
+                  type="button"
+                >
+                  →
+                </button>
+              </nav>
             </div>
           )}
         </article>
