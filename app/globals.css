@@ -1066,3 +1066,45 @@ body{overflow-x:hidden}
 @media(max-width:420px){
   .stock-kpis{grid-template-columns:1fr}
 }
+
+/* Real 1C sellers by branch */
+.onec-team-workspace{gap:20px}
+.onec-team-hero .team-filter-groups select{
+  min-width:240px;min-height:42px;padding:0 38px 0 13px;border:1px solid #cfe0d7;
+  border-radius:11px;background:rgba(255,255,255,.9);color:var(--ink);font-size:10px;
+  font-weight:750;outline:none;
+}
+.onec-team-hero .team-filter-groups select:focus{border-color:#8fc3ab;box-shadow:0 0 0 3px rgba(20,137,94,.08)}
+.team-branch-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(260px,.65fr);gap:18px}
+.team-branch-panel{padding:24px}
+.team-branch-bars{display:flex;flex-direction:column;gap:17px}
+.team-branch-bars>div>div{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:7px}
+.team-branch-bars strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}
+.team-branch-bars span{color:var(--green2);font-size:9px;font-weight:800;white-space:nowrap}
+.team-branch-bars i,.team-share-cell i{display:block;height:7px;border-radius:999px;background:#eaf0ed;overflow:hidden}
+.team-branch-bars i b,.team-share-cell i b{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#087a55,#32aa7c)}
+.team-leader-panel{display:flex;flex-direction:column;justify-content:center;min-height:220px;padding:26px;background:linear-gradient(145deg,#133f31,#0b6f50);color:#fff}
+.team-leader-panel .team-plan-kicker{color:#a9e8ce}
+.team-leader-panel>strong{margin-top:16px;font-size:22px;letter-spacing:-.03em}
+.team-leader-panel>p{margin:6px 0 22px;color:#b8d3c8;font-size:10px}
+.team-leader-panel>b{font-size:20px}.team-leader-panel>small{margin-top:6px;color:#b8d3c8;font-size:9px}
+.onec-team-table-panel{padding:0;overflow:hidden}
+.onec-team-table{min-width:1040px}
+.onec-team-table td:nth-child(2) strong{font-size:10px}
+.team-rank-place{display:grid;width:28px;height:28px;place-items:center;border-radius:50%;background:#edf5f1;color:var(--green2);font-size:9px;font-weight:850}
+.team-share-cell{display:grid;grid-template-columns:45px 110px;align-items:center;gap:8px}
+.team-share-cell>span{color:var(--green2);font-size:9px;font-weight:800}
+.team-share-cell i{height:6px}
+.onec-team-table-panel .onec-pagination nav>span{min-width:55px;text-align:center;color:var(--muted);font-size:9px}
+
+@media(max-width:900px){
+  .team-branch-grid{grid-template-columns:1fr}
+  .team-leader-panel{min-height:180px}
+}
+
+@media(max-width:760px){
+  .onec-team-hero .team-filter-groups select{width:100%;min-width:0;min-height:44px}
+  .onec-team-workspace .period-team{grid-template-columns:repeat(3,1fr)}
+  .team-branch-panel{padding:18px}
+  .team-leader-panel{padding:22px}
+}
