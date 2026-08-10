@@ -119,6 +119,12 @@ type SellerPayload = {
     loaded?: number;
     latestDate?: string | null;
     source?: string;
+    diagnostics?: {
+      turnoverRows?: number;
+      turnoverRowsWithSeller?: number;
+      scannedChecks?: number;
+      resultRows?: number;
+    };
   };
   message?: string;
 };
@@ -1218,15 +1224,26 @@ export function OnecTeam() {
 
   useEffect(() => setPage(1), [period, storeKey, search]);
 
-  if (loading || error || !(payload.items || []).length) {
+  if (loading || error) {
     return (
       <div className="page-stack">
         <DataState
           loading={loading}
           error={error}
-          empty={!loading && !error && !(payload.items || []).length}
+          empty={false}
         />
       </div>
+    );
+  }
+
+  if (!(payload.items || []).length) {
+    const diagnostics = payload.meta?.diagnostics;
+    return (
+      <MissingSource
+        title="Продажи продавцов по филиалам"
+        description="Продажи в 1С найдены, но продавец не заполнен"
+        source={`Проверены обороты регистра: ${diagnostics?.turnoverRows || 0} строк, с продавцом — ${diagnostics?.turnoverRowsWithSeller || 0}. Дополнительно проверены чеки ККМ: ${diagnostics?.scannedChecks || 0}. Заполните поле «Продавец» в чеке или строке товара — после этого данные появятся автоматически.`}
+      />
     );
   }
 
@@ -1250,7 +1267,7 @@ export function OnecTeam() {
             <span className="team-plan-kicker">Фактические данные 1С</span>
             <h2>Продажи продавцов по филиалам</h2>
             <p>
-              Регистр «Продажи» · последние данные{" "}
+              {payload.meta?.source || "Данные 1С"} · последние данные{" "}
               {payload.meta?.latestDate
                 ? new Date(payload.meta.latestDate).toLocaleString("ru-RU")
                 : "без даты"}
