@@ -136,6 +136,16 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
       },
     );
 
+    if (request.query.references === "false") {
+      return response.json({
+        items,
+        references: {
+          products: [],
+          warehouses: [],
+        },
+      });
+    }
+
     const productKeys = items.flatMap((report) =>
       (report.Товары || []).map((line) => line.Номенклатура_Key),
     );
