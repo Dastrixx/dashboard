@@ -964,3 +964,56 @@ body{overflow-x:hidden}
   .onec-pagination nav{width:100%;justify-content:space-between}
   .onec-pagination button{min-width:36px}
 }
+
+/* Real 1C warehouse workspace */
+.onec-stock-workspace{gap:20px}
+.stock-kpis .kpi-card{min-height:132px}
+.onec-stock-panel{padding:0;overflow:hidden}
+.stock-toolbar{
+  display:flex;align-items:flex-start;justify-content:space-between;gap:22px;
+  padding:22px 22px 18px;
+}
+.stock-toolbar h2{margin:0;font-size:17px;letter-spacing:-.02em}
+.stock-toolbar p{margin:6px 0 0;color:var(--muted);font-size:9px}
+.stock-controls{display:flex;align-items:center;justify-content:flex-end;gap:9px;flex-wrap:wrap}
+.stock-controls select{
+  min-height:38px;max-width:210px;padding:0 34px 0 12px;border:1px solid var(--line);
+  border-radius:9px;background:#fff;color:var(--ink);font-size:9px;outline:none;
+}
+.stock-controls select:focus,.onec-stock-search:focus-within{border-color:#8fc3ab;box-shadow:0 0 0 3px rgba(20,137,94,.08)}
+.onec-stock-search{width:250px;min-height:38px;background:#fff}
+.stock-table{min-width:1180px}
+.stock-table td:nth-child(2){max-width:260px;white-space:normal;line-height:1.35}
+.stock-table td:nth-child(3){max-width:190px;white-space:normal;line-height:1.35;color:var(--muted)}
+.stock-status{
+  display:inline-flex;align-items:center;min-height:25px;padding:0 8px;border-radius:7px;
+  background:#e5f2eb;color:#176848;font-size:8px;font-weight:800;white-space:nowrap;
+}
+.stock-status.low{background:#fff0d8;color:#956019}
+.stock-status.zero{background:#fde8e8;color:#a03e3e}
+.stock-pagination nav>span{min-width:54px;text-align:center;color:var(--muted);font-size:9px}
+.stock-next-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.stock-next-card{min-height:128px;background:linear-gradient(145deg,#fff,#f8fbf9)}
+.stock-next-card>span{color:var(--green2);font-size:8px;font-weight:850;text-transform:uppercase;letter-spacing:.09em}
+.stock-next-card h3{margin:9px 0 7px;font-size:14px}
+.stock-next-card p{max-width:620px;margin:0;color:var(--muted);font-size:9px;line-height:1.65}
+
+@media(max-width:1050px){
+  .stock-toolbar{align-items:stretch;flex-direction:column}
+  .stock-controls{display:grid;grid-template-columns:minmax(220px,1.4fr) 1fr 1fr}
+  .onec-stock-search{width:100%}
+  .stock-controls select{width:100%;max-width:none}
+}
+
+@media(max-width:760px){
+  .stock-kpis{grid-template-columns:1fr 1fr}
+  .stock-toolbar{padding:18px 16px 14px}
+  .stock-controls{grid-template-columns:1fr}
+  .stock-controls select{min-height:42px}
+  .stock-next-grid{grid-template-columns:1fr;gap:12px}
+  .stock-next-card{min-height:0}
+}
+
+@media(max-width:420px){
+  .stock-kpis{grid-template-columns:1fr}
+}
