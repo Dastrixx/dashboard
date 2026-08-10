@@ -291,11 +291,120 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
         "СтоимостьБезСкидокTurnover",
       ].join(","),
     });
-    const validItems = items.filter(
+    let validItems = items.filter(
       (item) =>
         item.Продавец_Key &&
         item.Продавец_Key !== "00000000-0000-0000-0000-000000000000",
     );
+    let effectiveLatestDate = latestDate;
+    let source = "AccumulationRegister_Продажи/Turnovers";
+    let scannedChecks = 0;
+
+    if (!validItems.length) {
+      const latestChecks = await onecGet("Document_ЧекККМ", {
+        $top: 1,
+        $select: "Date",
+        $filter: "Posted eq true",
+        $orderby: "Date desc",
+      });
+
+      if (latestChecks.length) {
+        effectiveLatestDate = new Date(latestChecks[0].Date);
+        const checkStartDate = new Date(
+          effectiveLatestDate.getTime() - days * 86_400_000,
+        );
+        const select = [
+          "Ref_Key",
+          "Date",
+          "Posted",
+          "ВидОперации",
+          "Магазин_Key",
+          "Продавец_Key",
+          "СуммаДокумента",
+          "Товары",
+        ].join(",");
+        let checks;
+
+        try {
+          checks = await onecGet("Document_ЧекККМ", {
+            $top: 500,
+            $select: select,
+            $filter: [
+              "Posted eq true",
+              `Date ge datetime'${toOdataDateTime(checkStartDate)}'`,
+            ].join(" and "),
+            $orderby: "Date desc",
+          });
+        } catch (error) {
+          console.warn(
+            "1С не приняла фильтр чеков по дате, загружаем последние чеки:",
+            error instanceof Error ? error.message : error,
+          );
+          checks = await onecGet("Document_ЧекККМ", {
+            $top: 500,
+            $select: select,
+            $filter: "Posted eq true",
+            $orderby: "Date desc",
+          });
+        }
+
+        scannedChecks = checks.length;
+        const groupedChecks = new Map();
+        const addTurnover = ({ sellerKey, storeKey, quantity, revenue, fullPrice }) => {
+          if (!sellerKey || sellerKey === "00000000-0000-0000-0000-000000000000") {
+            return;
+          }
+          const key = `${sellerKey}:${storeKey}`;
+          const current = groupedChecks.get(key) || {
+            Продавец_Key: sellerKey,
+            Магазин_Key: storeKey,
+            КоличествоTurnover: 0,
+            СтоимостьTurnover: 0,
+            СтоимостьБезСкидокTurnover: 0,
+          };
+          current.КоличествоTurnover += quantity;
+          current.СтоимостьTurnover += revenue;
+          current.СтоимостьБезСкидокTurnover += fullPrice;
+          groupedChecks.set(key, current);
+        };
+
+        checks.forEach((check) => {
+          const sign = /возврат/i.test(String(check.ВидОперации || "")) ? -1 : 1;
+          const lines = check.Товары || [];
+          if (!lines.length) {
+            addTurnover({
+              sellerKey: check.Продавец_Key,
+              storeKey: check.Магазин_Key,
+              quantity: 0,
+              revenue: sign * Number(check.СуммаДокумента || 0),
+              fullPrice: sign * Number(check.СуммаДокумента || 0),
+            });
+            return;
+          }
+
+          lines.forEach((line) => {
+            const revenue = Number(line.Сумма || 0);
+            const discounts =
+              Number(line.СуммаАвтоматическойСкидки || 0) +
+              Number(line.СуммаРучнойСкидки || 0) +
+              Number(line.СуммаСкидкиОплатыБонусом || 0);
+            addTurnover({
+              sellerKey:
+                line.Продавец_Key && line.Продавец_Key !== "00000000-0000-0000-0000-000000000000"
+                  ? line.Продавец_Key
+                  : check.Продавец_Key,
+              storeKey: check.Магазин_Key,
+              quantity: sign * Number(line.Количество || 0),
+              revenue: sign * revenue,
+              fullPrice: sign * (revenue + discounts),
+            });
+          });
+        });
+
+        validItems = [...groupedChecks.values()];
+        source = "Document_ЧекККМ (fallback)";
+      }
+    }
     const sellers = await loadReferencesByKeysBatched(
       "Catalog_ФизическиеЛица",
       validItems.map((item) => item.Продавец_Key),
@@ -316,8 +425,18 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
       meta: {
         days,
         loaded: validItems.length,
-        latestDate: latestDate.toISOString(),
-        source: "AccumulationRegister_Продажи/Turnovers",
+        latestDate: effectiveLatestDate.toISOString(),
+        source,
+        diagnostics: {
+          turnoverRows: items.length,
+          turnoverRowsWithSeller: items.filter(
+            (item) =>
+              item.Продавец_Key &&
+              item.Продавец_Key !== "00000000-0000-0000-0000-000000000000",
+          ).length,
+          scannedChecks,
+          resultRows: validItems.length,
+        },
       },
     });
   } catch (error) {
