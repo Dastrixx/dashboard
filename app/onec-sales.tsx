@@ -103,6 +103,96 @@ function inRange(value: string, from: number, to: number) {
   return timestamp >= from && timestamp <= to;
 }
 
+function buildProductRows(
+  sourceReports: OnecRetailReport[],
+  products: OnecProductReference[],
+  categories: OnecCategoryReference[],
+) {
+  const productByKey = new Map(
+    products.map((product) => [product.Ref_Key, product]),
+  );
+  const categoryByKey = new Map(
+    categories.map((item) => [item.Ref_Key, item.Description]),
+  );
+  const aggregate = new Map<string, { revenue: number; sold: number }>();
+
+  sourceReports
+    .flatMap((report) => report.Товары || [])
+    .forEach((line) => {
+      const current = aggregate.get(line.Номенклатура_Key) || {
+        revenue: 0,
+        sold: 0,
+      };
+      current.revenue += Number(line.Сумма || 0);
+      current.sold += Number(line.Количество || 0);
+      aggregate.set(line.Номенклатура_Key, current);
+    });
+
+  const totalRevenue =
+    [...aggregate.values()].reduce(
+      (sum, item) => sum + item.revenue,
+      0,
+    ) || 1;
+  let cumulative = 0;
+
+  return [...aggregate.entries()]
+    .map(([key, value]) => {
+      const product = productByKey.get(key);
+
+      return {
+        key,
+        article: product?.Артикул || product?.Code || "—",
+        name:
+          product?.Description ||
+          product?.НаименованиеПолное ||
+          "Название не найдено",
+        category:
+          categoryByKey.get(product?.ТоварнаяГруппа_Key || "") ||
+          "Без категории",
+        revenue: value.revenue,
+        sold: value.sold,
+        share: 0,
+        abc: "C" as const,
+      };
+    })
+    .sort((left, right) => right.revenue - left.revenue)
+    .map((row): ProductRow => {
+      const share = (row.revenue / totalRevenue) * 100;
+      cumulative += share;
+
+      return {
+        ...row,
+        share,
+        abc: cumulative <= 80 ? "A" : cumulative <= 95 ? "B" : "C",
+      };
+    });
+}
+
+function downloadRankingCsv(filename: string, rows: ProductRow[]) {
+  const escape = (value: string | number) =>
+    `"${String(value).replaceAll('"', '""')}"`;
+  const csv = [
+    ["Артикул", "Товар", "Категория", "Выручка, сом", "Продано"],
+    ...rows.map((row) => [
+      row.article,
+      row.name,
+      row.category,
+      row.revenue,
+      row.sold,
+    ]),
+  ]
+    .map((line) => line.map(escape).join(";"))
+    .join("\n");
+  const url = URL.createObjectURL(
+    new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" }),
+  );
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 export function OnecSales() {
   const [reports, setReports] = useState<OnecRetailReport[]>([]);
   const [products, setProducts] = useState<OnecProductReference[]>([]);
@@ -112,6 +202,11 @@ export function OnecSales() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
   const [tablePage, setTablePage] = useState(1);
+  const [rankingPeriod, setRankingPeriod] =
+    useState<AnalyticsPeriod>("month");
+  const [rankingCategory, setRankingCategory] = useState("");
+  const [topLimit, setTopLimit] = useState(10);
+  const [antiLimit, setAntiLimit] = useState(10);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -195,13 +290,6 @@ export function OnecSales() {
       inRange(report.Date, previousFrom, previousTo),
     );
 
-    const productByKey = new Map(
-      products.map((product) => [product.Ref_Key, product]),
-    );
-    const categoryByKey = new Map(
-      categories.map((item) => [item.Ref_Key, item.Description]),
-    );
-
     const revenue = currentReports.reduce(
       (sum, report) => sum + Number(report.СуммаДокумента || 0),
       0,
@@ -216,64 +304,9 @@ export function OnecSales() {
       0,
     );
 
-    const aggregate = new Map<
-      string,
-      { revenue: number; sold: number }
-    >();
-
-    lines.forEach((line) => {
-      const current = aggregate.get(line.Номенклатура_Key) || {
-        revenue: 0,
-        sold: 0,
-      };
-      current.revenue += Number(line.Сумма || 0);
-      current.sold += Number(line.Количество || 0);
-      aggregate.set(line.Номенклатура_Key, current);
-    });
-
+    const rows = buildProductRows(currentReports, products, categories);
     const totalProductRevenue =
-      [...aggregate.values()].reduce(
-        (sum, item) => sum + item.revenue,
-        0,
-      ) || 1;
-
-    let cumulative = 0;
-    const rows: ProductRow[] = [...aggregate.entries()]
-      .map(([key, value]) => {
-        const product = productByKey.get(key);
-        const categoryName =
-          categoryByKey.get(product?.ТоварнаяГруппа_Key || "") ||
-          "Без категории";
-
-        return {
-          key,
-          article: product?.Артикул || product?.Code || "—",
-          name:
-            product?.Description ||
-            product?.НаименованиеПолное ||
-            "Название не найдено",
-          category: categoryName,
-          revenue: value.revenue,
-          sold: value.sold,
-          share: 0,
-          abc: "C" as const,
-        };
-      })
-      .sort((left, right) => right.revenue - left.revenue)
-      .map((row) => {
-        const share = (row.revenue / totalProductRevenue) * 100;
-        cumulative += share;
-        return {
-          ...row,
-          share,
-          abc:
-            cumulative <= 80
-              ? ("A" as const)
-              : cumulative <= 95
-                ? ("B" as const)
-                : ("C" as const),
-        };
-      });
+      rows.reduce((sum, item) => sum + item.revenue, 0) || 1;
 
     const categoryMap = new Map<string, number>();
     rows.forEach((row) => {
@@ -327,7 +360,7 @@ export function OnecSales() {
       previousRevenue,
       sold,
       averagePrice: sold ? revenue / sold : 0,
-      activeSku: aggregate.size,
+      activeSku: rows.length,
       rows,
       categoryRows,
       currentBuckets: makeBuckets(currentReports, currentFrom),
@@ -338,6 +371,41 @@ export function OnecSales() {
           : null,
     };
   }, [categories, period, products, reports]);
+
+  const rankingRows = useMemo(() => {
+    const latestTimestamp = Math.max(
+      ...reports.map((report) => new Date(report.Date).getTime()),
+      0,
+    );
+    if (!latestTimestamp) return [];
+
+    const from =
+      latestTimestamp - PERIODS[rankingPeriod].days * DAY_MS + 1;
+    const sourceReports = reports.filter((report) =>
+      inRange(report.Date, from, latestTimestamp),
+    );
+
+    return buildProductRows(sourceReports, products, categories);
+  }, [categories, products, rankingPeriod, reports]);
+
+  const rankingCategories = useMemo(
+    () => [...new Set(rankingRows.map((row) => row.category))].sort(),
+    [rankingRows],
+  );
+  const filteredRankingRows = useMemo(
+    () =>
+      rankingRows.filter(
+        (row) => !rankingCategory || row.category === rankingCategory,
+      ),
+    [rankingCategory, rankingRows],
+  );
+  const topRankingRows = filteredRankingRows.slice(0, topLimit);
+  const antiRankingRows = [...filteredRankingRows]
+    .sort(
+      (left, right) =>
+        left.sold - right.sold || left.revenue - right.revenue,
+    )
+    .slice(0, antiLimit);
 
   const visibleRows = useMemo(() => {
     if (!analytics) return [];
@@ -572,6 +640,176 @@ export function OnecSales() {
             <span>Справочник «Товарные группы»; незаполненные — «Без категории»</span>
           </div>
         </article>
+      </section>
+
+      <section className="onec-ranking-section">
+        <header className="onec-ranking-toolbar">
+          <div>
+            <span className="onec-source-kicker">Аналитика спроса</span>
+            <h2>Рейтинг товаров</h2>
+            <p>
+              Выручка и количество продаж {PERIODS[rankingPeriod].caption}
+            </p>
+          </div>
+          <div className="onec-ranking-filters">
+            <label className="select-control">
+              <select
+                value={rankingCategory}
+                onChange={(event) => {
+                  setRankingCategory(event.target.value);
+                  setTopLimit(10);
+                  setAntiLimit(10);
+                }}
+              >
+                <option value="">Все категории</option>
+                {rankingCategories.map((item) => (
+                  <option value={item} key={item}>{item}</option>
+                ))}
+              </select>
+            </label>
+            <div
+              className="period-switch"
+              role="group"
+              aria-label="Период рейтинга товаров"
+            >
+              {(Object.keys(PERIODS) as AnalyticsPeriod[]).map((key) => (
+                <button
+                  type="button"
+                  key={key}
+                  className={rankingPeriod === key ? "active" : ""}
+                  onClick={() => {
+                    setRankingPeriod(key);
+                    setRankingCategory("");
+                    setTopLimit(10);
+                    setAntiLimit(10);
+                  }}
+                >
+                  {PERIODS[key].label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </header>
+
+        <div className="onec-ranking-grid">
+          <article className="panel onec-ranking-card">
+            <div className="panel-head">
+              <div>
+                <h2>Топ товаров по выручке</h2>
+                <p>Что приносит основные деньги</p>
+              </div>
+              <div className="onec-ranking-actions">
+                <button
+                  type="button"
+                  className="ranking-export"
+                  disabled={!filteredRankingRows.length}
+                  onClick={() =>
+                    downloadRankingCsv(
+                      `top-products-${rankingPeriod}.csv`,
+                      filteredRankingRows,
+                    )
+                  }
+                >
+                  ↓ Выгрузить
+                </button>
+                <span className="tag green">ТОП</span>
+              </div>
+            </div>
+
+            <div className="onec-rank-list">
+              {topRankingRows.map((row, index) => (
+                <div className="rank-row" key={row.key}>
+                  <b>{index + 1}</b>
+                  <div>
+                    <strong>{row.name}</strong>
+                    <span>{row.article} · {number.format(row.sold)} ед.</span>
+                  </div>
+                  <em>{money.format(row.revenue)}</em>
+                </div>
+              ))}
+              {!topRankingRows.length && (
+                <p className="onec-no-data">Нет продаж за выбранный период</p>
+              )}
+            </div>
+
+            {topLimit < filteredRankingRows.length && (
+              <button
+                type="button"
+                className="onec-rank-more"
+                onClick={() => setTopLimit((value) => value + 10)}
+              >
+                Ещё {Math.min(10, filteredRankingRows.length - topLimit)}
+                <small>
+                  Показано {topRankingRows.length} из {filteredRankingRows.length}
+                </small>
+              </button>
+            )}
+          </article>
+
+          <article className="panel onec-ranking-card">
+            <div className="panel-head">
+              <div>
+                <h2>Антитоп: низкий спрос</h2>
+                <p>Товары с минимальным количеством продаж</p>
+              </div>
+              <div className="onec-ranking-actions">
+                <button
+                  type="button"
+                  className="ranking-export"
+                  disabled={!antiRankingRows.length}
+                  onClick={() =>
+                    downloadRankingCsv(
+                      `low-demand-products-${rankingPeriod}.csv`,
+                      [...filteredRankingRows].sort(
+                        (left, right) =>
+                          left.sold - right.sold ||
+                          left.revenue - right.revenue,
+                      ),
+                    )
+                  }
+                >
+                  ↓ Выгрузить
+                </button>
+                <span className="tag amber">НИЗКИЙ СПРОС</span>
+              </div>
+            </div>
+
+            <div className="onec-rank-list">
+              {antiRankingRows.map((row, index) => (
+                <div className="rank-row" key={row.key}>
+                  <b>{index + 1}</b>
+                  <div>
+                    <strong>{row.name}</strong>
+                    <span>{row.article} · {money.format(row.revenue)}</span>
+                  </div>
+                  <em>{number.format(row.sold)} продаж</em>
+                </div>
+              ))}
+              {!antiRankingRows.length && (
+                <p className="onec-no-data">Нет продаж за выбранный период</p>
+              )}
+            </div>
+
+            {antiLimit < filteredRankingRows.length && (
+              <button
+                type="button"
+                className="onec-rank-more"
+                onClick={() => setAntiLimit((value) => value + 10)}
+              >
+                Ещё {Math.min(10, filteredRankingRows.length - antiLimit)}
+                <small>
+                  Показано {antiRankingRows.length} из {filteredRankingRows.length}
+                </small>
+              </button>
+            )}
+          </article>
+        </div>
+
+        <p className="onec-ranking-note">
+          Антитоп рассчитан по фактическому количеству продаж. После подключения
+          регистра остатков 1С сюда добавятся товары с нулевым спросом, но
+          фактическим наличием на складе.
+        </p>
       </section>
 
       <section className="panel onec-abc-panel">
