@@ -274,9 +274,85 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
       },
     );
 
-    const productKeys = balances.map((item) => item.Номенклатура_Key);
+    const operationRequests = await Promise.allSettled([
+      onecGet("Document_ПоступлениеТоваров", {
+        $top: 60,
+        $select: [
+          "Ref_Key",
+          "Number",
+          "Date",
+          "Posted",
+          "Контрагент_Key",
+          "Склад_Key",
+          "СуммаДокумента",
+          "Товары",
+        ].join(","),
+        $filter: "Posted eq true",
+        $orderby: "Date desc",
+      }),
+      onecGet("Document_СписаниеТоваров", {
+        $top: 30,
+        $select: [
+          "Ref_Key",
+          "Number",
+          "Date",
+          "Posted",
+          "Склад_Key",
+          "ОснованиеСписания",
+          "Комментарий",
+          "Товары",
+        ].join(","),
+        $filter: "Posted eq true",
+        $orderby: "Date desc",
+      }),
+      onecGet("Document_ПересчетТоваров", {
+        $top: 30,
+        $select: [
+          "Ref_Key",
+          "Number",
+          "Date",
+          "Posted",
+          "Склад_Key",
+          "Статус",
+          "Товары",
+        ].join(","),
+        $filter: "Posted eq true",
+        $orderby: "Date desc",
+      }),
+    ]);
+    const [receiptResult, writeOffResult, recountResult] = operationRequests;
+    const receipts = receiptResult.status === "fulfilled" ? receiptResult.value : [];
+    const writeOffs = writeOffResult.status === "fulfilled" ? writeOffResult.value : [];
+    const recounts = recountResult.status === "fulfilled" ? recountResult.value : [];
+    const operationErrors = {
+      receipts:
+        receiptResult.status === "rejected"
+          ? receiptResult.reason?.message || "Источник недоступен"
+          : "",
+      writeOffs:
+        writeOffResult.status === "rejected"
+          ? writeOffResult.reason?.message || "Источник недоступен"
+          : "",
+      recounts:
+        recountResult.status === "rejected"
+          ? recountResult.reason?.message || "Источник недоступен"
+          : "",
+    };
+
+    const operationLines = [...receipts, ...writeOffs, ...recounts].flatMap(
+      (document) => document.Товары || [],
+    );
+    const productKeys = [
+      ...balances.map((item) => item.Номенклатура_Key),
+      ...operationLines.map((item) => item.Номенклатура_Key),
+    ];
     const warehouseKeys = balances.map((item) => item.Склад_Key);
-    const [products, warehouses] = await Promise.all([
+    warehouseKeys.push(
+      ...[...receipts, ...writeOffs, ...recounts].map(
+        (document) => document.Склад_Key,
+      ),
+    );
+    const [products, warehouses, suppliers] = await Promise.all([
       loadReferencesByKeysBatched(
         "Catalog_Номенклатура",
         productKeys,
@@ -294,6 +370,11 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
         warehouseKeys,
         "Ref_Key,Code,Description,ТипСклада,Магазин_Key",
       ),
+      loadReferencesByKeysBatched(
+        "Catalog_Контрагенты",
+        receipts.map((item) => item.Контрагент_Key),
+        "Ref_Key,Code,Description,НаименованиеПолное",
+      ),
     ]);
     const categories = await loadReferencesByKeysBatched(
       "Catalog_ТоварныеГруппы",
@@ -303,11 +384,13 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
 
     response.json({
       items: balances,
-      references: { products, warehouses, categories },
+      references: { products, warehouses, categories, suppliers },
+      operations: { receipts, writeOffs, recounts },
       meta: {
         loaded: balances.length,
         asOf: new Date().toISOString(),
         source: "AccumulationRegister_ТоварыНаСкладах/Balance",
+        operationErrors,
       },
     });
   } catch (error) {
