@@ -820,6 +820,46 @@ body{overflow-x:hidden}
   display:block;height:100%;border-radius:999px;
   background:linear-gradient(90deg,var(--green2),#28a879);
 }
+.onec-ranking-section{display:flex;flex-direction:column;gap:16px}
+.onec-ranking-toolbar{
+  display:flex;align-items:flex-end;justify-content:space-between;gap:24px;
+  padding:4px 2px;
+}
+.onec-ranking-toolbar h2{margin:5px 0 4px;font-size:22px;letter-spacing:-.03em}
+.onec-ranking-toolbar p{margin:0;color:var(--muted);font-size:10px}
+.onec-ranking-filters{display:flex;align-items:center;gap:12px}
+.onec-ranking-filters .select-control{min-width:240px}
+.onec-ranking-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+.onec-ranking-card{padding:24px}
+.onec-ranking-card .panel-head{min-height:58px;padding-bottom:16px;border-bottom:1px solid var(--line)}
+.onec-ranking-card .panel-head h2{font-size:17px}
+.onec-ranking-card .panel-head p{font-size:10px;line-height:1.5}
+.onec-ranking-actions{display:flex;align-items:center;justify-content:flex-end;gap:9px}
+.ranking-export{
+  min-height:34px;padding:0 11px;border:1px solid #bcd9cc;border-radius:9px;
+  background:#fff;color:var(--green2);font-size:9px;font-weight:800;white-space:nowrap;
+}
+.ranking-export:hover:not(:disabled){background:#eef7f3;border-color:var(--green2)}
+.ranking-export:disabled{cursor:not-allowed;opacity:.4}
+.onec-rank-list .rank-row{min-height:62px;padding:11px 0}
+.onec-rank-list .rank-row>div{min-width:0}
+.onec-rank-list .rank-row strong{
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;
+}
+.onec-rank-list .rank-row em{text-align:right;white-space:nowrap}
+.onec-rank-more{
+  width:100%;min-height:48px;margin-top:14px;border:1px solid #bcd9cc;
+  border-radius:10px;background:#f4faf7;color:var(--green2);font-size:10px;
+  font-weight:850;
+}
+.onec-rank-more:hover{background:#eaf5ef}
+.onec-rank-more small{
+  margin-left:12px;color:var(--muted);font-size:8px;font-weight:500;
+}
+.onec-ranking-note{
+  margin:0;padding:11px 14px;border-radius:10px;background:#fff8e9;
+  color:#80652d;font-size:9px;line-height:1.55;
+}
 .onec-abc-panel{padding:0;overflow:hidden}
 .onec-abc-table{min-width:1050px}
 .onec-abc-table td{font-size:10px}
@@ -855,6 +895,15 @@ body{overflow-x:hidden}
   .onec-comparison-group{min-width:78px;height:215px}
   .onec-comparison-bars{height:180px;gap:6px}
   .onec-comparison-bars b{font-size:7px}
+  .onec-ranking-toolbar{align-items:stretch;flex-direction:column}
+  .onec-ranking-filters{align-items:stretch;flex-direction:column}
+  .onec-ranking-filters .select-control{width:100%;min-width:0}
+  .onec-ranking-filters .period-switch{display:grid;grid-template-columns:repeat(3,1fr)}
+  .onec-ranking-grid{grid-template-columns:1fr}
+  .onec-ranking-card{padding:18px}
+  .onec-ranking-card .panel-head{align-items:flex-start;flex-direction:column;gap:12px}
+  .onec-ranking-actions{width:100%;justify-content:space-between}
+  .onec-rank-list .rank-row{grid-template-columns:24px minmax(0,1fr) auto}
   .onec-pagination{align-items:flex-start;flex-direction:column;padding:14px 18px}
   .onec-pagination nav{width:100%;justify-content:space-between}
   .onec-pagination button{min-width:36px}
