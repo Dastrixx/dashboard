@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type OnecProductLine = {
   LineNumber: string;
@@ -24,12 +24,32 @@ type OnecRetailReport = {
   Товары: OnecProductLine[];
 };
 
+type OnecProductReference = {
+  Ref_Key: string;
+  Code: string;
+  Description: string;
+  Артикул: string;
+};
+
+type OnecWarehouseReference = {
+  Ref_Key: string;
+  Code: string;
+  Description: string;
+  ТипСклада: string;
+  Магазин_Key: string;
+};
+
 type OnecResponse = {
   items: OnecRetailReport[];
+  references: {
+    products: OnecProductReference[];
+    warehouses: OnecWarehouseReference[];
+  };
   message?: string;
 };
 
 const API_URL = "http://localhost:4000";
+const ZERO_GUID = "00000000-0000-0000-0000-000000000000";
 
 const money = new Intl.NumberFormat("ru-RU", {
   style: "currency",
@@ -44,6 +64,10 @@ const date = new Intl.DateTimeFormat("ru-RU", {
 
 export function OnecSales() {
   const [reports, setReports] = useState<OnecRetailReport[]>([]);
+  const [products, setProducts] = useState<OnecProductReference[]>([]);
+  const [warehouses, setWarehouses] = useState<OnecWarehouseReference[]>([]);
+  const [selectedReportKey, setSelectedReportKey] = useState("");
+  const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -56,7 +80,7 @@ export function OnecSales() {
         setError("");
 
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-reports?top=1`,
+          `${API_URL}/api/dashboard/onec-reports?top=5`,
           { signal: controller.signal },
         );
 
@@ -66,7 +90,19 @@ export function OnecSales() {
           throw new Error(data.message || `Ошибка HTTP ${response.status}`);
         }
 
-        setReports(Array.isArray(data.items) ? data.items : []);
+        const loadedReports = Array.isArray(data.items) ? data.items : [];
+        setReports(loadedReports);
+        setProducts(
+          Array.isArray(data.references?.products)
+            ? data.references.products
+            : [],
+        );
+        setWarehouses(
+          Array.isArray(data.references?.warehouses)
+            ? data.references.warehouses
+            : [],
+        );
+        setSelectedReportKey(loadedReports[0]?.Ref_Key ?? "");
       } catch (loadError) {
         if (
           loadError instanceof DOMException &&
@@ -90,95 +126,228 @@ export function OnecSales() {
     return () => controller.abort();
   }, []);
 
+  const productByKey = useMemo(
+    () => new Map(products.map((item) => [item.Ref_Key, item])),
+    [products],
+  );
+
+  const warehouseByKey = useMemo(
+    () => new Map(warehouses.map((item) => [item.Ref_Key, item])),
+    [warehouses],
+  );
+
+  const report =
+    reports.find((item) => item.Ref_Key === selectedReportKey) ?? reports[0];
+
+  const lines = useMemo(() => {
+    if (!report) return [];
+
+    const normalizedQuery = query.trim().toLowerCase();
+
+    return (report.Товары ?? []).filter((item) => {
+      if (!normalizedQuery) return true;
+
+      const product = productByKey.get(item.Номенклатура_Key);
+      const warehouse = warehouseByKey.get(item.Склад_Key);
+
+      return [
+        product?.Description,
+        product?.Артикул,
+        product?.Code,
+        warehouse?.Description,
+        item.Номенклатура_Key,
+      ]
+        .filter(Boolean)
+        .some((value) =>
+          String(value).toLowerCase().includes(normalizedQuery),
+        );
+    });
+  }, [productByKey, query, report, warehouseByKey]);
+
   if (loading) {
     return (
-      <section className="onec-card">
-        <p>Получаем данные из 1С…</p>
-      </section>
+      <div className="page-stack">
+        <section className="onec-state panel">
+          <span className="onec-spinner" />
+          <div>
+            <strong>Получаем данные из 1С</strong>
+            <p>Загружаем последние отчёты и справочники…</p>
+          </div>
+        </section>
+      </div>
     );
   }
 
   if (error) {
     return (
-      <section className="onec-card onec-error">
-        <strong>Не удалось получить данные 1С</strong>
-        <p>{error}</p>
-      </section>
+      <div className="page-stack">
+        <section className="onec-state onec-error panel">
+          <div>
+            <strong>Не удалось получить данные 1С</strong>
+            <p>{error}</p>
+          </div>
+        </section>
+      </div>
     );
   }
 
-  if (!reports.length) {
+  if (!report) {
     return (
-      <section className="onec-card">
-        <p>В 1С не найдено отчётов о розничных продажах.</p>
-      </section>
+      <div className="page-stack">
+        <section className="onec-state panel">
+          <div>
+            <strong>Отчётов пока нет</strong>
+            <p>В 1С не найдено отчётов о розничных продажах.</p>
+          </div>
+        </section>
+      </div>
     );
   }
 
   return (
-    <div className="onec-reports">
-      {reports.map((report) => (
-        <section className="onec-card" key={report.Ref_Key}>
-          <header className="onec-header">
-            <div>
-              <span className="onec-label">Документ 1С</span>
-              <h2>Отчёт №{report.Number}</h2>
-              <p>{date.format(new Date(report.Date))}</p>
-            </div>
+    <div className="page-stack onec-workspace">
+      <section className="onec-source-panel">
+        <div>
+          <span className="onec-source-kicker">Данные из 1С</span>
+          <h2>Отчёт о розничных продажах</h2>
+          <p>
+            Документ №{report.Number} · {date.format(new Date(report.Date))}
+          </p>
+        </div>
 
-            <div className="onec-document-values">
-              <div>
-                <span>Сумма документа</span>
-                <strong>{money.format(report.СуммаДокумента)}</strong>
-              </div>
+        <div className="onec-source-actions">
+          <span className={report.Posted ? "onec-posted" : "onec-draft"}>
+            {report.Posted ? "Проведён" : "Не проведён"}
+          </span>
 
-              <div>
-                <span>Возвраты</span>
-                <strong>{money.format(report.СуммаВозвратов)}</strong>
-              </div>
-            </div>
-          </header>
+          {reports.length > 1 && (
+            <label className="onec-report-select">
+              <span>Документ</span>
+              <select
+                value={report.Ref_Key}
+                onChange={(event) =>
+                  setSelectedReportKey(event.target.value)
+                }
+              >
+                {reports.map((item) => (
+                  <option value={item.Ref_Key} key={item.Ref_Key}>
+                    №{item.Number} · {date.format(new Date(item.Date))}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+      </section>
 
-          <div className="onec-table-wrap">
-            <table className="onec-table">
-              <thead>
-                <tr>
-                  <th>№</th>
-                  <th>Номенклатура</th>
-                  <th>Количество</th>
-                  <th>Цена</th>
-                  <th>Сумма</th>
-                  <th>Склад</th>
-                  <th>Продавец</th>
-                </tr>
-              </thead>
+      <section className="kpi-grid product-kpis">
+        <article className="kpi-card">
+          <div className="kpi-top">
+            <span>Сумма документа</span>
+          </div>
+          <strong>{money.format(report.СуммаДокумента)}</strong>
+          <p>поле 1С «СуммаДокумента»</p>
+        </article>
 
-              <tbody>
-                {(report.Товары ?? []).map((item) => (
+        <article className="kpi-card">
+          <div className="kpi-top">
+            <span>Возвраты</span>
+          </div>
+          <strong>{money.format(report.СуммаВозвратов)}</strong>
+          <p>поле 1С «СуммаВозвратов»</p>
+        </article>
+
+        <article className="kpi-card">
+          <div className="kpi-top">
+            <span>Строк товаров</span>
+          </div>
+          <strong>{report.Товары?.length ?? 0}</strong>
+          <p>табличная часть документа</p>
+        </article>
+
+        <article className="kpi-card">
+          <div className="kpi-top">
+            <span>Источник</span>
+          </div>
+          <strong className="onec-source-value">1С OData</strong>
+          <p>реальные данные без расчётов</p>
+        </article>
+      </section>
+
+      <section className="panel onec-products-panel">
+        <div className="inventory-head">
+          <div>
+            <h2>Товары документа</h2>
+            <p>
+              Номенклатура, количество, цена и склад непосредственно из 1С
+            </p>
+          </div>
+          <span>{lines.length} позиций</span>
+        </div>
+
+        <div className="inventory-controls">
+          <label className="search onec-search">
+            <span aria-hidden>⌕</span>
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Поиск по товару, артикулу или складу"
+            />
+          </label>
+        </div>
+
+        <div className="onec-table-wrap">
+          <table className="onec-table">
+            <thead>
+              <tr>
+                <th>№</th>
+                <th>Товар</th>
+                <th>Артикул</th>
+                <th>Количество</th>
+                <th>Цена</th>
+                <th>Сумма</th>
+                <th>Склад</th>
+                <th>Продавец</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lines.map((item) => {
+                const product = productByKey.get(item.Номенклатура_Key);
+                const warehouse = warehouseByKey.get(item.Склад_Key);
+
+                return (
                   <tr key={`${report.Ref_Key}-${item.LineNumber}`}>
                     <td>{item.LineNumber}</td>
                     <td>
-                      <code>{item.Номенклатура_Key}</code>
+                      <strong>
+                        {product?.Description || "Товар без наименования"}
+                      </strong>
+                      <small className="onec-key">
+                        {item.Номенклатура_Key}
+                      </small>
                     </td>
+                    <td>{product?.Артикул || product?.Code || "—"}</td>
                     <td>{item.Количество}</td>
                     <td>{money.format(item.Цена)}</td>
-                    <td>{money.format(item.Сумма)}</td>
                     <td>
-                      <code>{item.Склад_Key}</code>
+                      <strong>{money.format(item.Сумма)}</strong>
                     </td>
                     <td>
-                      {item.Продавец_Key ===
-                      "00000000-0000-0000-0000-000000000000"
-                        ? "Не указан"
-                        : item.Продавец_Key}
+                      {warehouse?.Description || item.Склад_Key}
+                    </td>
+                    <td>
+                      {item.Продавец_Key &&
+                      item.Продавец_Key !== ZERO_GUID
+                        ? item.Продавец_Key
+                        : "Не указан"}
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      ))}
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }
