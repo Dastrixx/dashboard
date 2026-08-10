@@ -1032,6 +1032,7 @@ body{overflow-x:hidden}
 .stock-difference{display:inline-flex;min-width:38px;justify-content:center;padding:4px 7px;border-radius:6px;font-size:9px;font-weight:800}
 .stock-difference.ok{background:#e4f1eb;color:#23684d}
 .stock-difference.bad{background:#ffeded;color:#a34242}
+.stock-quality-pagination{margin:16px -24px -24px}
 .stock-next-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
 .stock-next-card{min-height:128px;background:linear-gradient(145deg,#fff,#f8fbf9)}
 .stock-next-card>span{color:var(--green2);font-size:8px;font-weight:850;text-transform:uppercase;letter-spacing:.09em}
@@ -1059,6 +1060,7 @@ body{overflow-x:hidden}
   .stock-receipt-column{min-width:54px}
   .stock-receipt-bar-wrap{height:190px}
   .stock-operation-card{padding:18px}
+  .stock-quality-pagination{margin:14px -18px -18px}
 }
 
 @media(max-width:420px){
