@@ -48,14 +48,48 @@ type StockReference = {
   ТипСклада?: string;
 };
 
+type StockOperationLine = {
+  LineNumber?: string | number;
+  Номенклатура_Key: string;
+  Количество?: number;
+  КоличествоФакт?: number;
+  Сумма?: number;
+  СуммаФакт?: number;
+};
+
+type StockOperation = {
+  Ref_Key: string;
+  Number?: string;
+  Date: string;
+  Posted?: boolean;
+  Склад_Key?: string;
+  Контрагент_Key?: string;
+  СуммаДокумента?: number;
+  ОснованиеСписания?: string;
+  Комментарий?: string;
+  Статус?: string;
+  Товары?: StockOperationLine[];
+};
+
 type StockPayload = {
   items?: StockBalance[];
   references?: {
     products?: StockReference[];
     warehouses?: StockReference[];
     categories?: StockReference[];
+    suppliers?: StockReference[];
   };
-  meta?: { loaded?: number; asOf?: string; source?: string };
+  operations?: {
+    receipts?: StockOperation[];
+    writeOffs?: StockOperation[];
+    recounts?: StockOperation[];
+  };
+  meta?: {
+    loaded?: number;
+    asOf?: string;
+    source?: string;
+    operationErrors?: Record<string, string>;
+  };
   message?: string;
 };
 
@@ -357,6 +391,7 @@ export function OnecStock() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [warehouseMode, setWarehouseMode] = useState("all");
+  const [warehouseKey, setWarehouseKey] = useState("all");
   const [category, setCategory] = useState("all");
   const [status, setStatus] = useState("all");
   const [search, setSearch] = useState("");
@@ -407,8 +442,12 @@ export function OnecStock() {
     const categories = new Map(
       (payload.references?.categories || []).map((item) => [item.Ref_Key, item]),
     );
+    const suppliers = new Map(
+      (payload.references?.suppliers || []).map((item) => [item.Ref_Key, item]),
+    );
 
     const matchesWarehouse = (key: string) => {
+      if (warehouseKey !== "all" && key !== warehouseKey) return false;
       if (warehouseMode === "all") return true;
       const kind = warehouses.get(key)?.ТипСклада || "";
       if (warehouseMode === "sales-floor") return kind === "ТорговыйЗал";
@@ -487,6 +526,72 @@ export function OnecStock() {
       )
       .sort((left, right) => left.available - right.available);
 
+    const operationMatches = (document: StockOperation) =>
+      !document.Склад_Key || matchesWarehouse(document.Склад_Key);
+    const receipts = (payload.operations?.receipts || []).filter(operationMatches);
+    const writeOffs = (payload.operations?.writeOffs || []).filter(operationMatches);
+    const recounts = (payload.operations?.recounts || []).filter(operationMatches);
+    const latestReceiptTime = Math.max(
+      ...receipts.map((item) => new Date(item.Date).getTime()),
+      0,
+    );
+    const receiptWeeks = Array.from({ length: 8 }, (_, index) => ({
+      label: index === 7 ? "текущая" : `нед. −${7 - index}`,
+      sku: new Set<string>(),
+      units: 0,
+    }));
+    if (latestReceiptTime) {
+      receipts.forEach((document) => {
+        const distance = Math.floor(
+          (latestReceiptTime - new Date(document.Date).getTime()) /
+            (7 * 86_400_000),
+        );
+        const bucket = 7 - distance;
+        if (bucket < 0 || bucket > 7) return;
+        (document.Товары || []).forEach((line) => {
+          if (line.Номенклатура_Key) receiptWeeks[bucket].sku.add(line.Номенклатура_Key);
+          receiptWeeks[bucket].units += Number(line.Количество || 0);
+        });
+      });
+    }
+    const receiptChart = receiptWeeks.map((item) => ({
+      label: item.label,
+      sku: item.sku.size,
+      units: item.units,
+    }));
+    const maxReceiptSku = Math.max(...receiptChart.map((item) => item.sku), 1);
+
+    const writeOffRows = writeOffs.flatMap((document) =>
+      (document.Товары || []).map((line) => {
+        const product = products.get(line.Номенклатура_Key);
+        return {
+          key: `${document.Ref_Key}-${line.LineNumber}`,
+          sku: product?.Артикул || product?.Code || "Без артикула",
+          name: product?.НаименованиеПолное || product?.Description || "Товар не найден",
+          quantity: Number(line.Количество || 0),
+          reason:
+            document.ОснованиеСписания ||
+            document.Комментарий ||
+            "Причина не заполнена",
+        };
+      }),
+    );
+    const recountRows = recounts.flatMap((document) =>
+      (document.Товары || []).map((line) => {
+        const product = products.get(line.Номенклатура_Key);
+        const accounting = Number(line.Количество || 0);
+        const actual = Number(line.КоличествоФакт || 0);
+        return {
+          key: `${document.Ref_Key}-${line.LineNumber}`,
+          sku: product?.Артикул || product?.Code || "Без артикула",
+          name: product?.НаименованиеПолное || product?.Description || "Товар не найден",
+          accounting,
+          actual,
+          difference: actual - accounting,
+        };
+      }),
+    );
+
     return {
       rows,
       filtered,
@@ -497,10 +602,30 @@ export function OnecStock() {
       totalReserved: rows.reduce((sum, item) => sum + item.reserved, 0),
       zero: rows.filter((item) => item.status === "zero").length,
       low: rows.filter((item) => item.status === "low").length,
+      warehouses: [...warehouses.values()].sort((left, right) =>
+        (left.Description || "").localeCompare(right.Description || "", "ru"),
+      ),
+      receiptChart,
+      maxReceiptSku,
+      recentReceipts: receipts.slice(0, 5).map((document) => ({
+        ...document,
+        supplier:
+          suppliers.get(document.Контрагент_Key || "")?.НаименованиеПолное ||
+          suppliers.get(document.Контрагент_Key || "")?.Description ||
+          "Поставщик не указан",
+        warehouse:
+          warehouses.get(document.Склад_Key || "")?.Description ||
+          "Склад не указан",
+        sku: new Set(
+          (document.Товары || []).map((line) => line.Номенклатура_Key).filter(Boolean),
+        ).size,
+      })),
+      writeOffRows,
+      recountRows,
     };
-  }, [payload, warehouseMode, category, status, search]);
+  }, [payload, warehouseMode, warehouseKey, category, status, search]);
 
-  useEffect(() => setPage(1), [warehouseMode, category, status, search]);
+  useEffect(() => setPage(1), [warehouseMode, warehouseKey, category, status, search]);
 
   if (loading || error || !(payload.items || []).length) {
     return (
@@ -535,21 +660,40 @@ export function OnecStock() {
               : "только что"}
           </p>
         </div>
-        <div className="warehouse-selector" aria-label="Выбор типа склада">
-          {[
-            ["all", "Все"],
-            ["sales-floor", "Торговый зал"],
-            ["warehouse", "Склад"],
-          ].map(([value, label]) => (
-            <button
-              className={warehouseMode === value ? "active" : ""}
-              key={value}
-              onClick={() => setWarehouseMode(value)}
-              type="button"
+        <div className="stock-warehouse-controls">
+          <label className="stock-warehouse-select">
+            <span>Конкретный склад</span>
+            <select
+              onChange={(event) => setWarehouseKey(event.target.value)}
+              value={warehouseKey}
             >
-              {label}
-            </button>
-          ))}
+              <option value="all">Все склады</option>
+              {view.warehouses.map((item) => (
+                <option key={item.Ref_Key} value={item.Ref_Key}>
+                  {item.Description || item.Code || "Склад без названия"}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="warehouse-selector" aria-label="Выбор типа склада">
+            {[
+              ["all", "Все"],
+              ["sales-floor", "Торговый зал"],
+              ["warehouse", "Склад"],
+            ].map(([value, label]) => (
+              <button
+                className={warehouseMode === value ? "active" : ""}
+                key={value}
+                onClick={() => {
+                  setWarehouseMode(value);
+                  setWarehouseKey("all");
+                }}
+                type="button"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -674,16 +818,162 @@ export function OnecStock() {
         </div>
       </section>
 
-      <section className="stock-next-grid">
-        <article className="panel stock-next-card">
-          <span>Следующий источник</span>
-          <h3>Поступления товаров</h3>
-          <p>Подключим документы «ПоступлениеТоваров» для графика приходов и последних поставок.</p>
+      <section className="stock-section-heading">
+        <h2>Приход товара</h2>
+        <p>Последние 8 недель и проведённые документы поставок</p>
+      </section>
+
+      <section className="stock-operations-grid">
+        <article className="panel stock-operation-card">
+          <div className="panel-head">
+            <div>
+              <h2>SKU в приходе по неделям</h2>
+              <p>Частота и объём фактических поставок</p>
+            </div>
+          </div>
+          {view.receiptChart.some((item) => item.sku || item.units) ? (
+            <div className="stock-receipt-chart">
+              {view.receiptChart.map((item) => (
+                <div className="stock-receipt-column" key={item.label}>
+                  <div className="stock-receipt-bar-wrap">
+                    <b>{item.sku}</b>
+                    <i
+                      style={{
+                        height: `${Math.max((item.sku / view.maxReceiptSku) * 100, item.sku ? 8 : 0)}%`,
+                      }}
+                    />
+                  </div>
+                  <span>{item.label}</span>
+                  <small>{number.format(item.units)} ед.</small>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="stock-operation-empty">
+              <strong>Нет проведённых поступлений</strong>
+              <span>
+                {payload.meta?.operationErrors?.receipts ||
+                  "1С не вернула документы поступления для выбранного склада."}
+              </span>
+            </div>
+          )}
         </article>
-        <article className="panel stock-next-card">
-          <span>Следующий источник</span>
-          <h3>Пересчёт и расхождения</h3>
-          <p>Подключим «ПересчетТоваров» и акты расхождений. До этого значения не подменяются демо-данными.</p>
+
+        <article className="panel stock-operation-card">
+          <div className="panel-head">
+            <div>
+              <h2>Последние поставки</h2>
+              <p>Документы «Поступление товаров» из 1С</p>
+            </div>
+          </div>
+          {view.recentReceipts.length ? (
+            <div className="stock-compact-table-wrap">
+              <table className="stock-compact-table">
+                <thead>
+                  <tr><th>Дата</th><th>Поставщик</th><th>Склад</th><th>SKU</th></tr>
+                </thead>
+                <tbody>
+                  {view.recentReceipts.map((document) => (
+                    <tr key={document.Ref_Key}>
+                      <td>{new Date(document.Date).toLocaleDateString("ru-RU")}</td>
+                      <td><strong>{document.supplier}</strong></td>
+                      <td>{document.warehouse}</td>
+                      <td>{document.sku}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="stock-operation-empty compact">
+              <strong>Поставок нет</strong>
+              <span>Для выбранного склада документы не найдены.</span>
+            </div>
+          )}
+        </article>
+      </section>
+
+      <section className="stock-section-heading">
+        <h2>Контроль качества и учёта</h2>
+        <p>Списания и сверка фактических остатков</p>
+      </section>
+
+      <section className="stock-quality-grid">
+        <article className="panel stock-operation-card">
+          <div className="panel-head">
+            <div>
+              <h2>Списания</h2>
+              <p>Фактические документы списания товаров</p>
+            </div>
+            <span className="tag amber">
+              {number.format(view.writeOffRows.reduce((sum, item) => sum + item.quantity, 0))} ед.
+            </span>
+          </div>
+          {view.writeOffRows.length ? (
+            <div className="stock-compact-table-wrap">
+              <table className="stock-compact-table">
+                <thead><tr><th>Товар</th><th>Кол-во</th><th>Причина</th></tr></thead>
+                <tbody>
+                  {view.writeOffRows.slice(0, 8).map((item) => (
+                    <tr key={item.key}>
+                      <td><strong>{item.name}</strong><small>{item.sku}</small></td>
+                      <td>{number.format(item.quantity)}</td>
+                      <td>{item.reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="stock-operation-empty compact">
+              <strong>Списаний нет</strong>
+              <span>
+                {payload.meta?.operationErrors?.writeOffs ||
+                  "Проведённые документы списания не найдены."}
+              </span>
+            </div>
+          )}
+        </article>
+
+        <article className="panel stock-operation-card">
+          <div className="panel-head">
+            <div>
+              <h2>Сверка остатков</h2>
+              <p>Учётное количество против фактического</p>
+            </div>
+            <span className="tag green">
+              {view.recountRows.filter((item) => item.difference !== 0).length} расхожд.
+            </span>
+          </div>
+          {view.recountRows.length ? (
+            <div className="stock-compact-table-wrap">
+              <table className="stock-compact-table">
+                <thead><tr><th>Товар</th><th>По базе</th><th>Факт</th><th>Разница</th></tr></thead>
+                <tbody>
+                  {view.recountRows.slice(0, 8).map((item) => (
+                    <tr key={item.key}>
+                      <td><strong>{item.name}</strong><small>{item.sku}</small></td>
+                      <td>{number.format(item.accounting)}</td>
+                      <td>{number.format(item.actual)}</td>
+                      <td>
+                        <span className={`stock-difference ${item.difference === 0 ? "ok" : "bad"}`}>
+                          {item.difference > 0 ? "+" : ""}{number.format(item.difference)}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="stock-operation-empty compact">
+              <strong>Пересчётов нет</strong>
+              <span>
+                {payload.meta?.operationErrors?.recounts ||
+                  "Документы пересчёта для выбранного склада не найдены."}
+              </span>
+            </div>
+          )}
         </article>
       </section>
     </div>
