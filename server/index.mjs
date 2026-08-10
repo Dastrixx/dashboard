@@ -6,6 +6,7 @@ import {
   onecGet,
   onecGetByKey,
   onecMetadata,
+  onecTurnovers,
 } from "./onec.mjs";
 
 const app = express();
@@ -251,6 +252,84 @@ async function loadReferencesByKeysBatched(entity, keys, select) {
 
   return result;
 }
+
+app.get("/api/dashboard/onec-sellers", async (request, response) => {
+  try {
+    const days = [1, 7, 30].includes(Number(request.query.days))
+      ? Number(request.query.days)
+      : 30;
+    const latestRecords = await onecGet(
+      "AccumulationRegister_Продажи_RecordType",
+      {
+        $top: 1,
+        $select: "Period",
+        $filter: "Active eq true",
+        $orderby: "Period desc",
+      },
+    );
+
+    if (!latestRecords.length) {
+      return response.json({
+        items: [],
+        references: { sellers: [], stores: [] },
+        meta: { days, loaded: 0, latestDate: null },
+      });
+    }
+
+    const latestDate = new Date(latestRecords[0].Period);
+    const startDate = new Date(latestDate.getTime() - days * 86_400_000);
+    const items = await onecTurnovers("AccumulationRegister_Продажи", {
+      startPeriod: startDate,
+      endPeriod: new Date(latestDate.getTime() + 1000),
+      dimensions: "Продавец,Магазин",
+      top: 5000,
+      select: [
+        "Продавец_Key",
+        "Магазин_Key",
+        "КоличествоTurnover",
+        "СтоимостьTurnover",
+        "СтоимостьБезСкидокTurnover",
+      ].join(","),
+    });
+    const validItems = items.filter(
+      (item) =>
+        item.Продавец_Key &&
+        item.Продавец_Key !== "00000000-0000-0000-0000-000000000000",
+    );
+    const sellers = await loadReferencesByKeysBatched(
+      "Catalog_ФизическиеЛица",
+      validItems.map((item) => item.Продавец_Key),
+      "Ref_Key,Description,Магазин_Key",
+    );
+    const stores = await loadReferencesByKeysBatched(
+      "Catalog_Магазины",
+      [
+        ...validItems.map((item) => item.Магазин_Key),
+        ...sellers.map((item) => item.Магазин_Key),
+      ],
+      "Ref_Key,Code,Description",
+    );
+
+    response.json({
+      items: validItems,
+      references: { sellers, stores },
+      meta: {
+        days,
+        loaded: validItems.length,
+        latestDate: latestDate.toISOString(),
+        source: "AccumulationRegister_Продажи/Turnovers",
+      },
+    });
+  } catch (error) {
+    console.error("Ошибка загрузки продаж по продавцам 1С:", error);
+    response.status(502).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : "Не удалось получить продажи по продавцам из 1С",
+    });
+  }
+});
 
 app.get("/api/dashboard/onec-stock", async (request, response) => {
   try {
