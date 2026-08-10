@@ -93,6 +93,11 @@ const number = new Intl.NumberFormat("ru-RU", {
   maximumFractionDigits: 2,
 });
 
+const compactNumber = new Intl.NumberFormat("ru-RU", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
 const shortDate = new Intl.DateTimeFormat("ru-RU", {
   day: "2-digit",
   month: "2-digit",
@@ -324,7 +329,7 @@ export function OnecSales() {
       .sort((left, right) => right.value - left.value);
 
     const bucketCount =
-      period === "day" ? 6 : period === "week" ? 7 : 5;
+      period === "day" ? 6 : period === "week" ? 7 : 30;
     const bucketSize = duration / bucketCount;
 
     const makeBuckets = (
@@ -334,7 +339,7 @@ export function OnecSales() {
       Array.from({ length: bucketCount }, (_, index) => ({
         label:
           period === "month"
-            ? `${index + 1} нед.`
+            ? shortDate.format(new Date(rangeStart + index * bucketSize))
             : period === "week"
               ? shortDate.format(new Date(rangeStart + index * bucketSize))
               : `${index * 4}–${(index + 1) * 4}ч`,
@@ -492,6 +497,32 @@ export function OnecSales() {
     ...analytics.previousBuckets.map((item) => item.value),
     1,
   );
+  const chartWidth = 760;
+  const chartHeight = 270;
+  const chartPadding = 18;
+  const makeChartPoints = (items: { label: string; value: number }[]) =>
+    items.map((item, index) => ({
+      ...item,
+      x:
+        chartPadding +
+        (index / Math.max(items.length - 1, 1)) *
+          (chartWidth - chartPadding * 2),
+      y:
+        chartHeight -
+        chartPadding -
+        (item.value / maxChartValue) *
+          (chartHeight - chartPadding * 2),
+    }));
+  const currentChartPoints = makeChartPoints(analytics.currentBuckets);
+  const previousChartPoints = makeChartPoints(analytics.previousBuckets);
+  const abcSummary = (["A", "B", "C"] as const).map((group) => {
+    const rows = analytics.rows.filter((row) => row.abc === group);
+    return {
+      group,
+      count: rows.length,
+      share: rows.reduce((sum, row) => sum + row.share, 0),
+    };
+  });
 
   return (
     <div className="page-stack onec-product-analytics">
@@ -554,55 +585,84 @@ export function OnecSales() {
         </article>
       </section>
 
-      <section className="panel">
-        <div className="panel-head">
-          <div>
-            <h2>Сравнительный анализ</h2>
-            <p>Текущий период против предыдущего</p>
+      <section className="charts-grid onec-real-analysis-grid">
+        <article className="panel onec-revenue-panel">
+          <div className="panel-head">
+            <div>
+              <h2>Динамика выручки</h2>
+              <p>
+                {PERIODS[period].label} в сравнении с предыдущим периодом
+              </p>
+            </div>
+            <div className="chart-key compact">
+              <span><i className="actual" />Текущий</span>
+              <span><i className="previous" />Предыдущий</span>
+            </div>
           </div>
-          <div className="chart-key compact">
-            <span><i className="actual" />Текущий</span>
-            <span><i className="previous" />Предыдущий</span>
-          </div>
-        </div>
-        <div className="onec-comparison">
-          {analytics.currentBuckets.map((current, index) => {
-            const previous = analytics.previousBuckets[index];
-            return (
-              <div className="onec-comparison-group" key={current.label}>
-                <div className="onec-comparison-bars">
-                  <div>
-                    <b>{money.format(current.value)}</b>
-                    <i
-                      className="current"
-                      style={{
-                        height: `${Math.max((current.value / maxChartValue) * 100, current.value ? 3 : 0)}%`,
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <b>{money.format(previous.value)}</b>
-                    <i
-                      className="previous"
-                      style={{
-                        height: `${Math.max((previous.value / maxChartValue) * 100, previous.value ? 3 : 0)}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-                <span>{current.label}</span>
-              </div>
-            );
-          })}
-        </div>
-      </section>
 
-      <section className="charts-grid">
-        <article className="panel wide">
+          <div className="onec-revenue-chart">
+            <div className="onec-chart-maximum">
+              <span>Максимум</span>
+              <strong>{money.format(maxChartValue)}</strong>
+            </div>
+            <div className="onec-chart-y-axis" aria-hidden="true">
+              <span>{compactNumber.format(maxChartValue)}</span>
+              <span>{compactNumber.format(maxChartValue * 0.66)}</span>
+              <span>{compactNumber.format(maxChartValue * 0.33)}</span>
+              <span>0</span>
+            </div>
+            <svg
+              viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+              role="img"
+              aria-label="Динамика выручки текущего и предыдущего периода"
+            >
+              {[18, 96, 174, 252].map((y) => (
+                <line
+                  key={y}
+                  className="onec-chart-gridline"
+                  x1={chartPadding}
+                  x2={chartWidth - chartPadding}
+                  y1={y}
+                  y2={y}
+                />
+              ))}
+              <polyline
+                className="onec-revenue-line previous"
+                points={previousChartPoints
+                  .map((point) => `${point.x},${point.y}`)
+                  .join(" ")}
+              />
+              <polyline
+                className="onec-revenue-line current"
+                points={currentChartPoints
+                  .map((point) => `${point.x},${point.y}`)
+                  .join(" ")}
+              />
+              {currentChartPoints.map((point) => (
+                <circle
+                  key={point.label}
+                  className="onec-revenue-point"
+                  cx={point.x}
+                  cy={point.y}
+                  r="3"
+                >
+                  <title>{point.label}: {money.format(point.value)}</title>
+                </circle>
+              ))}
+            </svg>
+            <div className="onec-chart-x-axis" aria-hidden="true">
+              <span>Начало</span>
+              <span>Середина</span>
+              <span>Сегодня</span>
+            </div>
+          </div>
+        </article>
+
+        <article className="panel onec-category-panel">
           <div className="panel-head">
             <div>
               <h2>Продажи по категориям</h2>
-              <p>Доля в выручке за выбранный период</p>
+              <p>Структура выручки {PERIODS[period].caption}</p>
             </div>
           </div>
           <div className="onec-category-list">
@@ -611,33 +671,15 @@ export function OnecSales() {
                 <div>
                   <strong>{item.label}</strong>
                   <span>
-                    {money.format(item.value)} · {item.share.toFixed(1)}%
+                    {item.share.toFixed(1)}% · {money.format(item.value)}
                   </span>
                 </div>
                 <i><b style={{ width: `${item.share}%` }} /></i>
               </div>
             ))}
-          </div>
-        </article>
-
-        <article className="panel insights">
-          <div className="panel-head">
-            <div>
-              <h2>Источник расчёта</h2>
-              <p>Без демонстрационных значений</p>
-            </div>
-          </div>
-          <div className="insight good">
-            <b>Выручка</b>
-            <span>ОтчетОРозничныхПродажах.СуммаДокумента</span>
-          </div>
-          <div className="insight good">
-            <b>Количество и товары</b>
-            <span>Табличная часть документа «Товары»</span>
-          </div>
-          <div className="insight">
-            <b>Категории</b>
-            <span>Справочник «Товарные группы»; незаполненные — «Без категории»</span>
+            {!analytics.categoryRows.length && (
+              <p className="onec-no-data">Нет категорий за выбранный период</p>
+            )}
           </div>
         </article>
       </section>
@@ -810,6 +852,27 @@ export function OnecSales() {
           регистра остатков 1С сюда добавятся товары с нулевым спросом, но
           фактическим наличием на складе.
         </p>
+      </section>
+
+      <section className="panel onec-abc-summary">
+        <div className="panel-head">
+          <div>
+            <h2>ABC-анализ ассортимента</h2>
+            <p>A — ядро выручки, C — кандидаты для проверки спроса</p>
+          </div>
+        </div>
+        <div className="onec-abc-summary-grid">
+          {abcSummary.map((item) => (
+            <article
+              className={`onec-abc-summary-card ${item.group.toLowerCase()}`}
+              key={item.group}
+            >
+              <b>{item.group}</b>
+              <strong>{item.share.toFixed(1)}%</strong>
+              <span>{item.count} SKU</span>
+            </article>
+          ))}
+        </div>
       </section>
 
       <section className="panel onec-abc-panel">
