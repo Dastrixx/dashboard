@@ -299,6 +299,65 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
     let effectiveLatestDate = latestDate;
     let source = "AccumulationRegister_Продажи/Turnovers";
     let scannedChecks = 0;
+    let scannedPremiumRows = 0;
+    let scannedRealizations = 0;
+
+    if (!validItems.length) {
+      const latestPremiumRows = await onecGet(
+        "AccumulationRegister_ПремииПоЛичнымПродажам_RecordType",
+        {
+          $top: 1,
+          $select: "Period",
+          $filter: "Active eq true",
+          $orderby: "Period desc",
+        },
+      );
+
+      if (latestPremiumRows.length) {
+        effectiveLatestDate = new Date(latestPremiumRows[0].Period);
+        const premiumStartDate = new Date(
+          effectiveLatestDate.getTime() - days * 86_400_000,
+        );
+        const premiumRows = await onecGet(
+          "AccumulationRegister_ПремииПоЛичнымПродажам_RecordType",
+          {
+            $top: 1000,
+            $select: [
+              "Period",
+              "Active",
+              "Продавец_Key",
+              "МагазинПродаж_Key",
+              "МагазинРасчетаПремий_Key",
+              "Количество",
+              "СуммаПродаж",
+            ].join(","),
+            $filter: [
+              "Active eq true",
+              `Period ge datetime'${toOdataDateTime(premiumStartDate)}'`,
+            ].join(" and "),
+            $orderby: "Period desc",
+          },
+        );
+        scannedPremiumRows = premiumRows.length;
+        validItems = premiumRows
+          .filter(
+            (item) =>
+              item.Продавец_Key &&
+              item.Продавец_Key !== "00000000-0000-0000-0000-000000000000",
+          )
+          .map((item) => ({
+            Продавец_Key: item.Продавец_Key,
+            Магазин_Key:
+              item.МагазинПродаж_Key || item.МагазинРасчетаПремий_Key,
+            КоличествоTurnover: Number(item.Количество || 0),
+            СтоимостьTurnover: Number(item.СуммаПродаж || 0),
+            СтоимостьБезСкидокTurnover: Number(item.СуммаПродаж || 0),
+          }));
+        if (validItems.length) {
+          source = "AccumulationRegister_ПремииПоЛичнымПродажам_RecordType";
+        }
+      }
+    }
 
     if (!validItems.length) {
       const latestChecks = await onecGet("Document_ЧекККМ", {
@@ -405,6 +464,75 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
         source = "Document_ЧекККМ (fallback)";
       }
     }
+
+    if (!validItems.length) {
+      const latestRealizations = await onecGet("Document_РеализацияТоваров", {
+        $top: 1,
+        $select: "Date",
+        $filter: "Posted eq true",
+        $orderby: "Date desc",
+      });
+
+      if (latestRealizations.length) {
+        effectiveLatestDate = new Date(latestRealizations[0].Date);
+        const realizationStartDate = new Date(
+          effectiveLatestDate.getTime() - days * 86_400_000,
+        );
+        const realizations = await onecGet("Document_РеализацияТоваров", {
+          $top: 500,
+          $select: [
+            "Ref_Key",
+            "Date",
+            "Posted",
+            "Магазин_Key",
+            "Продавец_Key",
+            "СуммаДокумента",
+            "Товары",
+          ].join(","),
+          $filter: [
+            "Posted eq true",
+            `Date ge datetime'${toOdataDateTime(realizationStartDate)}'`,
+          ].join(" and "),
+          $orderby: "Date desc",
+        });
+        scannedRealizations = realizations.length;
+        const groupedRealizations = new Map();
+
+        realizations.forEach((document) => {
+          const lines = document.Товары || [];
+          lines.forEach((line) => {
+            const sellerKey =
+              line.Продавец_Key && line.Продавец_Key !== "00000000-0000-0000-0000-000000000000"
+                ? line.Продавец_Key
+                : document.Продавец_Key;
+            if (!sellerKey || sellerKey === "00000000-0000-0000-0000-000000000000") {
+              return;
+            }
+            const key = `${sellerKey}:${document.Магазин_Key}`;
+            const current = groupedRealizations.get(key) || {
+              Продавец_Key: sellerKey,
+              Магазин_Key: document.Магазин_Key,
+              КоличествоTurnover: 0,
+              СтоимостьTurnover: 0,
+              СтоимостьБезСкидокTurnover: 0,
+            };
+            const revenue = Number(line.Сумма || 0);
+            const discounts =
+              Number(line.СуммаАвтоматическойСкидки || 0) +
+              Number(line.СуммаРучнойСкидки || 0);
+            current.КоличествоTurnover += Number(line.Количество || 0);
+            current.СтоимостьTurnover += revenue;
+            current.СтоимостьБезСкидокTurnover += revenue + discounts;
+            groupedRealizations.set(key, current);
+          });
+        });
+
+        validItems = [...groupedRealizations.values()];
+        if (validItems.length) {
+          source = "Document_РеализацияТоваров (fallback)";
+        }
+      }
+    }
     const sellers = await loadReferencesByKeysBatched(
       "Catalog_ФизическиеЛица",
       validItems.map((item) => item.Продавец_Key),
@@ -435,6 +563,8 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
               item.Продавец_Key !== "00000000-0000-0000-0000-000000000000",
           ).length,
           scannedChecks,
+          scannedPremiumRows,
+          scannedRealizations,
           resultRows: validItems.length,
         },
       },
