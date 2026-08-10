@@ -81,7 +81,7 @@ export function OnecSales() {
         setError("");
 
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-reports?top=5`,
+          `${API_URL}/api/dashboard/onec-reports?top=1`,
           { signal: controller.signal },
         );
 
