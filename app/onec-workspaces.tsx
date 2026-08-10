@@ -902,8 +902,8 @@ export function OnecStock() {
         <article className="panel stock-operation-card">
           <div className="panel-head">
             <div>
-              <h2>Списания</h2>
-              <p>Фактические документы списания товаров</p>
+              <h2>Брак и списания</h2>
+              <p>Фактические документы списания с причиной из 1С</p>
             </div>
             <span className="tag amber">
               {number.format(view.writeOffRows.reduce((sum, item) => sum + item.quantity, 0))} ед.
