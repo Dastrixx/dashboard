@@ -123,6 +123,8 @@ type SellerPayload = {
       turnoverRows?: number;
       turnoverRowsWithSeller?: number;
       scannedChecks?: number;
+      scannedPremiumRows?: number;
+      scannedRealizations?: number;
       resultRows?: number;
     };
   };
@@ -1242,7 +1244,7 @@ export function OnecTeam() {
       <MissingSource
         title="Продажи продавцов по филиалам"
         description="Продажи в 1С найдены, но продавец не заполнен"
-        source={`Проверены обороты регистра: ${diagnostics?.turnoverRows || 0} строк, с продавцом — ${diagnostics?.turnoverRowsWithSeller || 0}. Дополнительно проверены чеки ККМ: ${diagnostics?.scannedChecks || 0}. Заполните поле «Продавец» в чеке или строке товара — после этого данные появятся автоматически.`}
+        source={`Проверены: регистр продаж — ${diagnostics?.turnoverRows || 0} строк (${diagnostics?.turnoverRowsWithSeller || 0} с продавцом), личные продажи — ${diagnostics?.scannedPremiumRows || 0}, чеки ККМ — ${diagnostics?.scannedChecks || 0}, реализации — ${diagnostics?.scannedRealizations || 0}. Если результат пустой, поле «Продавец» не заполнено ни в одном источнике 1С.`}
       />
     );
   }
