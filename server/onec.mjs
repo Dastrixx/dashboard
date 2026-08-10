@@ -117,3 +117,33 @@ export function onecGetByKey(entity, key, params = {}) {
     ...params,
   });
 }
+
+function quoteOdataString(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+export function onecBalance(register, options = {}) {
+  if (!/^AccumulationRegister_[\p{L}\p{N}_]+$/u.test(register)) {
+    throw new Error("Недопустимое имя регистра накопления 1С");
+  }
+
+  const period = options.period
+    ? new Date(options.period).toISOString().replace(/\.\d{3}Z$/, "")
+    : new Date().toISOString().replace(/\.\d{3}Z$/, "");
+  const condition = quoteOdataString(options.condition || "");
+  const dimensions = quoteOdataString(
+    options.dimensions || "Склад,Номенклатура",
+  );
+  const path = [
+    `${register}/Balance(`,
+    `Condition=${condition},`,
+    `Dimensions=${dimensions},`,
+    `Period=datetime'${period}')`,
+  ].join("");
+
+  return onecRequest(path, {
+    $format: "json",
+    $top: options.top,
+    $select: options.select,
+  });
+}
