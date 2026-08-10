@@ -69,6 +69,42 @@ app.get("/api/onec/metadata", async (_request, response) => {
   }
 });
 
+const GUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function loadReferencesByKeys(entity, keys, select) {
+  const uniqueKeys = [
+    ...new Set(
+      keys.filter(
+        (key) =>
+          typeof key === "string" &&
+          GUID_PATTERN.test(key) &&
+          key !== "00000000-0000-0000-0000-000000000000",
+      ),
+    ),
+  ];
+
+  const batches = [];
+
+  for (let index = 0; index < uniqueKeys.length; index += 15) {
+    const chunk = uniqueKeys.slice(index, index + 15);
+    const filter = chunk
+      .map((key) => `Ref_Key eq guid'${key}'`)
+      .join(" or ");
+
+    batches.push(
+      onecGet(entity, {
+        $top: chunk.length,
+        $select: select,
+        $filter: filter,
+      }),
+    );
+  }
+
+  const results = await Promise.all(batches);
+  return results.flat();
+}
+
 app.get("/api/dashboard/onec-reports", async (request, response) => {
   try {
     const top = Math.min(
@@ -76,8 +112,9 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
       10,
     );
 
-    const [items, products, warehouses] = await Promise.all([
-      onecGet("Document_ОтчетОРозничныхПродажах", {
+    const items = await onecGet(
+      "Document_ОтчетОРозничныхПродажах",
+      {
         $top: top,
         $select: [
           "Ref_Key",
@@ -91,19 +128,39 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
           "Товары",
         ].join(","),
         $orderby: "Date desc",
-      }),
-      onecGet("Catalog_Номенклатура", {
-        $top: 500,
-        $select: "Ref_Key,Code,Description,Артикул",
-        $filter: "IsFolder eq false and DeletionMark eq false",
-        $orderby: "Description",
-      }),
-      onecGet("Catalog_Склады", {
-        $top: 100,
-        $select: "Ref_Key,Code,Description,ТипСклада,Магазин_Key",
-        $filter: "IsFolder eq false and DeletionMark eq false",
-        $orderby: "Description",
-      }),
+      },
+    );
+
+    const productKeys = items.flatMap((report) =>
+      (report.Товары || []).map((line) => line.Номенклатура_Key),
+    );
+    const warehouseKeys = items.flatMap((report) =>
+      (report.Товары || []).map((line) => line.Склад_Key),
+    );
+
+    const [products, warehouses] = await Promise.all([
+      loadReferencesByKeys(
+        "Catalog_Номенклатура",
+        productKeys,
+        [
+          "Ref_Key",
+          "Code",
+          "Description",
+          "НаименованиеПолное",
+          "Артикул",
+        ].join(","),
+      ),
+      loadReferencesByKeys(
+        "Catalog_Склады",
+        warehouseKeys,
+        [
+          "Ref_Key",
+          "Code",
+          "Description",
+          "ТипСклада",
+          "Магазин_Key",
+        ].join(","),
+      ),
     ]);
 
     response.json({
