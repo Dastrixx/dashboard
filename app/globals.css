@@ -770,3 +770,70 @@ body{overflow-x:hidden}
   .onec-daily-column{min-width:54px;height:185px}
   .onec-missing-source{min-height:180px}
 }
+
+
+/* Real product analytics from 1C */
+.onec-product-analytics{gap:22px}
+.onec-period-note{
+  margin-left:auto;padding:7px 10px;border-radius:999px;
+  background:#f4f8f6;color:var(--muted);font-size:9px;white-space:nowrap;
+}
+.onec-comparison{
+  min-height:300px;display:flex;align-items:flex-end;gap:26px;
+  padding:28px 12px 0;border-bottom:1px solid var(--line);overflow-x:auto;
+}
+.onec-comparison-group{
+  min-width:100px;height:260px;display:flex;flex:1;flex-direction:column;
+  align-items:center;justify-content:flex-end;gap:10px;
+}
+.onec-comparison-bars{
+  width:100%;height:225px;display:flex;align-items:flex-end;
+  justify-content:center;gap:12px;
+}
+.onec-comparison-bars>div{
+  width:min(48px,42%);height:100%;display:flex;align-items:center;
+  justify-content:flex-end;flex-direction:column;gap:7px;
+}
+.onec-comparison-bars b{
+  color:var(--green2);font-size:8px;white-space:nowrap;
+}
+.onec-comparison-bars>div:nth-child(2) b{color:#87958f}
+.onec-comparison-bars i{
+  display:block;width:100%;min-height:0;border-radius:7px 7px 2px 2px;
+}
+.onec-comparison-bars i.current{
+  background:linear-gradient(180deg,#36aa80,var(--green2));
+}
+.onec-comparison-bars i.previous{background:#dbe3df}
+.onec-comparison-group>span{color:var(--muted);font-size:9px}
+.onec-category-list{display:flex;flex-direction:column;gap:18px}
+.onec-category-list>div>div{
+  display:flex;align-items:center;justify-content:space-between;gap:18px;
+  margin-bottom:8px;
+}
+.onec-category-list strong{font-size:10px}
+.onec-category-list span{color:var(--green2);font-size:9px}
+.onec-category-list>div>i{
+  display:block;height:7px;border-radius:999px;background:#edf2ef;overflow:hidden;
+}
+.onec-category-list>div>i>b{
+  display:block;height:100%;border-radius:999px;
+  background:linear-gradient(90deg,var(--green2),#28a879);
+}
+.onec-abc-panel{padding:0;overflow:hidden}
+.onec-abc-table{min-width:1050px}
+.onec-abc-table td{font-size:10px}
+.onec-document-footnote{
+  display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:9px;
+}
+.onec-document-footnote span{
+  padding:7px 10px;border:1px solid var(--line);border-radius:999px;background:#fff;
+}
+
+@media(max-width:760px){
+  .onec-period-note{width:100%;margin-left:0}
+  .onec-comparison{min-height:250px;gap:12px;padding-inline:0}
+  .onec-comparison-group{min-width:78px;height:215px}
+  .onec-comparison-bars{height:180px;gap:6px}
+  .onec-comparison-bars b{font-size:7px}
+}
