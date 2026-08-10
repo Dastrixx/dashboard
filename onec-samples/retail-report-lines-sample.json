@@ -1,0 +1,211 @@
+{
+  "document": {
+    "refKey": "068e3aad-e006-11f0-80c3-aa294801d716",
+    "number": "0000-000002",
+    "date": "2025-12-23T19:48:15",
+    "revenue": 29915,
+    "returns": 1236
+  },
+  "items": [
+    {
+      "lineNumber": "1",
+      "productKey": "02336498-db1d-11f0-80c0-e1193b635b5f",
+      "quantity": 1,
+      "price": 1470,
+      "amount": 1470,
+      "warehouseKey": "58b9061d-3781-11ea-8413-74d435de191b",
+      "sellerKey": "00000000-0000-0000-0000-000000000000",
+      "discountPercent": 0
+    },
+    {
+      "lineNumber": "2",
+      "productKey": "f0e7695f-db1d-11f0-80c0-e1193b635b5f",
+      "quantity": 1,
+      "price": 700,
+      "amount": 700,
+      "warehouseKey": "58b9061d-3781-11ea-8413-74d435de191b",
+      "sellerKey": "00000000-0000-0000-0000-000000000000",
+      "discountPercent": 0
+    },
+    {
+      "lineNumber": "3",
+      "productKey": "015ebe7f-db27-11f0-80c0-e1193b635b5f",
+      "quantity": 1,
+      "price": 275,
+      "amount": 220,
+      "warehouseKey": "58b9061d-3781-11ea-8413-74d435de191b",
+      "sellerKey": "00000000-0000-0000-0000-000000000000",
+      "discountPercent": 0
+    },
+    {
+      "lineNumber": "4",
+      "productKey": "ad2b6202-db27-11f0-80c0-e1193b635b5f",
+      "quantity": 2,
+      "price": 130,
+      "amount": 208,
+      "warehouseKey": "58b9061d-3781-11ea-8413-74d435de191b",
+      "sellerKey": "00000000-0000-0000-0000-000000000000",
+      "discountPercent": 0
+    },
+    {
+      "lineNumber": "5",
+      "productKey": "be7f78f2-db28-11f0-80c0-e1193b635b5f",
+      "quantity": 2,
+      "price": 525,
+      "amount": 840,
+      "warehouseKey": "58b9061d-3781-11ea-8413-74d435de191b",
+      "sellerKey": "00000000-0000-0000-0000-000000000000",
+      "discountPercent": 0
+    },
+    {
+      "lineNumber": "6",
+      "productKey": "5f6e1c97-db29-11f0-80c0-e1193b635b5f",
+      "quantity": 2,
+      "price": 320,
+      "amount": 512,
+      "warehouseKey": "58b9061d-3781-11ea-8413-74d435de191b",
+      "sellerKey": "00000000-0000-0000-0000-000000000000",
+      "discountPercent": 0
+    },
+    {
+      "lineNumber": "7",
+      "productKey": "79637602-dbfb-11f0-80c0-e1193b635b5f",
+      "quantity": 1,
+      "price": 700,
+      "amount": 560,
+      "warehouseKey": "58b9061d-3781-11ea-8413-74d435de191b",
+      "sellerKey": "00000000-0000-0000-0000-000000000000",
+      "discountPercent": 0
+    },
+    {
+      "lineNumber": "8",
+      "productKey": "94d1a1a7-df01-11f0-80c0-e1193b635b5f",
+      "quantity": 1,
+      "price": 1000,
+      "amount": 800,
+      "warehouseKey": "58b9061d-3781-11ea-8413-74d435de191b",
+      "sellerKey": "00000000-0000-0000-0000-000000000000",
+      "discountPercent": 0
+    },
+    {
+      "lineNumber": "9",
+      "productKey": "7383fb14-df02-11f0-80c0-e1193b635b5f",
+      "quantity": 1,
+      "price": 1520,
+      "amount": 1216,
+      "warehouseKey": "58b9061d-3781-11ea-8413-74d435de191b",
+      "sellerKey": "00000000-0000-0000-0000-000000000000",
+      "discountPercent": 0
+    },
+    {
+      "lineNumber": "10",
+      "productKey": "3e50bffe-df06-11f0-80c0-e1193b635b5f",
+      "quantity": 1,
+      "price": 910,
+      "amount": 728,
+      "warehouseKey": "58b9061d-3781-11ea-8413-74d435de191b",
+      "sellerKey": "00000000-0000-0000-0000-000000000000",
+      "discountPercent": 0
+    },
+    {
+      "lineNumber": "11",
+      "productKey": "21b8b367-df07-11f0-80c0-e1193b635b5f",
+      "quantity": 2,
+      "price": 1170,
+      "amount": 1872,
+      "warehouseKey": "58b9061d-3781-11ea-8413-74d435de191b",
+      "sellerKey": "00000000-0000-0000-0000-000000000000",
+      "discountPercent": 0
+    },
+    {
+      "lineNumber": "12",
+      "productKey": "e11947cf-d98d-11f0-bf9e-74563ce62df2",
+      "quantity": 2,
+      "price": 420,
+      "amount": 672,
+      "warehouseKey": "58b9061d-3781-11ea-8413-74d435de191b",
+      "sellerKey": "00000000-0000-0000-0000-000000000000",
+      "discountPercent": 0
+    },
+    {
+      "lineNumber": "13",
+      "productKey": "e11947d0-d98d-11f0-bf9e-74563ce62df2",
+      "quantity": 3,
+      "price": 350,
+      "amount": 805,
+      "warehouseKey": "58b9061d-3781-11ea-8413-74d435de191b",
+      "sellerKey": "00000000-0000-0000-0000-000000000000",
+      "discountPercent": 0
+    },
+    {
+      "lineNumber": "14",
+      "productKey": "e11947d2-d98d-11f0-bf9e-74563ce62df2",
+      "quantity": 8,
+      "price": 60,
+      "amount": 384,
+      "warehouseKey": "58b9061d-3781-11ea-8413-74d435de191b",
+      "sellerKey": "00000000-0000-0000-0000-000000000000",
+      "discountPercent": 0
+    },
+    {
+      "lineNumber": "15",
+      "productKey": "e11947d4-d98d-11f0-bf9e-74563ce62df2",
+      "quantity": 3,
+      "price": 190,
+      "amount": 456,
+      "warehouseKey": "58b9061d-3781-11ea-8413-74d435de191b",
+      "sellerKey": "00000000-0000-0000-0000-000000000000",
+      "discountPercent": 0
+    },
+    {
+      "lineNumber": "16",
+      "productKey": "e11947d5-d98d-11f0-bf9e-74563ce62df2",
+      "quantity": 5,
+      "price": 170,
+      "amount": 680,
+      "warehouseKey": "58b9061d-3781-11ea-8413-74d435de191b",
+      "sellerKey": "00000000-0000-0000-0000-000000000000",
+      "discountPercent": 0
+    },
+    {
+      "lineNumber": "17",
+      "productKey": "e11947d6-d98d-11f0-bf9e-74563ce62df2",
+      "quantity": 1,
+      "price": 70,
+      "amount": 56,
+      "warehouseKey": "58b9061d-3781-11ea-8413-74d435de191b",
+      "sellerKey": "00000000-0000-0000-0000-000000000000",
+      "discountPercent": 0
+    },
+    {
+      "lineNumber": "18",
+      "productKey": "e11947dc-d98d-11f0-bf9e-74563ce62df2",
+      "quantity": 1,
+      "price": 140,
+      "amount": 112,
+      "warehouseKey": "58b9061d-3781-11ea-8413-74d435de191b",
+      "sellerKey": "00000000-0000-0000-0000-000000000000",
+      "discountPercent": 0
+    },
+    {
+      "lineNumber": "19",
+      "productKey": "e11947df-d98d-11f0-bf9e-74563ce62df2",
+      "quantity": 4,
+      "price": 950,
+      "amount": 3040,
+      "warehouseKey": "58b9061d-3781-11ea-8413-74d435de191b",
+      "sellerKey": "00000000-0000-0000-0000-000000000000",
+      "discountPercent": 0
+    },
+    {
+      "lineNumber": "20",
+      "productKey": "e1195177-d98d-11f0-bf9e-74563ce62df2",
+      "quantity": 1,
+      "price": 3750,
+      "amount": 3000,
+      "warehouseKey": "58b9061d-3781-11ea-8413-74d435de191b",
+      "sellerKey": "00000000-0000-0000-0000-000000000000",
+      "discountPercent": 0
+    }
+  ]
+}
