@@ -69,6 +69,8 @@ app.get("/api/onec/metadata", async (_request, response) => {
   }
 });
 
+const referenceCache = new Map();
+
 const GUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -85,15 +87,28 @@ async function loadReferencesByKeys(entity, keys, select) {
   ];
 
   const references = [];
+  const missingKeys = [];
 
-  for (let index = 0; index < uniqueKeys.length; index += 5) {
-    const chunk = uniqueKeys.slice(index, index + 5);
+  for (const key of uniqueKeys) {
+    const cacheKey = `${entity}:${key}`;
+
+    if (referenceCache.has(cacheKey)) {
+      references.push(referenceCache.get(cacheKey));
+    } else {
+      missingKeys.push(key);
+    }
+  }
+
+  for (let index = 0; index < missingKeys.length; index += 5) {
+    const chunk = missingKeys.slice(index, index + 5);
     const chunkResults = await Promise.all(
       chunk.map(async (key) => {
         try {
-          return await onecGetByKey(entity, key, {
+          const item = await onecGetByKey(entity, key, {
             $select: select,
           });
+          referenceCache.set(`${entity}:${key}`, item);
+          return item;
         } catch (error) {
           console.warn(
             `Не удалось получить ${entity} с ключом ${key}:`,
@@ -163,6 +178,7 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
           "Description",
           "НаименованиеПолное",
           "Артикул",
+          "ТоварнаяГруппа_Key",
         ].join(","),
       ),
       loadReferencesByKeys(
@@ -178,11 +194,21 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
       ),
     ]);
 
+    const categoryKeys = products.map(
+      (product) => product.ТоварнаяГруппа_Key,
+    );
+    const categories = await loadReferencesByKeys(
+      "Catalog_ТоварныеГруппы",
+      categoryKeys,
+      "Ref_Key,Code,Description",
+    );
+
     response.json({
       items,
       references: {
         products,
         warehouses,
+        categories,
       },
     });
   } catch (error) {
