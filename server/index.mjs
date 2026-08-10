@@ -74,6 +74,79 @@ const referenceCache = new Map();
 const GUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const RETAIL_REPORT_ENTITY = "Document_ОтчетОРозничныхПродажах";
+const RETAIL_REPORT_SELECT = [
+  "Ref_Key",
+  "Number",
+  "Date",
+  "Posted",
+  "СуммаДокумента",
+  "СуммаВозвратов",
+  "Магазин_Key",
+  "КассаККМ_Key",
+  "Товары",
+].join(",");
+
+function toOdataDateTime(timestamp) {
+  return new Date(timestamp).toISOString().replace(/\.\d{3}Z$/, "");
+}
+
+async function loadReportPages({ limit, days }) {
+  const configuredPageSize = Number(process.env.ONEC_PAGE_SIZE || 25);
+  const pageSize = Math.min(Math.max(configuredPageSize, 1), 100);
+
+  const latest = await onecGet(RETAIL_REPORT_ENTITY, {
+    $top: 1,
+    $select: "Date",
+    $filter: "Posted eq true",
+    $orderby: "Date desc",
+  });
+
+  if (!latest.length) {
+    return [];
+  }
+
+  const latestTimestamp = new Date(latest[0].Date).getTime();
+  const fromTimestamp = latestTimestamp - days * 86_400_000;
+  const dateFilter = [
+    "Posted eq true",
+    `Date ge datetime'${toOdataDateTime(fromTimestamp)}'`,
+  ].join(" and ");
+
+  async function load(filter) {
+    const result = [];
+
+    while (result.length < limit) {
+      const currentPageSize = Math.min(pageSize, limit - result.length);
+      const page = await onecGet(RETAIL_REPORT_ENTITY, {
+        $top: currentPageSize,
+        $skip: result.length,
+        $select: RETAIL_REPORT_SELECT,
+        $filter: filter,
+        $orderby: "Date desc",
+      });
+
+      result.push(...page);
+
+      if (page.length < currentPageSize) {
+        break;
+      }
+    }
+
+    return result;
+  }
+
+  try {
+    return await load(dateFilter);
+  } catch (error) {
+    console.warn(
+      "1С не приняла фильтр по дате, используем постраничную загрузку:",
+      error instanceof Error ? error.message : error,
+    );
+    return load("Posted eq true");
+  }
+}
+
 async function loadReferencesByKeys(entity, keys, select) {
   const uniqueKeys = [
     ...new Set(
@@ -131,25 +204,12 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
       Math.max(Number(request.query.top) || 1, 1),
       500,
     );
-
-    const items = await onecGet(
-      "Document_ОтчетОРозничныхПродажах",
-      {
-        $top: top,
-        $select: [
-          "Ref_Key",
-          "Number",
-          "Date",
-          "Posted",
-          "СуммаДокумента",
-          "СуммаВозвратов",
-          "Магазин_Key",
-          "КассаККМ_Key",
-          "Товары",
-        ].join(","),
-        $orderby: "Date desc",
-      },
+    const days = Math.min(
+      Math.max(Number(request.query.days) || 60, 1),
+      365,
     );
+
+    const items = await loadReportPages({ limit: top, days });
 
     if (request.query.references === "false") {
       return response.json({
@@ -157,7 +217,9 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
         references: {
           products: [],
           warehouses: [],
+          categories: [],
         },
+        meta: { loaded: items.length, days },
       });
     }
 
@@ -210,6 +272,7 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
         warehouses,
         categories,
       },
+      meta: { loaded: items.length, days },
     });
   } catch (error) {
     console.error("Ошибка загрузки отчётов 1С:", error);
