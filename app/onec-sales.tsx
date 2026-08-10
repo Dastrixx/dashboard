@@ -28,6 +28,7 @@ type OnecProductReference = {
   Ref_Key: string;
   Code: string;
   Description: string;
+  НаименованиеПолное: string;
   Артикул: string;
 };
 
@@ -152,6 +153,7 @@ export function OnecSales() {
 
       return [
         product?.Description,
+        product?.НаименованиеПолное,
         product?.Артикул,
         product?.Code,
         warehouse?.Description,
@@ -320,7 +322,9 @@ export function OnecSales() {
                     <td>{item.LineNumber}</td>
                     <td>
                       <strong>
-                        {product?.Description || "Товар без наименования"}
+                        {product?.Description ||
+                          product?.НаименованиеПолное ||
+                          "Название не найдено в справочнике"}
                       </strong>
                       <small className="onec-key">
                         {item.Номенклатура_Key}
