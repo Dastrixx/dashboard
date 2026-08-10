@@ -820,6 +820,53 @@ body{overflow-x:hidden}
   display:block;height:100%;border-radius:999px;
   background:linear-gradient(90deg,var(--green2),#28a879);
 }
+.onec-real-analysis-grid{grid-template-columns:minmax(0,1.45fr) minmax(320px,1fr)}
+.onec-revenue-panel,.onec-category-panel{min-height:480px}
+.onec-revenue-chart{
+  position:relative;min-height:380px;padding:78px 4px 28px 58px;
+}
+.onec-revenue-chart svg{display:block;width:100%;height:275px;overflow:visible}
+.onec-chart-gridline{stroke:#e2ebe6;stroke-width:2}
+.onec-revenue-line{
+  fill:none;stroke-linecap:round;stroke-linejoin:round;stroke-width:4;
+}
+.onec-revenue-line.current{stroke:var(--green2)}
+.onec-revenue-line.previous{stroke:#afbbb5;stroke-width:3;stroke-dasharray:8 8}
+.onec-revenue-point{fill:var(--green2);stroke:#fff;stroke-width:2;opacity:.72}
+.onec-chart-maximum{
+  position:absolute;right:8px;top:12px;display:flex;align-items:center;gap:11px;
+  min-height:42px;padding:0 13px;border:1px solid #cce1d7;border-radius:11px;
+  background:#fff;box-shadow:0 7px 18px rgba(18,74,54,.06);
+}
+.onec-chart-maximum span{
+  color:var(--muted);font-size:8px;text-transform:uppercase;letter-spacing:.06em;
+}
+.onec-chart-maximum strong{color:var(--green2);font-size:11px}
+.onec-chart-y-axis{
+  position:absolute;left:0;top:82px;bottom:35px;display:flex;
+  flex-direction:column;justify-content:space-between;color:#96a39d;font-size:8px;
+}
+.onec-chart-x-axis{
+  display:flex;justify-content:space-between;padding:0 4px;
+  color:#96a39d;font-size:8px;
+}
+.onec-category-panel .onec-category-list{
+  max-height:390px;padding-right:5px;overflow-y:auto;
+}
+.onec-abc-summary{padding:25px}
+.onec-abc-summary .panel-head{margin-bottom:20px}
+.onec-abc-summary .panel-head h2{font-size:18px}
+.onec-abc-summary-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:13px}
+.onec-abc-summary-card{
+  min-height:86px;padding:17px 20px;display:grid;
+  grid-template-columns:36px 1fr auto;align-items:center;gap:10px;border-radius:12px;
+}
+.onec-abc-summary-card b{font-size:18px}
+.onec-abc-summary-card strong{font-size:24px;letter-spacing:-.04em}
+.onec-abc-summary-card span{font-size:9px;white-space:nowrap}
+.onec-abc-summary-card.a{background:#e4f1eb;color:#28684f}
+.onec-abc-summary-card.b{background:#fff1d7;color:#99691d}
+.onec-abc-summary-card.c{background:#eef1ef;color:#68736d}
 .onec-ranking-section{display:flex;flex-direction:column;gap:16px}
 .onec-ranking-toolbar{
   display:flex;align-items:flex-end;justify-content:space-between;gap:24px;
@@ -895,6 +942,15 @@ body{overflow-x:hidden}
   .onec-comparison-group{min-width:78px;height:215px}
   .onec-comparison-bars{height:180px;gap:6px}
   .onec-comparison-bars b{font-size:7px}
+  .onec-real-analysis-grid{grid-template-columns:1fr}
+  .onec-revenue-panel,.onec-category-panel{min-height:0}
+  .onec-revenue-chart{min-height:310px;padding:72px 0 24px 42px}
+  .onec-revenue-chart svg{height:220px}
+  .onec-chart-y-axis{top:78px;bottom:31px}
+  .onec-chart-maximum{right:0}
+  .onec-abc-summary{padding:18px}
+  .onec-abc-summary-grid{grid-template-columns:1fr}
+  .onec-abc-summary-card{min-height:72px}
   .onec-ranking-toolbar{align-items:stretch;flex-direction:column}
   .onec-ranking-filters{align-items:stretch;flex-direction:column}
   .onec-ranking-filters .select-control{width:100%;min-width:0}
