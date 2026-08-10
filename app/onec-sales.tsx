@@ -122,7 +122,7 @@ export function OnecSales() {
         setError("");
 
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-reports?top=500`,
+          `${API_URL}/api/dashboard/onec-reports?top=500&days=60`,
           { signal: controller.signal },
         );
         const data = (await response.json()) as Partial<OnecResponse>;
