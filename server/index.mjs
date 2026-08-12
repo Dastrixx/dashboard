@@ -298,18 +298,21 @@ app.get("/api/dashboard/onec-product-categories", async (request, response) => {
       ].join(","),
     });
 
+    const productKindSelect = [
+      "Ref_Key",
+      "Code",
+      "Description",
+      "ТоварнаяГруппа_Key",
+      "ТоварнаяКатегория_Key",
+    ].join(",");
     const [productKinds, productGroups] = await Promise.all([
-      loadReferencesByKeys(
-        "Catalog_ВидыНоменклатуры",
-        products.map((product) => product.ВидНоменклатуры_Key),
-        [
-          "Ref_Key",
-          "Code",
-          "Description",
-          "ТоварнаяГруппа_Key",
-          "ТоварнаяКатегория_Key",
-        ].join(","),
-      ),
+      // В этой базе запрос Catalog_*(guid'...') может не вернуть запись.
+      // Справочник видов номенклатуры небольшой, поэтому надёжнее загрузить
+      // его целиком и сопоставить ключи в памяти.
+      onecGet("Catalog_ВидыНоменклатуры", {
+        $top: 500,
+        $select: productKindSelect,
+      }),
       loadReferencesByKeys(
         "Catalog_ТоварныеГруппы",
         products.map((product) => product.ТоварнаяГруппа_Key),
@@ -335,6 +338,20 @@ app.get("/api/dashboard/onec-product-categories", async (request, response) => {
     response.json({
       items: {
         productKinds: kinds,
+        availableProductKinds: productKinds
+          .filter(
+            (kind) =>
+              kind.Ref_Key &&
+              kind.Ref_Key !== EMPTY_GUID &&
+              kind.Description,
+          )
+          .map((kind) => ({
+            key: kind.Ref_Key,
+            code: kind.Code,
+            name: kind.Description,
+            productCategoryKey: kind.ТоварнаяКатегория_Key,
+            productGroupKey: kind.ТоварнаяГруппа_Key,
+          })),
         productGroups: groups,
         productCategoryKeys: categoryKeys,
       },
