@@ -569,9 +569,15 @@ export function OnecSales() {
       share: rows.reduce((sum, row) => sum + row.share, 0),
     };
   });
+  const referencesReady =
+    loadMeta?.referencesLoaded === true && !referenceError;
 
   return (
-    <div className="page-stack onec-product-analytics">
+    <div
+      className={`page-stack onec-product-analytics ${
+        referencesReady ? "" : "references-pending"
+      }`}
+    >
       <section className="analytics-filter-bar">
         <div className="filter-copy">
           <span>Период анализа</span>
@@ -739,6 +745,31 @@ export function OnecSales() {
           </div>
         </article>
       </section>
+
+      {referencesLoading && (
+        <section
+          className="panel onec-reference-skeleton"
+          aria-busy="true"
+          aria-label="Загрузка названий товаров"
+        >
+          <div className="panel-head">
+            <div>
+              <h2>Подготавливаем товары</h2>
+              <p>Загружаем названия, артикулы и категории из 1С</p>
+            </div>
+            <span className="onec-spinner" />
+          </div>
+          <div className="onec-skeleton-list" aria-hidden="true">
+            {Array.from({ length: 6 }, (_, index) => (
+              <div key={index}>
+                <i />
+                <span />
+                <b />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="onec-ranking-section">
         <header className="onec-ranking-toolbar">
