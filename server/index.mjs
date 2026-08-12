@@ -77,10 +77,33 @@ app.get("/api/onec/metadata", async (_request, response) => {
 
 const referenceCache = new Map();
 const reportCache = new Map();
+let productKindsCache = null;
 
 const GUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMPTY_GUID = "00000000-0000-0000-0000-000000000000";
+const BUSINESS_CATEGORIES = [
+  {
+    Ref_Key: "home-textile",
+    Description: "Домашний текстиль",
+    aliases: ["домашний текстиль", "плед"],
+  },
+  {
+    Ref_Key: "tableware",
+    Description: "Посуда",
+    aliases: ["посуда", "посуда китай"],
+  },
+  {
+    Ref_Key: "clothing",
+    Description: "Одежда",
+    aliases: ["одежда"],
+  },
+  {
+    Ref_Key: "household-chemicals",
+    Description: "Бытовая химия",
+    aliases: ["детская химия", "мыломойка", "бытовая химия"],
+  },
+];
 
 const RETAIL_REPORT_ENTITY = "Document_ОтчетОРозничныхПродажах";
 const RETAIL_REPORT_SELECT = [
@@ -243,6 +266,80 @@ async function loadReferencesByKeysBatched(entity, keys, select) {
   return loadReferencesByKeys(entity, keys, select);
 }
 
+function normalizeReferenceName(value) {
+  return String(value || "")
+    .trim()
+    .toLocaleLowerCase("ru-RU")
+    .replace(/\s+/g, " ");
+}
+
+function resolveBusinessCategory(kindName) {
+  const normalizedName = normalizeReferenceName(kindName);
+
+  return (
+    BUSINESS_CATEGORIES.find((category) =>
+      category.aliases.some((alias) => normalizedName === alias),
+    ) || null
+  );
+}
+
+async function loadProductKindsCatalog() {
+  const now = Date.now();
+
+  if (productKindsCache?.items && productKindsCache.expiresAt > now) {
+    return productKindsCache.items;
+  }
+
+  if (productKindsCache?.promise) {
+    return productKindsCache.promise;
+  }
+
+  const promise = onecGet("Catalog_ВидыНоменклатуры", {
+    $top: 500,
+    $select: [
+      "Ref_Key",
+      "Description",
+      "ТоварнаяГруппа_Key",
+      "ТоварнаяКатегория_Key",
+    ].join(","),
+  });
+  productKindsCache = { promise, expiresAt: now + 600_000 };
+
+  try {
+    const items = await promise;
+    productKindsCache = { items, expiresAt: Date.now() + 600_000 };
+    return items;
+  } catch (error) {
+    productKindsCache = null;
+    throw error;
+  }
+}
+
+function enrichProductsWithBusinessCategories(products, productKinds) {
+  const kindByKey = new Map(
+    productKinds.map((kind) => [kind.Ref_Key, kind]),
+  );
+
+  return products.map((product) => {
+    const kind = kindByKey.get(product.ВидНоменклатуры_Key);
+    const category = resolveBusinessCategory(kind?.Description);
+
+    return {
+      ...product,
+      ВидНоменклатуры: kind?.Description || null,
+      BusinessCategory_Key: category?.Ref_Key || null,
+      BusinessCategory: category?.Description || null,
+    };
+  });
+}
+
+function publicBusinessCategories() {
+  return BUSINESS_CATEGORIES.map(({ Ref_Key, Description }) => ({
+    Ref_Key,
+    Description,
+  }));
+}
+
 function summarizeProductReference(products, field, references = []) {
   const referenceByKey = new Map(
     references.map((reference) => [reference.Ref_Key, reference]),
@@ -298,20 +395,11 @@ app.get("/api/dashboard/onec-product-categories", async (request, response) => {
       ].join(","),
     });
 
-    const productKindSelect = [
-      "Ref_Key",
-      "Description",
-      "ТоварнаяГруппа_Key",
-      "ТоварнаяКатегория_Key",
-    ].join(",");
     const [productKinds, productGroups] = await Promise.all([
       // В этой базе запрос Catalog_*(guid'...') может не вернуть запись.
       // Справочник видов номенклатуры небольшой, поэтому надёжнее загрузить
       // его целиком и сопоставить ключи в памяти.
-      onecGet("Catalog_ВидыНоменклатуры", {
-        $top: 500,
-        $select: productKindSelect,
-      }),
+      loadProductKindsCatalog(),
       loadReferencesByKeys(
         "Catalog_ТоварныеГруппы",
         products.map((product) => product.ТоварнаяГруппа_Key),
@@ -323,7 +411,11 @@ app.get("/api/dashboard/onec-product-categories", async (request, response) => {
       products,
       "ВидНоменклатуры_Key",
       productKinds,
-    );
+    ).map((item) => ({
+      ...item,
+      businessCategory: resolveBusinessCategory(item.name)?.Description || null,
+      businessCategoryKey: resolveBusinessCategory(item.name)?.Ref_Key || null,
+    }));
     const groups = summarizeProductReference(
       products,
       "ТоварнаяГруппа_Key",
@@ -803,7 +895,7 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
         (document) => document.Склад_Key,
       ),
     );
-    const [products, warehouses, suppliers] = await Promise.all([
+    const [rawProducts, warehouses, suppliers, productKinds] = await Promise.all([
       loadReferencesByKeysBatched(
         "Catalog_Номенклатура",
         productKeys,
@@ -813,7 +905,7 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
           "Description",
           "НаименованиеПолное",
           "Артикул",
-          "ТоварнаяГруппа_Key",
+          "ВидНоменклатуры_Key",
         ].join(","),
       ),
       loadReferencesByKeysBatched(
@@ -826,16 +918,23 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
         receipts.map((item) => item.Контрагент_Key),
         "Ref_Key,Code,Description,НаименованиеПолное",
       ),
+      loadProductKindsCatalog(),
     ]);
-    const categories = await loadReferencesByKeysBatched(
-      "Catalog_ТоварныеГруппы",
-      products.map((item) => item.ТоварнаяГруппа_Key),
-      "Ref_Key,Code,Description",
+    const products = enrichProductsWithBusinessCategories(
+      rawProducts,
+      productKinds,
     );
+    const categories = publicBusinessCategories();
 
     response.json({
       items: balances,
-      references: { products, warehouses, categories, suppliers },
+      references: {
+        products,
+        warehouses,
+        categories,
+        productKinds,
+        suppliers,
+      },
       operations: { receipts, writeOffs, recounts },
       meta: {
         loaded: balances.length,
@@ -895,7 +994,7 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
       (report.Товары || []).map((line) => line.Склад_Key),
     );
 
-    const [products, warehouses] = await Promise.all([
+    const [rawProducts, warehouses, productKinds] = await Promise.all([
       loadReferencesByKeys(
         "Catalog_Номенклатура",
         productKeys,
@@ -905,7 +1004,7 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
           "Description",
           "НаименованиеПолное",
           "Артикул",
-          "ТоварнаяГруппа_Key",
+          "ВидНоменклатуры_Key",
         ].join(","),
       ),
       loadReferencesByKeys(
@@ -919,16 +1018,13 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
           "Магазин_Key",
         ].join(","),
       ),
+      loadProductKindsCatalog(),
     ]);
-
-    const categoryKeys = products.map(
-      (product) => product.ТоварнаяГруппа_Key,
+    const products = enrichProductsWithBusinessCategories(
+      rawProducts,
+      productKinds,
     );
-    const categories = await loadReferencesByKeys(
-      "Catalog_ТоварныеГруппы",
-      categoryKeys,
-      "Ref_Key,Code,Description",
-    );
+    const categories = publicBusinessCategories();
 
     response.json({
       items,
@@ -936,6 +1032,7 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
         products,
         warehouses,
         categories,
+        productKinds,
       },
       meta: {
         loaded: items.length,
