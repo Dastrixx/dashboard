@@ -486,12 +486,15 @@ export function OnecStock() {
       (payload.references?.suppliers || []).map((item) => [item.Ref_Key, item]),
     );
 
-    const matchesWarehouse = (key: string) => {
-      if (warehouseKey !== "all" && key !== warehouseKey) return false;
+    const matchesWarehouseType = (key: string) => {
       if (warehouseMode === "all") return true;
       const kind = warehouses.get(key)?.ТипСклада || "";
       if (warehouseMode === "sales-floor") return kind === "ТорговыйЗал";
       return kind === "СкладскоеПомещение";
+    };
+    const matchesWarehouse = (key: string) => {
+      if (warehouseKey !== "all" && key !== warehouseKey) return false;
+      return matchesWarehouseType(key);
     };
 
     const grouped = new Map<
@@ -642,9 +645,14 @@ export function OnecStock() {
       totalReserved: rows.reduce((sum, item) => sum + item.reserved, 0),
       zero: rows.filter((item) => item.status === "zero").length,
       low: rows.filter((item) => item.status === "low").length,
-      warehouses: [...warehouses.values()].sort((left, right) =>
-        (left.Description || "").localeCompare(right.Description || "", "ru"),
-      ),
+      availableWarehouses: [...warehouses.values()]
+        .filter((item) => matchesWarehouseType(item.Ref_Key))
+        .sort((left, right) =>
+          (left.Description || "").localeCompare(
+            right.Description || "",
+            "ru",
+          ),
+        ),
       receiptChart,
       maxReceiptSku,
       recentReceipts: receipts.slice(0, 5).map((document) => ({
@@ -725,37 +733,46 @@ export function OnecStock() {
         </div>
         <div className="stock-warehouse-controls">
           <label className="stock-warehouse-select">
-            <span>Конкретный склад</span>
+            <span>Выберите склад</span>
             <select
               onChange={(event) => setWarehouseKey(event.target.value)}
               value={warehouseKey}
             >
-              <option value="all">Все склады</option>
-              {view.warehouses.map((item) => (
+              <option value="all">
+                {warehouseMode === "sales-floor"
+                  ? "Все торговые залы"
+                  : warehouseMode === "warehouse"
+                    ? "Все склады"
+                    : "Все помещения"}
+              </option>
+              {view.availableWarehouses.map((item) => (
                 <option key={item.Ref_Key} value={item.Ref_Key}>
                   {item.Description || item.Code || "Склад без названия"}
                 </option>
               ))}
             </select>
           </label>
-          <div className="warehouse-selector" aria-label="Выбор типа склада">
-            {[
-              ["all", "Все"],
-              ["sales-floor", "Торговый зал"],
-              ["warehouse", "Склад"],
-            ].map(([value, label]) => (
-              <button
-                className={warehouseMode === value ? "active" : ""}
-                key={value}
-                onClick={() => {
-                  setWarehouseMode(value);
-                  setWarehouseKey("all");
-                }}
-                type="button"
-              >
-                {label}
-              </button>
-            ))}
+          <div className="stock-warehouse-type">
+            <span>Тип помещения</span>
+            <div className="warehouse-selector" aria-label="Выбор типа помещения">
+              {[
+                ["all", "Все"],
+                ["sales-floor", "Торговый зал"],
+                ["warehouse", "Склад"],
+              ].map(([value, label]) => (
+                <button
+                  className={warehouseMode === value ? "active" : ""}
+                  key={value}
+                  onClick={() => {
+                    setWarehouseMode(value);
+                    setWarehouseKey("all");
+                  }}
+                  type="button"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </section>
