@@ -56,6 +56,13 @@ type OnecResponse = {
     warehouses: OnecWarehouseReference[];
     categories: OnecCategoryReference[];
   };
+  meta?: {
+    loaded?: number;
+    days?: number;
+    cache?: "hit" | "miss" | "shared";
+    durationMs?: number;
+    referencesLoaded?: boolean;
+  };
   message?: string;
 };
 
@@ -214,6 +221,9 @@ export function OnecSales() {
   const [antiLimit, setAntiLimit] = useState(10);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [referencesLoading, setReferencesLoading] = useState(false);
+  const [referenceError, setReferenceError] = useState("");
+  const [loadMeta, setLoadMeta] = useState<OnecResponse["meta"]>();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -224,7 +234,7 @@ export function OnecSales() {
         setError("");
 
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-reports?top=500&days=60`,
+          `${API_URL}/api/dashboard/onec-reports?top=500&days=60&references=false`,
           { signal: controller.signal },
         );
         const data = (await response.json()) as Partial<OnecResponse>;
@@ -238,21 +248,57 @@ export function OnecSales() {
             ? data.items.filter((item) => item.Posted)
             : [],
         );
-        setProducts(
-          Array.isArray(data.references?.products)
-            ? data.references.products
-            : [],
-        );
-        setWarehouses(
-          Array.isArray(data.references?.warehouses)
-            ? data.references.warehouses
-            : [],
-        );
-        setCategories(
-          Array.isArray(data.references?.categories)
-            ? data.references.categories
-            : [],
-        );
+        setLoadMeta(data.meta);
+        setLoading(false);
+
+        setReferencesLoading(true);
+        setReferenceError("");
+
+        try {
+          const referenceResponse = await fetch(
+            `${API_URL}/api/dashboard/onec-reports?top=500&days=60`,
+            { signal: controller.signal },
+          );
+          const referenceData = (await referenceResponse.json()) as Partial<OnecResponse>;
+
+          if (!referenceResponse.ok) {
+            throw new Error(
+              referenceData.message || `Ошибка HTTP ${referenceResponse.status}`,
+            );
+          }
+
+          setProducts(
+            Array.isArray(referenceData.references?.products)
+              ? referenceData.references.products
+              : [],
+          );
+          setWarehouses(
+            Array.isArray(referenceData.references?.warehouses)
+              ? referenceData.references.warehouses
+              : [],
+          );
+          setCategories(
+            Array.isArray(referenceData.references?.categories)
+              ? referenceData.references.categories
+              : [],
+          );
+          setLoadMeta(referenceData.meta);
+        } catch (referenceLoadError) {
+          if (
+            referenceLoadError instanceof DOMException &&
+            referenceLoadError.name === "AbortError"
+          ) {
+            return;
+          }
+
+          setReferenceError(
+            referenceLoadError instanceof Error
+              ? referenceLoadError.message
+              : "Не удалось получить названия товаров",
+          );
+        } finally {
+          setReferencesLoading(false);
+        }
       } catch (loadError) {
         if (
           loadError instanceof DOMException &&
@@ -546,10 +592,20 @@ export function OnecSales() {
           ))}
         </div>
         <span className="onec-period-note">
-          Данные по состоянию на{" "}
-          {new Date(analytics.latestTimestamp).toLocaleDateString("ru-RU")}
+          {referencesLoading
+            ? "Аналитика готова · загружаем названия товаров…"
+            : `Данные по состоянию на ${new Date(
+                analytics.latestTimestamp,
+              ).toLocaleDateString("ru-RU")}`}
         </span>
       </section>
+
+      {referenceError && (
+        <section className="onec-reference-warning" role="status">
+          <strong>Продажи загружены, справочники временно недоступны.</strong>
+          <span>{referenceError}</span>
+        </section>
+      )}
 
       <section className="kpi-grid product-kpis">
         <article className="kpi-card">
@@ -991,8 +1047,14 @@ export function OnecSales() {
       </section>
 
       <section className="onec-document-footnote">
-        <span>Получено документов: {analytics.currentReports.length}</span>
+        <span>Получено документов: {reports.length}</span>
         <span>Складов в справочнике: {warehouses.length}</span>
+        <span>
+          Сервер: {loadMeta?.cache === "hit" ? "из кэша" : loadMeta?.cache === "shared" ? "общий запрос" : "из 1С"}
+          {typeof loadMeta?.durationMs === "number"
+            ? ` · ${loadMeta.durationMs} мс`
+            : ""}
+        </span>
       </section>
     </div>
   );
