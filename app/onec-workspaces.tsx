@@ -44,7 +44,10 @@ type StockReference = {
   Description?: string;
   НаименованиеПолное?: string;
   Артикул?: string;
-  ТоварнаяГруппа_Key?: string;
+  ВидНоменклатуры_Key?: string;
+  ВидНоменклатуры?: string | null;
+  BusinessCategory_Key?: string | null;
+  BusinessCategory?: string | null;
   ТипСклада?: string;
 };
 
@@ -514,7 +517,7 @@ export function OnecStock() {
 
     balances.filter((item) => matchesWarehouse(item.Склад_Key)).forEach((item) => {
       const product = products.get(item.Номенклатура_Key);
-      const categoryKey = product?.ТоварнаяГруппа_Key || "";
+      const categoryKey = product?.BusinessCategory_Key || "";
       const current = grouped.get(item.Номенклатура_Key) || {
         key: item.Номенклатура_Key,
         sku: product?.Артикул || product?.Code || "Без артикула",
@@ -523,7 +526,10 @@ export function OnecStock() {
           product?.Description ||
           `Товар ${item.Номенклатура_Key.slice(0, 8)}`,
         categoryKey,
-        category: categories.get(categoryKey)?.Description || "Без категории",
+        category:
+          product?.BusinessCategory ||
+          categories.get(categoryKey)?.Description ||
+          "Не классифицировано",
         quantity: 0,
         reserved: 0,
         cost: 0,
