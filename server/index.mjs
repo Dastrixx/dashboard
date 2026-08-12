@@ -300,7 +300,6 @@ app.get("/api/dashboard/onec-product-categories", async (request, response) => {
 
     const productKindSelect = [
       "Ref_Key",
-      "Code",
       "Description",
       "ТоварнаяГруппа_Key",
       "ТоварнаяКатегория_Key",
@@ -347,7 +346,6 @@ app.get("/api/dashboard/onec-product-categories", async (request, response) => {
           )
           .map((kind) => ({
             key: kind.Ref_Key,
-            code: kind.Code,
             name: kind.Description,
             productCategoryKey: kind.ТоварнаяКатегория_Key,
             productGroupKey: kind.ТоварнаяГруппа_Key,
