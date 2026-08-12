@@ -32,7 +32,10 @@ type OnecProductReference = {
   Description: string;
   НаименованиеПолное: string;
   Артикул: string;
-  ТоварнаяГруппа_Key: string;
+  ВидНоменклатуры_Key: string;
+  ВидНоменклатуры?: string | null;
+  BusinessCategory_Key?: string | null;
+  BusinessCategory?: string | null;
 };
 
 type OnecWarehouseReference = {
@@ -45,7 +48,7 @@ type OnecWarehouseReference = {
 
 type OnecCategoryReference = {
   Ref_Key: string;
-  Code: string;
+  Code?: string;
   Description: string;
 };
 
@@ -159,8 +162,9 @@ function buildProductRows(
           product?.НаименованиеПолное ||
           "Название не найдено",
         category:
-          categoryByKey.get(product?.ТоварнаяГруппа_Key || "") ||
-          "Без категории",
+          product?.BusinessCategory ||
+          categoryByKey.get(product?.BusinessCategory_Key || "") ||
+          "Не классифицировано",
         revenue: value.revenue,
         sold: value.sold,
         share: 0,
@@ -356,21 +360,23 @@ export function OnecSales() {
     );
 
     const rows = buildProductRows(currentReports, products, categories);
-    const totalProductRevenue =
-      rows.reduce((sum, item) => sum + item.revenue, 0) || 1;
-
-    const categoryMap = new Map<string, number>();
+    const categoryMap = new Map<string, number>(
+      categories.map((item) => [item.Description, 0]),
+    );
     rows.forEach((row) => {
+      if (!categoryMap.has(row.category)) return;
       categoryMap.set(
         row.category,
         (categoryMap.get(row.category) || 0) + row.revenue,
       );
     });
+    const categorizedRevenue =
+      [...categoryMap.values()].reduce((sum, value) => sum + value, 0) || 1;
     const categoryRows = [...categoryMap.entries()]
       .map(([label, value]) => ({
         label,
         value,
-        share: (value / totalProductRevenue) * 100,
+        share: (value / categorizedRevenue) * 100,
       }))
       .sort((left, right) => right.value - left.value);
 
@@ -440,8 +446,11 @@ export function OnecSales() {
   }, [categories, products, rankingPeriod, reports]);
 
   const rankingCategories = useMemo(
-    () => [...new Set(rankingRows.map((row) => row.category))].sort(),
-    [rankingRows],
+    () =>
+      categories
+        .map((item) => item.Description)
+        .filter((item) => rankingRows.some((row) => row.category === item)),
+    [categories, rankingRows],
   );
   const filteredRankingRows = useMemo(
     () =>
@@ -979,9 +988,9 @@ export function OnecSales() {
               }}
             >
               <option value="">Все категории</option>
-              {analytics.categoryRows.map((item) => (
-                <option value={item.label} key={item.label}>
-                  {item.label}
+              {categories.map((item) => (
+                <option value={item.Description} key={item.Ref_Key}>
+                  {item.Description}
                 </option>
               ))}
             </select>
