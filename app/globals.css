@@ -935,6 +935,12 @@ body{overflow-x:hidden}
 .onec-document-footnote span{
   padding:7px 10px;border:1px solid var(--line);border-radius:999px;background:#fff;
 }
+.onec-reference-warning{
+  display:flex;align-items:center;gap:10px;padding:11px 14px;border:1px solid #ead7ad;
+  border-radius:11px;background:#fff9eb;color:#755d29;font-size:9px;
+}
+.onec-reference-warning strong{font-size:9px}
+.onec-reference-warning span{color:#8b7443}
 
 @media(max-width:760px){
   .onec-period-note{width:100%;margin-left:0}
@@ -963,6 +969,7 @@ body{overflow-x:hidden}
   .onec-pagination{align-items:flex-start;flex-direction:column;padding:14px 18px}
   .onec-pagination nav{width:100%;justify-content:space-between}
   .onec-pagination button{min-width:36px}
+  .onec-reference-warning{align-items:flex-start;flex-direction:column}
 }
 
 /* Real 1C warehouse workspace */
