@@ -994,7 +994,8 @@ body{overflow-x:hidden}
 .stock-pagination nav>span{min-width:54px;text-align:center;color:var(--muted);font-size:9px}
 .stock-warehouse-controls{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;justify-content:flex-end}
 .stock-warehouse-select{display:flex;flex-direction:column;gap:5px}
-.stock-warehouse-select>span{color:var(--muted);font-size:8px;font-weight:700}
+.stock-warehouse-select>span,.stock-warehouse-type>span{color:var(--muted);font-size:8px;font-weight:700}
+.stock-warehouse-type{display:flex;flex-direction:column;gap:5px}
 .stock-warehouse-select select{
   width:250px;min-height:42px;padding:0 36px 0 12px;border:1px solid #d6e4dd;
   border-radius:10px;background:#fff;color:var(--ink);font-size:10px;font-weight:700;
@@ -1056,6 +1057,7 @@ body{overflow-x:hidden}
   .stock-next-card{min-height:0}
   .stock-warehouse-controls{width:100%;align-items:stretch;flex-direction:column}
   .stock-warehouse-select select{width:100%;min-height:44px}
+  .stock-warehouse-type{width:100%}
   .stock-receipt-chart{height:265px;gap:5px;overflow-x:auto}
   .stock-receipt-column{min-width:54px}
   .stock-receipt-bar-wrap{height:190px}
