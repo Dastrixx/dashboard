@@ -205,52 +205,10 @@ async function loadReferencesByKeys(entity, keys, select) {
 }
 
 async function loadReferencesByKeysBatched(entity, keys, select) {
-  const uniqueKeys = [
-    ...new Set(
-      keys.filter(
-        (key) =>
-          typeof key === "string" &&
-          GUID_PATTERN.test(key) &&
-          key !== "00000000-0000-0000-0000-000000000000",
-      ),
-    ),
-  ];
-  const result = [];
-  const missing = [];
-
-  uniqueKeys.forEach((key) => {
-    const cached = referenceCache.get(`${entity}:${key}`);
-    if (cached) result.push(cached);
-    else missing.push(key);
-  });
-
-  for (let index = 0; index < missing.length; index += 15) {
-    const chunk = missing.slice(index, index + 15);
-    const filter = chunk
-      .map((key) => `Ref_Key eq guid'${key}'`)
-      .join(" or ");
-
-    try {
-      const items = await onecGet(entity, {
-        $top: chunk.length,
-        $select: select,
-        $filter: filter,
-      });
-
-      for (const item of items) {
-        referenceCache.set(`${entity}:${item.Ref_Key}`, item);
-        result.push(item);
-      }
-    } catch (error) {
-      console.warn(
-        `1С не приняла пакетный запрос ${entity}, используем запросы по ключам:`,
-        error instanceof Error ? error.message : error,
-      );
-      result.push(...(await loadReferencesByKeys(entity, chunk, select)));
-    }
-  }
-
-  return result;
+  // Эта конфигурация 1С не разрешает OR-фильтр по Ref_Key и отвечает HTTP 500.
+  // Загружаем ссылки через адреса Catalog_*(guid'...') по пять параллельно.
+  // loadReferencesByKeys дедуплицирует ключи и использует общий in-memory кэш.
+  return loadReferencesByKeys(entity, keys, select);
 }
 
 app.get("/api/dashboard/onec-sellers", async (request, response) => {
