@@ -76,6 +76,7 @@ app.get("/api/onec/metadata", async (_request, response) => {
 });
 
 const referenceCache = new Map();
+const reportCache = new Map();
 
 const GUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -150,6 +151,36 @@ async function loadReportPages({ limit, days }) {
       error instanceof Error ? error.message : error,
     );
     return load("Posted eq true");
+  }
+}
+
+async function loadReportPagesCached({ limit, days }) {
+  const key = `${limit}:${days}`;
+  const now = Date.now();
+  const cached = reportCache.get(key);
+
+  if (cached?.items && cached.expiresAt > now) {
+    return { items: cached.items, cache: "hit" };
+  }
+
+  if (cached?.promise) {
+    return { items: await cached.promise, cache: "shared" };
+  }
+
+  const ttlMs = Math.max(
+    Number(process.env.ONEC_REPORT_CACHE_TTL_MS || 120_000),
+    10_000,
+  );
+  const promise = loadReportPages({ limit, days });
+  reportCache.set(key, { promise, expiresAt: now + ttlMs });
+
+  try {
+    const items = await promise;
+    reportCache.set(key, { items, expiresAt: Date.now() + ttlMs });
+    return { items, cache: "miss" };
+  } catch (error) {
+    reportCache.delete(key);
+    throw error;
   }
 }
 
@@ -701,7 +732,9 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
       365,
     );
 
-    const items = await loadReportPages({ limit: top, days });
+    const startedAt = Date.now();
+    const reportResult = await loadReportPagesCached({ limit: top, days });
+    const items = reportResult.items;
 
     if (request.query.references === "false") {
       return response.json({
@@ -711,7 +744,13 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
           warehouses: [],
           categories: [],
         },
-        meta: { loaded: items.length, days },
+        meta: {
+          loaded: items.length,
+          days,
+          cache: reportResult.cache,
+          durationMs: Date.now() - startedAt,
+          referencesLoaded: false,
+        },
       });
     }
 
@@ -764,7 +803,13 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
         warehouses,
         categories,
       },
-      meta: { loaded: items.length, days },
+      meta: {
+        loaded: items.length,
+        days,
+        cache: reportResult.cache,
+        durationMs: Date.now() - startedAt,
+        referencesLoaded: true,
+      },
     });
   } catch (error) {
     console.error("Ошибка загрузки отчётов 1С:", error);
