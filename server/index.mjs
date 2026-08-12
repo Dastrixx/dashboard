@@ -80,6 +80,7 @@ const reportCache = new Map();
 
 const GUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const EMPTY_GUID = "00000000-0000-0000-0000-000000000000";
 
 const RETAIL_REPORT_ENTITY = "Document_ОтчетОРозничныхПродажах";
 const RETAIL_REPORT_SELECT = [
@@ -241,6 +242,124 @@ async function loadReferencesByKeysBatched(entity, keys, select) {
   // loadReferencesByKeys дедуплицирует ключи и использует общий in-memory кэш.
   return loadReferencesByKeys(entity, keys, select);
 }
+
+function summarizeProductReference(products, field, references = []) {
+  const referenceByKey = new Map(
+    references.map((reference) => [reference.Ref_Key, reference]),
+  );
+  const summaryByKey = new Map();
+
+  for (const product of products) {
+    const key = product[field];
+
+    if (!GUID_PATTERN.test(key || "") || key === EMPTY_GUID) {
+      continue;
+    }
+
+    const current = summaryByKey.get(key) || {
+      key,
+      name: referenceByKey.get(key)?.Description || null,
+      productsCount: 0,
+      productExamples: [],
+    };
+
+    current.productsCount += 1;
+
+    if (current.productExamples.length < 5) {
+      current.productExamples.push({
+        key: product.Ref_Key,
+        code: product.Code,
+        article: product.Артикул,
+        name: product.Description,
+      });
+    }
+
+    summaryByKey.set(key, current);
+  }
+
+  return [...summaryByKey.values()].sort(
+    (left, right) => right.productsCount - left.productsCount,
+  );
+}
+
+app.get("/api/dashboard/onec-product-categories", async (request, response) => {
+  try {
+    const top = Math.min(Math.max(Number(request.query.top) || 500, 1), 500);
+    const products = await onecGet("Catalog_Номенклатура", {
+      $top: top,
+      $select: [
+        "Ref_Key",
+        "Code",
+        "Description",
+        "Артикул",
+        "ВидНоменклатуры_Key",
+        "ТоварнаяГруппа_Key",
+        "ТоварнаяКатегория_Key",
+      ].join(","),
+    });
+
+    const [productKinds, productGroups] = await Promise.all([
+      loadReferencesByKeys(
+        "Catalog_ВидыНоменклатуры",
+        products.map((product) => product.ВидНоменклатуры_Key),
+        [
+          "Ref_Key",
+          "Code",
+          "Description",
+          "ТоварнаяГруппа_Key",
+          "ТоварнаяКатегория_Key",
+        ].join(","),
+      ),
+      loadReferencesByKeys(
+        "Catalog_ТоварныеГруппы",
+        products.map((product) => product.ТоварнаяГруппа_Key),
+        "Ref_Key,Code,Description,Parent_Key,IsFolder",
+      ),
+    ]);
+
+    const kinds = summarizeProductReference(
+      products,
+      "ВидНоменклатуры_Key",
+      productKinds,
+    );
+    const groups = summarizeProductReference(
+      products,
+      "ТоварнаяГруппа_Key",
+      productGroups,
+    );
+    const categoryKeys = summarizeProductReference(
+      products,
+      "ТоварнаяКатегория_Key",
+    );
+
+    response.json({
+      items: {
+        productKinds: kinds,
+        productGroups: groups,
+        productCategoryKeys: categoryKeys,
+      },
+      references: { productKinds, productGroups },
+      meta: {
+        loadedProducts: products.length,
+        fields: {
+          productKinds: "ВидНоменклатуры_Key",
+          productGroups: "ТоварнаяГруппа_Key",
+          productCategoryKeys: "ТоварнаяКатегория_Key",
+        },
+        note:
+          "ТоварнаяКатегория_Key есть в карточке номенклатуры, но отдельный справочник товарных категорий не опубликован в standard.odata. Названия можно получить через ВидНоменклатуры, если именно там настроены четыре бизнес-категории.",
+      },
+    });
+  } catch (error) {
+    console.error("Ошибка определения категорий товаров 1С:", error);
+    response.status(502).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : "Не удалось определить категории товаров 1С",
+    });
+  }
+});
 
 app.get("/api/dashboard/onec-sellers", async (request, response) => {
   try {
