@@ -941,6 +941,25 @@ body{overflow-x:hidden}
 }
 .onec-reference-warning strong{font-size:9px}
 .onec-reference-warning span{color:#8b7443}
+.references-pending .onec-real-analysis-grid{grid-template-columns:1fr}
+.references-pending .onec-category-panel,
+.references-pending .onec-ranking-section,
+.references-pending .onec-abc-summary,
+.references-pending .onec-abc-panel{display:none}
+.onec-reference-skeleton{min-height:310px;padding:24px}
+.onec-reference-skeleton .panel-head{align-items:center}
+.onec-skeleton-list{display:grid;grid-template-columns:1fr 1fr;gap:12px 22px}
+.onec-skeleton-list>div{
+  display:grid;grid-template-columns:34px minmax(120px,1fr) 90px;align-items:center;
+  gap:11px;min-height:52px;padding:10px 0;border-top:1px solid var(--line);
+}
+.onec-skeleton-list i,.onec-skeleton-list span,.onec-skeleton-list b{
+  display:block;border-radius:7px;background:linear-gradient(90deg,#edf2ef 20%,#f8faf9 45%,#edf2ef 70%);
+  background-size:240% 100%;animation:onec-skeleton-pulse 1.35s ease-in-out infinite;
+}
+.onec-skeleton-list i{width:30px;height:30px;border-radius:50%}
+.onec-skeleton-list span{height:12px}.onec-skeleton-list b{height:10px}
+@keyframes onec-skeleton-pulse{to{background-position:-240% 0}}
 
 @media(max-width:760px){
   .onec-period-note{width:100%;margin-left:0}
@@ -970,6 +989,8 @@ body{overflow-x:hidden}
   .onec-pagination nav{width:100%;justify-content:space-between}
   .onec-pagination button{min-width:36px}
   .onec-reference-warning{align-items:flex-start;flex-direction:column}
+  .onec-reference-skeleton{min-height:260px;padding:18px}
+  .onec-skeleton-list{grid-template-columns:1fr}
 }
 
 /* Real 1C warehouse workspace */
