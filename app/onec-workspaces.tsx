@@ -126,6 +126,8 @@ type SellerPayload = {
       turnoverRows?: number;
       turnoverRowsWithSeller?: number;
       scannedChecks?: number;
+      scannedCashShifts?: number;
+      checksWithAssignedEmployee?: number;
       scannedPremiumRows?: number;
       scannedRealizations?: number;
       resultRows?: number;
@@ -1266,8 +1268,8 @@ export function OnecTeam() {
     return (
       <MissingSource
         title="Продажи продавцов по филиалам"
-        description="Продажи в 1С найдены, но продавец не заполнен"
-        source={`Проверены: регистр продаж — ${diagnostics?.turnoverRows || 0} строк (${diagnostics?.turnoverRowsWithSeller || 0} с продавцом), личные продажи — ${diagnostics?.scannedPremiumRows || 0}, чеки ККМ — ${diagnostics?.scannedChecks || 0}, реализации — ${diagnostics?.scannedRealizations || 0}. Если результат пустой, поле «Продавец» не заполнено ни в одном источнике 1С.`}
+        description="В документах 1С не удалось определить сотрудника продажи"
+        source={`Проверены: регистр продаж — ${diagnostics?.turnoverRows || 0} строк (${diagnostics?.turnoverRowsWithSeller || 0} с продавцом), личные продажи — ${diagnostics?.scannedPremiumRows || 0}, чеки ККМ — ${diagnostics?.scannedChecks || 0} (${diagnostics?.checksWithAssignedEmployee || 0} с сотрудником), кассовые смены — ${diagnostics?.scannedCashShifts || 0}, реализации — ${diagnostics?.scannedRealizations || 0}. Для чека сотрудник определяется по продавцу строки, продавцу чека, кассиру смены или ответственному пользователю.`}
       />
     );
   }

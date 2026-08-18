@@ -506,14 +506,18 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
         "СтоимостьБезСкидокTurnover",
       ].join(","),
     });
-    let validItems = items.filter(
-      (item) =>
-        item.Продавец_Key &&
-        item.Продавец_Key !== "00000000-0000-0000-0000-000000000000",
-    );
+    let validItems = items
+      .filter(
+        (item) =>
+          item.Продавец_Key &&
+          item.Продавец_Key !== "00000000-0000-0000-0000-000000000000",
+      )
+      .map((item) => ({ ...item, СотрудникТип: "person" }));
     let effectiveLatestDate = latestDate;
     let source = "AccumulationRegister_Продажи/Turnovers";
     let scannedChecks = 0;
+    let scannedCashShifts = 0;
+    let checksWithAssignedEmployee = 0;
     let scannedPremiumRows = 0;
     let scannedRealizations = 0;
 
@@ -562,6 +566,7 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
           )
           .map((item) => ({
             Продавец_Key: item.Продавец_Key,
+            СотрудникТип: "person",
             Магазин_Key:
               item.МагазинПродаж_Key || item.МагазинРасчетаПремий_Key,
             КоличествоTurnover: Number(item.Количество || 0),
@@ -592,8 +597,11 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
           "Date",
           "Posted",
           "ВидОперации",
+          "КассаККМ_Key",
+          "НомерСменыККМ",
           "Магазин_Key",
           "Продавец_Key",
+          "Ответственный_Key",
           "СуммаДокумента",
           "Товары",
         ].join(",");
@@ -623,14 +631,72 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
         }
 
         scannedChecks = checks.length;
+        let cashShifts = [];
+        const cashShiftSelect = [
+          "Ref_Key",
+          "Date",
+          "Posted",
+          "КассаККМ_Key",
+          "НомерСменыККТ",
+          "Кассир_Key",
+          "Магазин_Key",
+        ].join(",");
+
+        try {
+          cashShifts = await onecGet("Document_КассоваяСмена", {
+            $top: 500,
+            $select: cashShiftSelect,
+            $filter: [
+              "Posted eq true",
+              `Date ge datetime'${toOdataDateTime(checkStartDate)}'`,
+            ].join(" and "),
+            $orderby: "Date desc",
+          });
+        } catch (error) {
+          console.warn(
+            "1С не приняла фильтр кассовых смен по дате, загружаем последние смены:",
+            error instanceof Error ? error.message : error,
+          );
+          cashShifts = await onecGet("Document_КассоваяСмена", {
+            $top: 500,
+            $select: cashShiftSelect,
+            $filter: "Posted eq true",
+            $orderby: "Date desc",
+          });
+        }
+
+        scannedCashShifts = cashShifts.length;
+        const cashiersByShift = new Map();
+        cashShifts.forEach((shift) => {
+          if (
+            shift.КассаККМ_Key &&
+            shift.НомерСменыККТ !== undefined &&
+            shift.Кассир_Key &&
+            shift.Кассир_Key !== EMPTY_GUID
+          ) {
+            cashiersByShift.set(
+              `${shift.КассаККМ_Key}:${shift.НомерСменыККТ}`,
+              shift,
+            );
+          }
+        });
+
         const groupedChecks = new Map();
-        const addTurnover = ({ sellerKey, storeKey, quantity, revenue, fullPrice }) => {
+        const addTurnover = ({
+          sellerKey,
+          employeeType,
+          storeKey,
+          quantity,
+          revenue,
+          fullPrice,
+        }) => {
           if (!sellerKey || sellerKey === "00000000-0000-0000-0000-000000000000") {
             return;
           }
-          const key = `${sellerKey}:${storeKey}`;
+          const key = `${employeeType}:${sellerKey}:${storeKey}`;
           const current = groupedChecks.get(key) || {
             Продавец_Key: sellerKey,
+            СотрудникТип: employeeType,
             Магазин_Key: storeKey,
             КоличествоTurnover: 0,
             СтоимостьTurnover: 0,
@@ -645,10 +711,37 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
         checks.forEach((check) => {
           const sign = /возврат/i.test(String(check.ВидОперации || "")) ? -1 : 1;
           const lines = check.Товары || [];
+          const shift = cashiersByShift.get(
+            `${check.КассаККМ_Key}:${check.НомерСменыККМ}`,
+          );
+          const directSellerKey =
+            check.Продавец_Key && check.Продавец_Key !== EMPTY_GUID
+              ? check.Продавец_Key
+              : null;
+          const cashierKey =
+            shift?.Кассир_Key && shift.Кассир_Key !== EMPTY_GUID
+              ? shift.Кассир_Key
+              : null;
+          const responsibleKey =
+            check.Ответственный_Key && check.Ответственный_Key !== EMPTY_GUID
+              ? check.Ответственный_Key
+              : null;
+          const fallbackEmployeeKey = directSellerKey || cashierKey || responsibleKey;
+          const fallbackEmployeeType = directSellerKey ? "person" : "user";
+          const resolvedStoreKey =
+            check.Магазин_Key && check.Магазин_Key !== EMPTY_GUID
+              ? check.Магазин_Key
+              : shift?.Магазин_Key;
+
+          if (fallbackEmployeeKey) {
+            checksWithAssignedEmployee += 1;
+          }
+
           if (!lines.length) {
             addTurnover({
-              sellerKey: check.Продавец_Key,
-              storeKey: check.Магазин_Key,
+              sellerKey: fallbackEmployeeKey,
+              employeeType: fallbackEmployeeType,
+              storeKey: resolvedStoreKey,
               quantity: 0,
               revenue: sign * Number(check.СуммаДокумента || 0),
               fullPrice: sign * Number(check.СуммаДокумента || 0),
@@ -662,12 +755,14 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
               Number(line.СуммаАвтоматическойСкидки || 0) +
               Number(line.СуммаРучнойСкидки || 0) +
               Number(line.СуммаСкидкиОплатыБонусом || 0);
+            const lineSellerKey =
+              line.Продавец_Key && line.Продавец_Key !== EMPTY_GUID
+                ? line.Продавец_Key
+                : null;
             addTurnover({
-              sellerKey:
-                line.Продавец_Key && line.Продавец_Key !== "00000000-0000-0000-0000-000000000000"
-                  ? line.Продавец_Key
-                  : check.Продавец_Key,
-              storeKey: check.Магазин_Key,
+              sellerKey: lineSellerKey || fallbackEmployeeKey,
+              employeeType: lineSellerKey ? "person" : fallbackEmployeeType,
+              storeKey: resolvedStoreKey,
               quantity: sign * Number(line.Количество || 0),
               revenue: sign * revenue,
               fullPrice: sign * (revenue + discounts),
@@ -676,7 +771,9 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
         });
 
         validItems = [...groupedChecks.values()];
-        source = "Document_ЧекККМ (fallback)";
+        source = cashiersByShift.size
+          ? "Document_ЧекККМ + Document_КассоваяСмена (fallback)"
+          : "Document_ЧекККМ (fallback)";
       }
     }
 
@@ -726,6 +823,7 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
             const key = `${sellerKey}:${document.Магазин_Key}`;
             const current = groupedRealizations.get(key) || {
               Продавец_Key: sellerKey,
+              СотрудникТип: "person",
               Магазин_Key: document.Магазин_Key,
               КоличествоTurnover: 0,
               СтоимостьTurnover: 0,
@@ -748,11 +846,25 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
         }
       }
     }
-    const sellers = await loadReferencesByKeysBatched(
+    const personKeys = validItems
+      .filter((item) => item.СотрудникТип !== "user")
+      .map((item) => item.Продавец_Key);
+    const userKeys = validItems
+      .filter((item) => item.СотрудникТип === "user")
+      .map((item) => item.Продавец_Key);
+    const [people, users] = await Promise.all([
+      loadReferencesByKeysBatched(
       "Catalog_ФизическиеЛица",
-      validItems.map((item) => item.Продавец_Key),
+      personKeys,
       "Ref_Key,Description,Магазин_Key",
-    );
+      ),
+      loadReferencesByKeysBatched(
+        "Catalog_Пользователи",
+        userKeys,
+        "Ref_Key,Description,ФизическоеЛицо_Key,ФизЛицо_Key,Магазин_Key",
+      ),
+    ]);
+    const sellers = [...people, ...users];
     const stores = await loadReferencesByKeysBatched(
       "Catalog_Магазины",
       [
@@ -778,6 +890,8 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
               item.Продавец_Key !== "00000000-0000-0000-0000-000000000000",
           ).length,
           scannedChecks,
+          scannedCashShifts,
+          checksWithAssignedEmployee,
           scannedPremiumRows,
           scannedRealizations,
           resultRows: validItems.length,
