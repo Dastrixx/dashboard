@@ -551,6 +551,8 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     let loadedChecks = 0;
     let checkLines = 0;
     let checkLinesWithConsultant = 0;
+    let historicalChecksScanned = 0;
+    let historicalChecksWithConsultant = 0;
     let reports = [];
     let cache = "not-used";
     let latestDate = null;
@@ -674,6 +676,92 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       });
     }
 
+    // Последний документ в базе может быть одиночным тестовым чеком без
+    // консультанта. В таком случае период, рассчитанный от его даты, скрывает
+    // более ранние реальные продажи. Загружаем историю, находим последнюю дату,
+    // где Продавец_Key действительно заполнен, и применяем выбранный период уже
+    // к этой активности. Это не подменяет консультанта кассиром/ответственным.
+    if (!grouped.size) {
+      const historicalChecks = await onecGet("Document_ЧекККМ", {
+        $top: Math.min(
+          Math.max(Number(process.env.ONEC_CONSULTANT_SCAN_LIMIT || 500), 1),
+          2000,
+        ),
+        $select: [
+          "Ref_Key",
+          "Date",
+          "Posted",
+          "ВидОперации",
+          "Магазин_Key",
+          "Продавец_Key",
+          "Товары",
+        ].join(","),
+        $filter: "Posted eq true",
+        $orderby: "Date desc",
+      });
+      const checksWithConsultant = historicalChecks.filter((check) => {
+        if (check.Продавец_Key && check.Продавец_Key !== EMPTY_GUID) {
+          return true;
+        }
+        return (check.Товары || []).some(
+          (line) =>
+            line.Продавец_Key && line.Продавец_Key !== EMPTY_GUID,
+        );
+      });
+      historicalChecksScanned = historicalChecks.length;
+      historicalChecksWithConsultant = checksWithConsultant.length;
+
+      if (checksWithConsultant.length) {
+        const consultantActivity = resolveActivityAnchor(
+          checksWithConsultant,
+          "Date",
+        );
+        const consultantLatestDate = consultantActivity.anchorDate;
+        const consultantStartDate = new Date(
+          consultantLatestDate.getTime() - days * 86_400_000,
+        );
+        const periodChecks = filterByPeriod(
+          checksWithConsultant,
+          "Date",
+          consultantStartDate,
+          new Date(consultantLatestDate.getTime() + 1000),
+        );
+
+        latestDate = consultantLatestDate.toISOString();
+        absoluteLatestDate =
+          consultantActivity.absoluteLatestDate?.toISOString() ||
+          absoluteLatestDate;
+        analysisAnchorAdjusted = consultantActivity.adjusted;
+        ignoredIsolatedDocuments = consultantActivity.ignoredDocuments;
+        periodStart = consultantStartDate.toISOString();
+        periodEnd = consultantLatestDate.toISOString();
+        source = "Document_ЧекККМ.Продавец_Key (последняя активность)";
+        loadedChecks = historicalChecks.length;
+        scannedChecks = periodChecks.length;
+        salesLines = 0;
+        returnLines = 0;
+        linesWithConsultant = 0;
+        checkLines = 0;
+        checkLinesWithConsultant = 0;
+
+        periodChecks.forEach((check) => {
+          const sign = /возврат/i.test(String(check.ВидОперации || ""))
+            ? -1
+            : 1;
+          (check.Товары || []).forEach((line) => {
+            checkLines += 1;
+            addLine({
+              storeKey: check.Магазин_Key,
+              line,
+              sign,
+              documentSellerKey: check.Продавец_Key,
+              origin: "check",
+            });
+          });
+        });
+      }
+    }
+
     // В некоторых базах консультант переносится из чеков только при закрытии
     // смены. Тогда ищем его в строках отчёта о розничных продажах.
     if (!grouped.size) {
@@ -747,6 +835,8 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
           loadedChecks,
           checkLines,
           checkLinesWithConsultant,
+          historicalChecksScanned,
+          historicalChecksWithConsultant,
           reports: reports.length,
           salesLines,
           returnLines,
