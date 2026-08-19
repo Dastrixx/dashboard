@@ -94,6 +94,8 @@ export function Dashboard({ initialRole }: { initialRole: Role }) {
         return;
       }
 
+      // Сессия хранится вне React и читается только после гидратации клиента.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSession(parsed);
     } catch {
       window.localStorage.removeItem("analytics-session");

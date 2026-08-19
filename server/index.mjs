@@ -2,6 +2,20 @@ import cors from "cors";
 import express from "express";
 import { dashboardData } from "./data.mjs";
 import {
+  EMPTY_GUID,
+  GUID_PATTERN,
+  RETAIL_REPORT_ENTITY,
+  RETAIL_REPORT_SELECT,
+} from "./dashboard/constants.mjs";
+import {
+  enrichProductsWithBusinessCategories,
+  filterByPeriod,
+  publicBusinessCategories,
+  resolveActivityAnchor,
+  summarizeProductReference,
+  toOdataDateTime,
+} from "./dashboard/utils.mjs";
+import {
   onecBalance,
   onecGet,
   onecGetByKey,
@@ -78,105 +92,6 @@ app.get("/api/onec/metadata", async (_request, response) => {
 const referenceCache = new Map();
 const reportCache = new Map();
 let productKindsCache = null;
-
-const GUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const EMPTY_GUID = "00000000-0000-0000-0000-000000000000";
-const BUSINESS_CATEGORIES = [
-  {
-    Ref_Key: "home-textile",
-    Description: "Домашний текстиль",
-    aliases: ["домашний текстиль", "плед"],
-  },
-  {
-    Ref_Key: "tableware",
-    Description: "Посуда",
-    aliases: ["посуда", "посуда китай"],
-  },
-  {
-    Ref_Key: "clothing",
-    Description: "Одежда",
-    aliases: ["одежда"],
-  },
-  {
-    Ref_Key: "household-chemicals",
-    Description: "Бытовая химия",
-    aliases: ["детская химия", "мыломойка", "бытовая химия"],
-  },
-];
-
-const RETAIL_REPORT_ENTITY = "Document_ОтчетОРозничныхПродажах";
-const RETAIL_REPORT_SELECT = [
-  "Ref_Key",
-  "Number",
-  "Date",
-  "Posted",
-  "СуммаДокумента",
-  "СуммаВозвратов",
-  "Магазин_Key",
-  "КассаККМ_Key",
-  "Товары",
-  "ВозвращенныеТовары",
-].join(",");
-
-function toOdataDateTime(timestamp) {
-  return new Date(timestamp).toISOString().replace(/\.\d{3}Z$/, "");
-}
-
-function filterByPeriod(items, field, startDate, endDate) {
-  const startTimestamp = new Date(startDate).getTime();
-  const endTimestamp = new Date(endDate).getTime();
-
-  return items.filter((item) => {
-    const timestamp = new Date(item?.[field]).getTime();
-    return (
-      Number.isFinite(timestamp) &&
-      timestamp >= startTimestamp &&
-      timestamp <= endTimestamp
-    );
-  });
-}
-
-function resolveActivityAnchor(items, field) {
-  const timestamps = items
-    .map((item) => new Date(item?.[field]).getTime())
-    .filter(Number.isFinite)
-    .sort((left, right) => right - left);
-  const absoluteLatestTimestamp = timestamps[0] || null;
-  const isolationGapMs = Math.max(
-    Number(process.env.ONEC_ACTIVITY_GAP_DAYS || 45),
-    1,
-  ) * 86_400_000;
-  const maxIsolatedDocuments = Math.max(
-    Number(process.env.ONEC_MAX_ISOLATED_DOCUMENTS || 3),
-    1,
-  );
-  let anchorTimestamp = absoluteLatestTimestamp;
-  let ignoredDocuments = 0;
-
-  for (
-    let index = 0;
-    index < Math.min(timestamps.length - 1, maxIsolatedDocuments);
-    index += 1
-  ) {
-    if (timestamps[index] - timestamps[index + 1] > isolationGapMs) {
-      anchorTimestamp = timestamps[index + 1];
-      ignoredDocuments = index + 1;
-      break;
-    }
-  }
-
-  return {
-    anchorDate: anchorTimestamp ? new Date(anchorTimestamp) : null,
-    absoluteLatestDate: absoluteLatestTimestamp
-      ? new Date(absoluteLatestTimestamp)
-      : null,
-    adjusted: Boolean(
-      anchorTimestamp && absoluteLatestTimestamp !== anchorTimestamp,
-    ),
-    ignoredDocuments,
-  };
-}
 
 async function loadReportPages({ limit, days }) {
   const configuredPageSize = Number(process.env.ONEC_PAGE_SIZE || 25);
@@ -418,23 +333,6 @@ async function loadReferencesByKeysBatched(entity, keys, select) {
   return loadReferencesByKeys(entity, keys, select);
 }
 
-function normalizeReferenceName(value) {
-  return String(value || "")
-    .trim()
-    .toLocaleLowerCase("ru-RU")
-    .replace(/\s+/g, " ");
-}
-
-function resolveBusinessCategory(kindName) {
-  const normalizedName = normalizeReferenceName(kindName);
-
-  return (
-    BUSINESS_CATEGORIES.find((category) =>
-      category.aliases.some((alias) => normalizedName === alias),
-    ) || null
-  );
-}
-
 async function loadProductKindsCatalog() {
   const now = Date.now();
 
@@ -465,70 +363,6 @@ async function loadProductKindsCatalog() {
     productKindsCache = null;
     throw error;
   }
-}
-
-function enrichProductsWithBusinessCategories(products, productKinds) {
-  const kindByKey = new Map(
-    productKinds.map((kind) => [kind.Ref_Key, kind]),
-  );
-
-  return products.map((product) => {
-    const kind = kindByKey.get(product.ВидНоменклатуры_Key);
-    const category = resolveBusinessCategory(kind?.Description);
-
-    return {
-      ...product,
-      ВидНоменклатуры: kind?.Description || null,
-      BusinessCategory_Key: category?.Ref_Key || null,
-      BusinessCategory: category?.Description || null,
-    };
-  });
-}
-
-function publicBusinessCategories() {
-  return BUSINESS_CATEGORIES.map(({ Ref_Key, Description }) => ({
-    Ref_Key,
-    Description,
-  }));
-}
-
-function summarizeProductReference(products, field, references = []) {
-  const referenceByKey = new Map(
-    references.map((reference) => [reference.Ref_Key, reference]),
-  );
-  const summaryByKey = new Map();
-
-  for (const product of products) {
-    const key = product[field];
-
-    if (!GUID_PATTERN.test(key || "") || key === EMPTY_GUID) {
-      continue;
-    }
-
-    const current = summaryByKey.get(key) || {
-      key,
-      name: referenceByKey.get(key)?.Description || null,
-      productsCount: 0,
-      productExamples: [],
-    };
-
-    current.productsCount += 1;
-
-    if (current.productExamples.length < 5) {
-      current.productExamples.push({
-        key: product.Ref_Key,
-        code: product.Code,
-        article: product.Артикул,
-        name: product.Description,
-      });
-    }
-
-    summaryByKey.set(key, current);
-  }
-
-  return [...summaryByKey.values()].sort(
-    (left, right) => right.productsCount - left.productsCount,
-  );
 }
 
 app.get("/api/dashboard/onec-product-categories", async (request, response) => {
