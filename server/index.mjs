@@ -116,6 +116,7 @@ const RETAIL_REPORT_SELECT = [
   "Магазин_Key",
   "КассаККМ_Key",
   "Товары",
+  "ВозвращенныеТовары",
 ].join(",");
 
 function toOdataDateTime(timestamp) {
@@ -464,6 +465,203 @@ app.get("/api/dashboard/onec-product-categories", async (request, response) => {
         error instanceof Error
           ? error.message
           : "Не удалось определить категории товаров 1С",
+    });
+  }
+});
+
+app.get("/api/dashboard/onec-consultants", async (request, response) => {
+  try {
+    const days = [1, 7, 30].includes(Number(request.query.days))
+      ? Number(request.query.days)
+      : 30;
+    const grouped = new Map();
+    let salesLines = 0;
+    let returnLines = 0;
+    let linesWithConsultant = 0;
+    let scannedChecks = 0;
+    let checkLines = 0;
+    let checkLinesWithConsultant = 0;
+    let reports = [];
+    let cache = "not-used";
+    let latestDate = null;
+    let source = "Document_ЧекККМ.Товары.Продавец_Key";
+
+    const addLine = ({ storeKey, line, sign, documentSellerKey, origin }) => {
+      if (sign > 0) salesLines += 1;
+      else returnLines += 1;
+
+      const consultantKey =
+        line.Продавец_Key && line.Продавец_Key !== EMPTY_GUID
+          ? line.Продавец_Key
+          : documentSellerKey;
+      if (!consultantKey || consultantKey === EMPTY_GUID) return;
+
+      linesWithConsultant += 1;
+      if (origin === "check") checkLinesWithConsultant += 1;
+      const resolvedStoreKey = storeKey || EMPTY_GUID;
+      const key = `${consultantKey}:${resolvedStoreKey}`;
+      const current = grouped.get(key) || {
+        Продавец_Key: consultantKey,
+        СотрудникТип: "consultant",
+        Магазин_Key: resolvedStoreKey,
+        КоличествоTurnover: 0,
+        СтоимостьTurnover: 0,
+        СтоимостьБезСкидокTurnover: 0,
+        СтрокПродаж: 0,
+        СтрокВозвратов: 0,
+      };
+      const quantity = Number(line.Количество || 0);
+      const amount = Number(line.Сумма || 0);
+      const fullPrice = Number(line.Цена || 0) * quantity;
+
+      current.КоличествоTurnover += sign * quantity;
+      current.СтоимостьTurnover += sign * amount;
+      current.СтоимостьБезСкидокTurnover += sign * Math.max(fullPrice, amount);
+      if (sign > 0) current.СтрокПродаж += 1;
+      else current.СтрокВозвратов += 1;
+      grouped.set(key, current);
+    };
+
+    const latestChecks = await onecGet("Document_ЧекККМ", {
+      $top: 1,
+      $select: "Date",
+      $filter: "Posted eq true",
+      $orderby: "Date desc",
+    });
+
+    if (latestChecks.length) {
+      latestDate = latestChecks[0].Date;
+      const checkStartDate = new Date(
+        new Date(latestDate).getTime() - days * 86_400_000,
+      );
+      const checkQuery = {
+        $top: 1000,
+        $select: [
+          "Ref_Key",
+          "Date",
+          "Posted",
+          "ВидОперации",
+          "Магазин_Key",
+          "Продавец_Key",
+          "Товары",
+        ].join(","),
+        $orderby: "Date desc",
+      };
+      let checks;
+
+      try {
+        checks = await onecGet("Document_ЧекККМ", {
+          ...checkQuery,
+          $filter: [
+            "Posted eq true",
+            `Date ge datetime'${toOdataDateTime(checkStartDate)}'`,
+          ].join(" and "),
+        });
+      } catch (error) {
+        console.warn(
+          "1С не приняла период консультантов по чекам, загружаем последние чеки:",
+          error instanceof Error ? error.message : error,
+        );
+        checks = await onecGet("Document_ЧекККМ", {
+          ...checkQuery,
+          $filter: "Posted eq true",
+        });
+      }
+      scannedChecks = checks.length;
+
+      checks.forEach((check) => {
+        const sign = /возврат/i.test(String(check.ВидОперации || ""))
+          ? -1
+          : 1;
+        (check.Товары || []).forEach((line) => {
+          checkLines += 1;
+          addLine({
+            storeKey: check.Магазин_Key,
+            line,
+            sign,
+            documentSellerKey: check.Продавец_Key,
+            origin: "check",
+          });
+        });
+      });
+    }
+
+    // В некоторых базах консультант переносится из чеков только при закрытии
+    // смены. Тогда ищем его в строках отчёта о розничных продажах.
+    if (!grouped.size) {
+      const reportResult = await loadReportPagesCached({ limit: 500, days });
+      reports = reportResult.items;
+      cache = reportResult.cache;
+      latestDate = reports[0]?.Date || latestDate;
+      source = "Document_ОтчетОРозничныхПродажах.Товары.Продавец_Key";
+
+      reports.forEach((report) => {
+        (report.Товары || []).forEach((line) =>
+          addLine({
+            storeKey: report.Магазин_Key,
+            line,
+            sign: 1,
+            documentSellerKey: null,
+            origin: "retail-report",
+          }),
+        );
+        (report.ВозвращенныеТовары || []).forEach((line) =>
+          addLine({
+            storeKey: report.Магазин_Key,
+            line,
+            sign: -1,
+            documentSellerKey: null,
+            origin: "retail-report",
+          }),
+        );
+      });
+    }
+
+    const items = [...grouped.values()].sort(
+      (left, right) => right.СтоимостьTurnover - left.СтоимостьTurnover,
+    );
+    const consultants = await loadReferencesByKeysBatched(
+      "Catalog_ФизическиеЛица",
+      items.map((item) => item.Продавец_Key),
+      "Ref_Key,Description,Сотрудник,Магазин_Key",
+    );
+    const stores = await loadReferencesByKeysBatched(
+      "Catalog_Магазины",
+      [
+        ...items.map((item) => item.Магазин_Key),
+        ...consultants.map((item) => item.Магазин_Key),
+      ],
+      "Ref_Key,Code,Description",
+    );
+
+    response.json({
+      items,
+      references: { sellers: consultants, stores },
+      meta: {
+        days,
+        loaded: items.length,
+        latestDate,
+        source,
+        cache,
+        diagnostics: {
+          scannedChecks,
+          checkLines,
+          checkLinesWithConsultant,
+          reports: reports.length,
+          salesLines,
+          returnLines,
+          linesWithConsultant,
+          consultants: consultants.length,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Ошибка загрузки продаж консультантов 1С:", error);
+    response.status(502).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : "Не удалось получить продажи консультантов из 1С",
     });
   }
 });

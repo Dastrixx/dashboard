@@ -102,6 +102,8 @@ type SellerTurnover = {
   КоличествоTurnover?: number;
   СтоимостьTurnover?: number;
   СтоимостьБезСкидокTurnover?: number;
+  СтрокПродаж?: number;
+  СтрокВозвратов?: number;
 };
 
 type SellerReference = {
@@ -131,6 +133,13 @@ type SellerPayload = {
       scannedPremiumRows?: number;
       scannedRealizations?: number;
       resultRows?: number;
+      reports?: number;
+      salesLines?: number;
+      returnLines?: number;
+      linesWithConsultant?: number;
+      consultants?: number;
+      checkLines?: number;
+      checkLinesWithConsultant?: number;
     };
   };
   message?: string;
@@ -1119,6 +1128,7 @@ export function OnecStock() {
 export function OnecTeam() {
   const [period, setPeriod] = useState<1 | 7 | 30>(30);
   const [payload, setPayload] = useState<SellerPayload>({});
+  const [consultantPayload, setConsultantPayload] = useState<SellerPayload>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [storeKey, setStoreKey] = useState("all");
@@ -1132,15 +1142,30 @@ export function OnecTeam() {
       try {
         setLoading(true);
         setError("");
-        const response = await fetch(
-          `${API_URL}/api/dashboard/onec-sellers?days=${period}`,
-          { signal: controller.signal },
-        );
-        const data = (await response.json()) as SellerPayload;
-        if (!response.ok) {
-          throw new Error(data.message || `Ошибка HTTP ${response.status}`);
+        const [sellerResponse, consultantResponse] = await Promise.all([
+          fetch(`${API_URL}/api/dashboard/onec-sellers?days=${period}`, {
+            signal: controller.signal,
+          }),
+          fetch(`${API_URL}/api/dashboard/onec-consultants?days=${period}`, {
+            signal: controller.signal,
+          }),
+        ]);
+        const [sellerData, consultantData] = (await Promise.all([
+          sellerResponse.json(),
+          consultantResponse.json(),
+        ])) as [SellerPayload, SellerPayload];
+        if (!sellerResponse.ok) {
+          throw new Error(
+            sellerData.message || `Ошибка HTTP ${sellerResponse.status}`,
+          );
         }
-        setPayload(data);
+        if (!consultantResponse.ok) {
+          throw new Error(
+            consultantData.message || `Ошибка HTTP ${consultantResponse.status}`,
+          );
+        }
+        setPayload(sellerData);
+        setConsultantPayload(consultantData);
       } catch (loadError) {
         if (loadError instanceof DOMException && loadError.name === "AbortError") return;
         setError(
@@ -1249,6 +1274,80 @@ export function OnecTeam() {
     };
   }, [payload, storeKey, search]);
 
+  const consultantView = useMemo(() => {
+    const references = new Map(
+      (consultantPayload.references?.sellers || []).map((item) => [
+        item.Ref_Key,
+        item,
+      ]),
+    );
+    const stores = new Map(
+      (consultantPayload.references?.stores || []).map((item) => [
+        item.Ref_Key,
+        item,
+      ]),
+    );
+    const query = search.trim().toLowerCase();
+    const rows = (consultantPayload.items || [])
+      .map((item) => {
+        const consultant = references.get(item.Продавец_Key);
+        const resolvedStoreKey =
+          item.Магазин_Key && item.Магазин_Key !== ZERO_GUID
+            ? item.Магазин_Key
+            : consultant?.Магазин_Key || ZERO_GUID;
+
+        return {
+          key: `${item.Продавец_Key}:${resolvedStoreKey}`,
+          consultantKey: item.Продавец_Key,
+          consultant:
+            consultant?.Description ||
+            `Консультант ${item.Продавец_Key.slice(0, 8)}`,
+          storeKey: resolvedStoreKey,
+          store:
+            stores.get(resolvedStoreKey)?.Description ||
+            (resolvedStoreKey === ZERO_GUID
+              ? "Филиал не указан"
+              : "Филиал не найден"),
+          revenue: Number(item.СтоимостьTurnover || 0),
+          quantity: Number(item.КоличествоTurnover || 0),
+          salesLines: Number(item.СтрокПродаж || 0),
+          returnLines: Number(item.СтрокВозвратов || 0),
+        };
+      })
+      .filter(
+        (item) =>
+          (storeKey === "all" || item.storeKey === storeKey) &&
+          (!query ||
+            `${item.consultant} ${item.store}`.toLowerCase().includes(query)),
+      )
+      .sort((left, right) => right.revenue - left.revenue);
+    const totalRevenue = rows.reduce((sum, item) => sum + item.revenue, 0);
+
+    return {
+      rows: rows.map((item, index) => ({
+        ...item,
+        rank: index + 1,
+        share: totalRevenue ? (item.revenue / totalRevenue) * 100 : 0,
+      })),
+      stores: [...stores.values()],
+      totalRevenue,
+      totalQuantity: rows.reduce((sum, item) => sum + item.quantity, 0),
+      consultants: new Set(rows.map((item) => item.consultantKey)).size,
+    };
+  }, [consultantPayload, storeKey, search]);
+
+  const teamStores = useMemo(() => {
+    const stores = new Map(
+      [...view.stores, ...consultantView.stores].map((item) => [
+        item.Ref_Key,
+        item,
+      ]),
+    );
+    return [...stores.values()].sort((left, right) =>
+      (left.Description || "").localeCompare(right.Description || "", "ru"),
+    );
+  }, [view.stores, consultantView.stores]);
+
   useEffect(() => setPage(1), [period, storeKey, search]);
 
   if (loading || error) {
@@ -1263,7 +1362,10 @@ export function OnecTeam() {
     );
   }
 
-  if (!(payload.items || []).length) {
+  if (
+    !(payload.items || []).length &&
+    !(consultantPayload.items || []).length
+  ) {
     const diagnostics = payload.meta?.diagnostics;
     return (
       <MissingSource
@@ -1303,7 +1405,7 @@ export function OnecTeam() {
           <div className="team-filter-groups">
             <select value={storeKey} onChange={(event) => setStoreKey(event.target.value)}>
               <option value="all">Все филиалы</option>
-              {view.stores.map((item) => (
+              {teamStores.map((item) => (
                 <option key={item.Ref_Key} value={item.Ref_Key}>
                   {item.Description || item.Code || "Филиал без названия"}
                 </option>
@@ -1333,6 +1435,60 @@ export function OnecTeam() {
           <div><span>Продавцов</span><strong>{view.sellers}</strong><small>с продажами за период</small></div>
           <div><span>Филиалов</span><strong>{view.branches.length}</strong><small>участвуют в продажах</small></div>
         </div>
+      </section>
+
+      <section className="panel consultant-analytics-panel">
+        <div className="panel-head consultant-panel-head">
+          <div>
+            <span className="team-plan-kicker">Консультанты 1С</span>
+            <h2>Личные продажи консультантов</h2>
+            <p>
+              {consultantPayload.meta?.source ||
+                "Продавец в товарной строке розничного отчёта"}
+            </p>
+          </div>
+          <div className="consultant-kpis">
+            <div><span>Консультантов</span><strong>{consultantView.consultants}</strong></div>
+            <div><span>Выручка</span><strong>{money.format(consultantView.totalRevenue)}</strong></div>
+            <div><span>Продано</span><strong>{number.format(consultantView.totalQuantity)} ед.</strong></div>
+          </div>
+        </div>
+        {consultantView.rows.length ? (
+          <div className="onec-table-wrap">
+            <table className="onec-table consultant-table">
+              <thead>
+                <tr>
+                  <th>Место</th><th>Консультант</th><th>Филиал</th>
+                  <th>Выручка</th><th>Продано</th><th>Доля</th><th>Возвраты</th>
+                </tr>
+              </thead>
+              <tbody>
+                {consultantView.rows.slice(0, 20).map((item) => (
+                  <tr key={item.key}>
+                    <td><span className="team-rank-place">{item.rank}</span></td>
+                    <td><strong>{item.consultant}</strong></td>
+                    <td>{item.store}</td>
+                    <td><strong>{money.format(item.revenue)}</strong></td>
+                    <td>{number.format(item.quantity)} ед.</td>
+                    <td>{number.format(item.share)}%</td>
+                    <td>{number.format(item.returnLines)} строк</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="consultant-empty-state">
+            <strong>В товарных строках консультант пока не заполнен</strong>
+            <p>
+              Проверено чеков: {consultantPayload.meta?.diagnostics?.scannedChecks || 0},
+              товарных строк чеков: {consultantPayload.meta?.diagnostics?.checkLines || 0},
+              строк чеков с консультантом: {consultantPayload.meta?.diagnostics?.checkLinesWithConsultant || 0}.
+              Проверено розничных отчётов: {consultantPayload.meta?.diagnostics?.reports || 0},
+              всего строк с консультантом: {consultantPayload.meta?.diagnostics?.linesWithConsultant || 0}.
+            </p>
+          </div>
+        )}
       </section>
 
       <section className="team-branch-grid">
