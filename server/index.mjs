@@ -558,6 +558,8 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     let checksWithResponsible = 0;
     let cashShiftsWithCashier = 0;
     let usedEmployeeFallback = false;
+    let directCheckLinesScanned = 0;
+    let directCheckLinesWithConsultant = 0;
     let reports = [];
     let cache = "not-used";
     let latestDate = null;
@@ -666,22 +668,68 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       latestDate = periodEnd;
       absoluteLatestDate = periodEnd;
 
-      checks.forEach((check) => {
-        const sign = /возврат/i.test(String(check.ВидОперации || ""))
+      // В standard.odata табличная часть опубликована также отдельной
+      // сущностью. В этой базе именно прямой endpoint строк может содержать
+      // Продавец_Key, даже когда Document_ЧекККМ.Товары приходит урезанным.
+      const directLines = await onecGet("Document_ЧекККМ_Товары", {
+        $top: 10_000,
+        $select: [
+          "Ref_Key",
+          "LineNumber",
+          "Продавец_Key",
+          "Количество",
+          "Цена",
+          "Сумма",
+          "Склад_Key",
+        ].join(","),
+      });
+      const directLinesWithConsultant = directLines.filter(
+        (line) =>
+          line.Продавец_Key && line.Продавец_Key !== EMPTY_GUID,
+      );
+      directCheckLinesScanned = directLines.length;
+      directCheckLinesWithConsultant = directLinesWithConsultant.length;
+      const checksByKey = new Map(
+        checks.map((check) => [check.Ref_Key, check]),
+      );
+
+      directLinesWithConsultant.forEach((line) => {
+        const check = checksByKey.get(line.Ref_Key);
+        const sign = /возврат/i.test(String(check?.ВидОперации || ""))
           ? -1
           : 1;
-        (check.Товары || []).forEach((line) => {
-          checkLines += 1;
-          addLine({
-            storeKey: check.Магазин_Key,
-            line,
-            sign,
-            documentSellerKey: check.Продавец_Key,
-            documentEmployeeType: "person",
-            origin: "check",
-          });
+        checkLines += 1;
+        addLine({
+          storeKey: check?.Магазин_Key,
+          line,
+          sign,
+          documentSellerKey: null,
+          documentEmployeeType: "person",
+          origin: "check",
         });
       });
+      if (grouped.size) {
+        source = "Document_ЧекККМ_Товары.Продавец_Key · прямые строки чеков";
+      }
+
+      if (!grouped.size) {
+        checks.forEach((check) => {
+          const sign = /возврат/i.test(String(check.ВидОперации || ""))
+            ? -1
+            : 1;
+          (check.Товары || []).forEach((line) => {
+            checkLines += 1;
+            addLine({
+              storeKey: check.Магазин_Key,
+              line,
+              sign,
+              documentSellerKey: check.Продавец_Key,
+              documentEmployeeType: "person",
+              origin: "check",
+            });
+          });
+        });
+      }
 
       // Если личный продавец в чеках не заполнен, возвращаем тот источник,
       // из которого раньше строился отчёт сотрудников: кассир смены, затем
@@ -858,6 +906,8 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
           checksWithResponsible,
           cashShiftsWithCashier,
           usedEmployeeFallback,
+          directCheckLinesScanned,
+          directCheckLinesWithConsultant,
           reports: reports.length,
           salesLines,
           returnLines,
