@@ -80,7 +80,7 @@ type ProductRow = {
   abc: "A" | "B" | "C";
 };
 
-import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "";
+const API_URL = import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "";
 const DAY_MS = 86_400_000;
 const TABLE_PAGE_SIZE = 20;
 
