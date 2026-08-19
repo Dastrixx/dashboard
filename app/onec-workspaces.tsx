@@ -145,7 +145,7 @@ type SellerPayload = {
   message?: string;
 };
 
-const API_URL = "http://localhost:4000";
+import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "";
 const ZERO_GUID = "00000000-0000-0000-0000-000000000000";
 
 const money = new Intl.NumberFormat("ru-RU", {
@@ -329,22 +329,30 @@ export function OnecOverview({ period }: { period: Period }) {
 
       <section className="kpi-grid">
         <article className="kpi-card">
-          <div className="kpi-top"><span>Сумма документов</span></div>
+          <div className="kpi-top">
+            <span>Сумма документов</span>
+          </div>
           <strong>{money.format(view.revenue)}</strong>
           <p>проведённые отчёты 1С</p>
         </article>
         <article className="kpi-card">
-          <div className="kpi-top"><span>Возвраты</span></div>
+          <div className="kpi-top">
+            <span>Возвраты</span>
+          </div>
           <strong>{money.format(view.returns)}</strong>
           <p>поле «СуммаВозвратов»</p>
         </article>
         <article className="kpi-card">
-          <div className="kpi-top"><span>Продано единиц</span></div>
+          <div className="kpi-top">
+            <span>Продано единиц</span>
+          </div>
           <strong>{number.format(view.quantity)}</strong>
           <p>по товарным строкам отчётов</p>
         </article>
         <article className="kpi-card">
-          <div className="kpi-top"><span>Товаров в продажах</span></div>
+          <div className="kpi-top">
+            <span>Товаров в продажах</span>
+          </div>
           <strong>{number.format(view.uniqueProducts)}</strong>
           <p>уникальная номенклатура</p>
         </article>
@@ -399,7 +407,9 @@ export function OnecOverview({ period }: { period: Period }) {
           </div>
           <div className="insight">
             <b>Средний чек</b>
-            <span>Нет данных: без количества чеков показатель не рассчитывается</span>
+            <span>
+              Нет данных: без количества чеков показатель не рассчитывается
+            </span>
           </div>
           <div className="insight">
             <b>Продавцы</b>
@@ -468,7 +478,10 @@ export function OnecStock() {
         }
         setPayload(data);
       } catch (loadError) {
-        if (loadError instanceof DOMException && loadError.name === "AbortError") {
+        if (
+          loadError instanceof DOMException &&
+          loadError.name === "AbortError"
+        ) {
           return;
         }
         setError(
@@ -491,10 +504,16 @@ export function OnecStock() {
       (payload.references?.products || []).map((item) => [item.Ref_Key, item]),
     );
     const warehouses = new Map(
-      (payload.references?.warehouses || []).map((item) => [item.Ref_Key, item]),
+      (payload.references?.warehouses || []).map((item) => [
+        item.Ref_Key,
+        item,
+      ]),
     );
     const categories = new Map(
-      (payload.references?.categories || []).map((item) => [item.Ref_Key, item]),
+      (payload.references?.categories || []).map((item) => [
+        item.Ref_Key,
+        item,
+      ]),
     );
     const suppliers = new Map(
       (payload.references?.suppliers || []).map((item) => [item.Ref_Key, item]),
@@ -526,34 +545,36 @@ export function OnecStock() {
       }
     >();
 
-    balances.filter((item) => matchesWarehouse(item.Склад_Key)).forEach((item) => {
-      const product = products.get(item.Номенклатура_Key);
-      const categoryKey = product?.BusinessCategory_Key || "";
-      const current = grouped.get(item.Номенклатура_Key) || {
-        key: item.Номенклатура_Key,
-        sku: product?.Артикул || product?.Code || "Без артикула",
-        name:
-          product?.НаименованиеПолное ||
-          product?.Description ||
-          `Товар ${item.Номенклатура_Key.slice(0, 8)}`,
-        categoryKey,
-        category:
-          product?.BusinessCategory ||
-          categories.get(categoryKey)?.Description ||
-          "Не классифицировано",
-        quantity: 0,
-        reserved: 0,
-        cost: 0,
-        locations: new Set<string>(),
-      };
-      current.quantity += Number(item.КоличествоBalance || 0);
-      current.reserved += Number(item.РезервBalance || 0);
-      current.cost += Number(item.ор_СебестоимостьBalance || 0);
-      current.locations.add(
-        warehouses.get(item.Склад_Key)?.Description || "Склад не определён",
-      );
-      grouped.set(item.Номенклатура_Key, current);
-    });
+    balances
+      .filter((item) => matchesWarehouse(item.Склад_Key))
+      .forEach((item) => {
+        const product = products.get(item.Номенклатура_Key);
+        const categoryKey = product?.BusinessCategory_Key || "";
+        const current = grouped.get(item.Номенклатура_Key) || {
+          key: item.Номенклатура_Key,
+          sku: product?.Артикул || product?.Code || "Без артикула",
+          name:
+            product?.НаименованиеПолное ||
+            product?.Description ||
+            `Товар ${item.Номенклатура_Key.slice(0, 8)}`,
+          categoryKey,
+          category:
+            product?.BusinessCategory ||
+            categories.get(categoryKey)?.Description ||
+            "Не классифицировано",
+          quantity: 0,
+          reserved: 0,
+          cost: 0,
+          locations: new Set<string>(),
+        };
+        current.quantity += Number(item.КоличествоBalance || 0);
+        current.reserved += Number(item.РезервBalance || 0);
+        current.cost += Number(item.ор_СебестоимостьBalance || 0);
+        current.locations.add(
+          warehouses.get(item.Склад_Key)?.Description || "Склад не определён",
+        );
+        grouped.set(item.Номенклатура_Key, current);
+      });
 
     const rows = [...grouped.values()].map((item) => {
       const available = Math.max(item.quantity - item.reserved, 0);
@@ -582,15 +603,23 @@ export function OnecStock() {
       .filter(
         (item) =>
           !query ||
-          `${item.sku} ${item.name} ${item.locations}`.toLowerCase().includes(query),
+          `${item.sku} ${item.name} ${item.locations}`
+            .toLowerCase()
+            .includes(query),
       )
       .sort((left, right) => left.available - right.available);
 
     const operationMatches = (document: StockOperation) =>
       !document.Склад_Key || matchesWarehouse(document.Склад_Key);
-    const receipts = (payload.operations?.receipts || []).filter(operationMatches);
-    const writeOffs = (payload.operations?.writeOffs || []).filter(operationMatches);
-    const recounts = (payload.operations?.recounts || []).filter(operationMatches);
+    const receipts = (payload.operations?.receipts || []).filter(
+      operationMatches,
+    );
+    const writeOffs = (payload.operations?.writeOffs || []).filter(
+      operationMatches,
+    );
+    const recounts = (payload.operations?.recounts || []).filter(
+      operationMatches,
+    );
     const latestReceiptTime = Math.max(
       ...receipts.map((item) => new Date(item.Date).getTime()),
       0,
@@ -609,7 +638,8 @@ export function OnecStock() {
         const bucket = 7 - distance;
         if (bucket < 0 || bucket > 7) return;
         (document.Товары || []).forEach((line) => {
-          if (line.Номенклатура_Key) receiptWeeks[bucket].sku.add(line.Номенклатура_Key);
+          if (line.Номенклатура_Key)
+            receiptWeeks[bucket].sku.add(line.Номенклатура_Key);
           receiptWeeks[bucket].units += Number(line.Количество || 0);
         });
       });
@@ -627,7 +657,10 @@ export function OnecStock() {
         return {
           key: `${document.Ref_Key}-${line.LineNumber}`,
           sku: product?.Артикул || product?.Code || "Без артикула",
-          name: product?.НаименованиеПолное || product?.Description || "Товар не найден",
+          name:
+            product?.НаименованиеПолное ||
+            product?.Description ||
+            "Товар не найден",
           quantity: Number(line.Количество || 0),
           reason:
             document.ОснованиеСписания ||
@@ -644,7 +677,10 @@ export function OnecStock() {
         return {
           key: `${document.Ref_Key}-${line.LineNumber}`,
           sku: product?.Артикул || product?.Code || "Без артикула",
-          name: product?.НаименованиеПолное || product?.Description || "Товар не найден",
+          name:
+            product?.НаименованиеПолное ||
+            product?.Description ||
+            "Товар не найден",
           accounting,
           actual,
           difference: actual - accounting,
@@ -665,10 +701,7 @@ export function OnecStock() {
       availableWarehouses: [...warehouses.values()]
         .filter((item) => matchesWarehouseType(item.Ref_Key))
         .sort((left, right) =>
-          (left.Description || "").localeCompare(
-            right.Description || "",
-            "ru",
-          ),
+          (left.Description || "").localeCompare(right.Description || "", "ru"),
         ),
       receiptChart,
       maxReceiptSku,
@@ -682,7 +715,9 @@ export function OnecStock() {
           warehouses.get(document.Склад_Key || "")?.Description ||
           "Склад не указан",
         sku: new Set(
-          (document.Товары || []).map((line) => line.Номенклатура_Key).filter(Boolean),
+          (document.Товары || [])
+            .map((line) => line.Номенклатура_Key)
+            .filter(Boolean),
         ).size,
       })),
       writeOffRows,
@@ -690,7 +725,10 @@ export function OnecStock() {
     };
   }, [payload, warehouseMode, warehouseKey, category, status, search]);
 
-  useEffect(() => setPage(1), [warehouseMode, warehouseKey, category, status, search]);
+  useEffect(
+    () => setPage(1),
+    [warehouseMode, warehouseKey, category, status, search],
+  );
   useEffect(() => {
     setWriteOffPage(1);
     setRecountPage(1);
@@ -771,7 +809,10 @@ export function OnecStock() {
           </label>
           <div className="stock-warehouse-type">
             <span>Тип помещения</span>
-            <div className="warehouse-selector" aria-label="Выбор типа помещения">
+            <div
+              className="warehouse-selector"
+              aria-label="Выбор типа помещения"
+            >
               {[
                 ["all", "Все"],
                 ["sales-floor", "Торговый зал"],
@@ -796,22 +837,30 @@ export function OnecStock() {
 
       <section className="kpi-grid stock-kpis">
         <article className="kpi-card">
-          <div className="kpi-top"><span>SKU с остатком</span></div>
+          <div className="kpi-top">
+            <span>SKU с остатком</span>
+          </div>
           <strong>{number.format(view.rows.length)}</strong>
           <p>позиций вернул регистр 1С</p>
         </article>
         <article className="kpi-card">
-          <div className="kpi-top"><span>Остаток, единиц</span></div>
+          <div className="kpi-top">
+            <span>Остаток, единиц</span>
+          </div>
           <strong>{number.format(view.totalQuantity)}</strong>
           <p>по выбранным складам</p>
         </article>
         <article className="kpi-card">
-          <div className="kpi-top"><span>Осталось мало</span></div>
+          <div className="kpi-top">
+            <span>Осталось мало</span>
+          </div>
           <strong>{number.format(view.low)}</strong>
           <p>доступно не более 5 единиц</p>
         </article>
         <article className="kpi-card">
-          <div className="kpi-top"><span>В резерве</span></div>
+          <div className="kpi-top">
+            <span>В резерве</span>
+          </div>
           <strong>{number.format(view.totalReserved)}</strong>
           <p>{view.zero} позиций с нулевым остатком</p>
         </article>
@@ -833,7 +882,10 @@ export function OnecStock() {
                 value={search}
               />
             </label>
-            <select value={category} onChange={(event) => setCategory(event.target.value)}>
+            <select
+              value={category}
+              onChange={(event) => setCategory(event.target.value)}
+            >
               <option value="all">Все категории</option>
               {view.categories.map((item) => (
                 <option key={item.Ref_Key} value={item.Ref_Key}>
@@ -841,7 +893,10 @@ export function OnecStock() {
                 </option>
               ))}
             </select>
-            <select value={status} onChange={(event) => setStatus(event.target.value)}>
+            <select
+              value={status}
+              onChange={(event) => setStatus(event.target.value)}
+            >
               <option value="all">Все статусы</option>
               <option value="available">В наличии</option>
               <option value="low">Мало</option>
@@ -868,13 +923,19 @@ export function OnecStock() {
             <tbody>
               {visibleRows.map((item) => (
                 <tr key={item.key}>
-                  <td><code>{item.sku}</code></td>
-                  <td><strong>{item.name}</strong></td>
+                  <td>
+                    <code>{item.sku}</code>
+                  </td>
+                  <td>
+                    <strong>{item.name}</strong>
+                  </td>
                   <td>{item.locations}</td>
                   <td>{item.category}</td>
                   <td>{number.format(item.quantity)}</td>
                   <td>{number.format(item.reserved)}</td>
-                  <td><strong>{number.format(item.available)}</strong></td>
+                  <td>
+                    <strong>{number.format(item.available)}</strong>
+                  </td>
                   <td>
                     <span className={`stock-status ${item.status}`}>
                       {item.status === "zero"
@@ -903,7 +964,9 @@ export function OnecStock() {
             >
               ←
             </button>
-            <span>{currentPage} / {pages}</span>
+            <span>
+              {currentPage} / {pages}
+            </span>
             <button
               disabled={currentPage === pages}
               onClick={() => setPage((value) => Math.min(value + 1, pages))}
@@ -967,13 +1030,22 @@ export function OnecStock() {
             <div className="stock-compact-table-wrap">
               <table className="stock-compact-table">
                 <thead>
-                  <tr><th>Дата</th><th>Поставщик</th><th>Склад</th><th>SKU</th></tr>
+                  <tr>
+                    <th>Дата</th>
+                    <th>Поставщик</th>
+                    <th>Склад</th>
+                    <th>SKU</th>
+                  </tr>
                 </thead>
                 <tbody>
                   {view.recentReceipts.map((document) => (
                     <tr key={document.Ref_Key}>
-                      <td>{new Date(document.Date).toLocaleDateString("ru-RU")}</td>
-                      <td><strong>{document.supplier}</strong></td>
+                      <td>
+                        {new Date(document.Date).toLocaleDateString("ru-RU")}
+                      </td>
+                      <td>
+                        <strong>{document.supplier}</strong>
+                      </td>
                       <td>{document.warehouse}</td>
                       <td>{document.sku}</td>
                     </tr>
@@ -1003,17 +1075,29 @@ export function OnecStock() {
               <p>Фактические документы списания с причиной из 1С</p>
             </div>
             <span className="tag amber">
-              {number.format(view.writeOffRows.reduce((sum, item) => sum + item.quantity, 0))} ед.
+              {number.format(
+                view.writeOffRows.reduce((sum, item) => sum + item.quantity, 0),
+              )}{" "}
+              ед.
             </span>
           </div>
           {view.writeOffRows.length ? (
             <div className="stock-compact-table-wrap">
               <table className="stock-compact-table">
-                <thead><tr><th>Товар</th><th>Кол-во</th><th>Причина</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>Товар</th>
+                    <th>Кол-во</th>
+                    <th>Причина</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {visibleWriteOffRows.map((item) => (
                     <tr key={item.key}>
-                      <td><strong>{item.name}</strong><small>{item.sku}</small></td>
+                      <td>
+                        <strong>{item.name}</strong>
+                        <small>{item.sku}</small>
+                      </td>
                       <td>{number.format(item.quantity)}</td>
                       <td>{item.reason}</td>
                     </tr>
@@ -1033,20 +1117,29 @@ export function OnecStock() {
           {view.writeOffRows.length > qualityPageSize && (
             <div className="onec-pagination stock-quality-pagination">
               <span>
-                Показано {visibleWriteOffRows.length} из {view.writeOffRows.length}
+                Показано {visibleWriteOffRows.length} из{" "}
+                {view.writeOffRows.length}
               </span>
               <nav aria-label="Пагинация брака и списаний">
                 <button
                   disabled={currentWriteOffPage === 1}
-                  onClick={() => setWriteOffPage((value) => Math.max(value - 1, 1))}
+                  onClick={() =>
+                    setWriteOffPage((value) => Math.max(value - 1, 1))
+                  }
                   type="button"
                 >
                   ←
                 </button>
-                <span>{currentWriteOffPage} / {writeOffPages}</span>
+                <span>
+                  {currentWriteOffPage} / {writeOffPages}
+                </span>
                 <button
                   disabled={currentWriteOffPage === writeOffPages}
-                  onClick={() => setWriteOffPage((value) => Math.min(value + 1, writeOffPages))}
+                  onClick={() =>
+                    setWriteOffPage((value) =>
+                      Math.min(value + 1, writeOffPages),
+                    )
+                  }
                   type="button"
                 >
                   →
@@ -1063,22 +1156,36 @@ export function OnecStock() {
               <p>Учётное количество против фактического</p>
             </div>
             <span className="tag green">
-              {view.recountRows.filter((item) => item.difference !== 0).length} расхожд.
+              {view.recountRows.filter((item) => item.difference !== 0).length}{" "}
+              расхожд.
             </span>
           </div>
           {view.recountRows.length ? (
             <div className="stock-compact-table-wrap">
               <table className="stock-compact-table">
-                <thead><tr><th>Товар</th><th>По базе</th><th>Факт</th><th>Разница</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>Товар</th>
+                    <th>По базе</th>
+                    <th>Факт</th>
+                    <th>Разница</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {visibleRecountRows.map((item) => (
                     <tr key={item.key}>
-                      <td><strong>{item.name}</strong><small>{item.sku}</small></td>
+                      <td>
+                        <strong>{item.name}</strong>
+                        <small>{item.sku}</small>
+                      </td>
                       <td>{number.format(item.accounting)}</td>
                       <td>{number.format(item.actual)}</td>
                       <td>
-                        <span className={`stock-difference ${item.difference === 0 ? "ok" : "bad"}`}>
-                          {item.difference > 0 ? "+" : ""}{number.format(item.difference)}
+                        <span
+                          className={`stock-difference ${item.difference === 0 ? "ok" : "bad"}`}
+                        >
+                          {item.difference > 0 ? "+" : ""}
+                          {number.format(item.difference)}
                         </span>
                       </td>
                     </tr>
@@ -1098,20 +1205,27 @@ export function OnecStock() {
           {view.recountRows.length > qualityPageSize && (
             <div className="onec-pagination stock-quality-pagination">
               <span>
-                Показано {visibleRecountRows.length} из {view.recountRows.length}
+                Показано {visibleRecountRows.length} из{" "}
+                {view.recountRows.length}
               </span>
               <nav aria-label="Пагинация сверки остатков">
                 <button
                   disabled={currentRecountPage === 1}
-                  onClick={() => setRecountPage((value) => Math.max(value - 1, 1))}
+                  onClick={() =>
+                    setRecountPage((value) => Math.max(value - 1, 1))
+                  }
                   type="button"
                 >
                   ←
                 </button>
-                <span>{currentRecountPage} / {recountPages}</span>
+                <span>
+                  {currentRecountPage} / {recountPages}
+                </span>
                 <button
                   disabled={currentRecountPage === recountPages}
-                  onClick={() => setRecountPage((value) => Math.min(value + 1, recountPages))}
+                  onClick={() =>
+                    setRecountPage((value) => Math.min(value + 1, recountPages))
+                  }
                   type="button"
                 >
                   →
@@ -1161,13 +1275,18 @@ export function OnecTeam() {
         }
         if (!consultantResponse.ok) {
           throw new Error(
-            consultantData.message || `Ошибка HTTP ${consultantResponse.status}`,
+            consultantData.message ||
+              `Ошибка HTTP ${consultantResponse.status}`,
           );
         }
         setPayload(sellerData);
         setConsultantPayload(consultantData);
       } catch (loadError) {
-        if (loadError instanceof DOMException && loadError.name === "AbortError") return;
+        if (
+          loadError instanceof DOMException &&
+          loadError.name === "AbortError"
+        )
+          return;
         setError(
           loadError instanceof Error
             ? loadError.message
@@ -1213,11 +1332,14 @@ export function OnecTeam() {
       const current = grouped.get(key) || {
         key,
         sellerKey: item.Продавец_Key,
-        seller: seller?.Description || `Продавец ${item.Продавец_Key.slice(0, 8)}`,
+        seller:
+          seller?.Description || `Продавец ${item.Продавец_Key.slice(0, 8)}`,
         storeKey: resolvedStoreKey,
         store:
           stores.get(resolvedStoreKey)?.Description ||
-          (resolvedStoreKey === ZERO_GUID ? "Филиал не указан" : "Филиал не найден"),
+          (resolvedStoreKey === ZERO_GUID
+            ? "Филиал не указан"
+            : "Филиал не найден"),
         revenue: 0,
         revenueWithoutDiscount: 0,
         quantity: 0,
@@ -1237,11 +1359,15 @@ export function OnecTeam() {
     const rows = allRows.filter(
       (item) =>
         (storeKey === "all" || item.storeKey === storeKey) &&
-        (!query || `${item.seller} ${item.store}`.toLowerCase().includes(query)),
+        (!query ||
+          `${item.seller} ${item.store}`.toLowerCase().includes(query)),
     );
     const totalRevenue = rows.reduce((sum, item) => sum + item.revenue, 0);
     const totalQuantity = rows.reduce((sum, item) => sum + item.quantity, 0);
-    const branchMap = new Map<string, { key: string; name: string; revenue: number }>();
+    const branchMap = new Map<
+      string,
+      { key: string; name: string; revenue: number }
+    >();
     rows.forEach((item) => {
       const branch = branchMap.get(item.storeKey) || {
         key: item.storeKey,
@@ -1353,11 +1479,7 @@ export function OnecTeam() {
   if (loading || error) {
     return (
       <div className="page-stack">
-        <DataState
-          loading={loading}
-          error={error}
-          empty={false}
-        />
+        <DataState loading={loading} error={error} empty={false} />
       </div>
     );
   }
@@ -1403,7 +1525,10 @@ export function OnecTeam() {
             </p>
           </div>
           <div className="team-filter-groups">
-            <select value={storeKey} onChange={(event) => setStoreKey(event.target.value)}>
+            <select
+              value={storeKey}
+              onChange={(event) => setStoreKey(event.target.value)}
+            >
               <option value="all">Все филиалы</option>
               {teamStores.map((item) => (
                 <option key={item.Ref_Key} value={item.Ref_Key}>
@@ -1430,10 +1555,26 @@ export function OnecTeam() {
           </div>
         </div>
         <div className="team-plan-metrics">
-          <div><span>Продажи команды</span><strong>{money.format(view.totalRevenue)}</strong><small>по выбранному филиалу</small></div>
-          <div><span>Продано единиц</span><strong>{number.format(view.totalQuantity)}</strong><small>оборот регистра продаж</small></div>
-          <div><span>Продавцов</span><strong>{view.sellers}</strong><small>с продажами за период</small></div>
-          <div><span>Филиалов</span><strong>{view.branches.length}</strong><small>участвуют в продажах</small></div>
+          <div>
+            <span>Продажи команды</span>
+            <strong>{money.format(view.totalRevenue)}</strong>
+            <small>по выбранному филиалу</small>
+          </div>
+          <div>
+            <span>Продано единиц</span>
+            <strong>{number.format(view.totalQuantity)}</strong>
+            <small>оборот регистра продаж</small>
+          </div>
+          <div>
+            <span>Продавцов</span>
+            <strong>{view.sellers}</strong>
+            <small>с продажами за период</small>
+          </div>
+          <div>
+            <span>Филиалов</span>
+            <strong>{view.branches.length}</strong>
+            <small>участвуют в продажах</small>
+          </div>
         </div>
       </section>
 
@@ -1448,9 +1589,18 @@ export function OnecTeam() {
             </p>
           </div>
           <div className="consultant-kpis">
-            <div><span>Консультантов</span><strong>{consultantView.consultants}</strong></div>
-            <div><span>Выручка</span><strong>{money.format(consultantView.totalRevenue)}</strong></div>
-            <div><span>Продано</span><strong>{number.format(consultantView.totalQuantity)} ед.</strong></div>
+            <div>
+              <span>Консультантов</span>
+              <strong>{consultantView.consultants}</strong>
+            </div>
+            <div>
+              <span>Выручка</span>
+              <strong>{money.format(consultantView.totalRevenue)}</strong>
+            </div>
+            <div>
+              <span>Продано</span>
+              <strong>{number.format(consultantView.totalQuantity)} ед.</strong>
+            </div>
           </div>
         </div>
         {consultantView.rows.length ? (
@@ -1458,17 +1608,28 @@ export function OnecTeam() {
             <table className="onec-table consultant-table">
               <thead>
                 <tr>
-                  <th>Место</th><th>Консультант</th><th>Филиал</th>
-                  <th>Выручка</th><th>Продано</th><th>Доля</th><th>Возвраты</th>
+                  <th>Место</th>
+                  <th>Консультант</th>
+                  <th>Филиал</th>
+                  <th>Выручка</th>
+                  <th>Продано</th>
+                  <th>Доля</th>
+                  <th>Возвраты</th>
                 </tr>
               </thead>
               <tbody>
                 {consultantView.rows.slice(0, 20).map((item) => (
                   <tr key={item.key}>
-                    <td><span className="team-rank-place">{item.rank}</span></td>
-                    <td><strong>{item.consultant}</strong></td>
+                    <td>
+                      <span className="team-rank-place">{item.rank}</span>
+                    </td>
+                    <td>
+                      <strong>{item.consultant}</strong>
+                    </td>
                     <td>{item.store}</td>
-                    <td><strong>{money.format(item.revenue)}</strong></td>
+                    <td>
+                      <strong>{money.format(item.revenue)}</strong>
+                    </td>
                     <td>{number.format(item.quantity)} ед.</td>
                     <td>{number.format(item.share)}%</td>
                     <td>{number.format(item.returnLines)} строк</td>
@@ -1481,11 +1642,17 @@ export function OnecTeam() {
           <div className="consultant-empty-state">
             <strong>В товарных строках консультант пока не заполнен</strong>
             <p>
-              Проверено чеков: {consultantPayload.meta?.diagnostics?.scannedChecks || 0},
-              товарных строк чеков: {consultantPayload.meta?.diagnostics?.checkLines || 0},
-              строк чеков с консультантом: {consultantPayload.meta?.diagnostics?.checkLinesWithConsultant || 0}.
-              Проверено розничных отчётов: {consultantPayload.meta?.diagnostics?.reports || 0},
-              всего строк с консультантом: {consultantPayload.meta?.diagnostics?.linesWithConsultant || 0}.
+              Проверено чеков:{" "}
+              {consultantPayload.meta?.diagnostics?.scannedChecks || 0},
+              товарных строк чеков:{" "}
+              {consultantPayload.meta?.diagnostics?.checkLines || 0}, строк
+              чеков с консультантом:{" "}
+              {consultantPayload.meta?.diagnostics?.checkLinesWithConsultant ||
+                0}
+              . Проверено розничных отчётов:{" "}
+              {consultantPayload.meta?.diagnostics?.reports || 0}, всего строк с
+              консультантом:{" "}
+              {consultantPayload.meta?.diagnostics?.linesWithConsultant || 0}.
             </p>
           </div>
         )}
@@ -1494,13 +1661,25 @@ export function OnecTeam() {
       <section className="team-branch-grid">
         <article className="panel team-branch-panel">
           <div className="panel-head">
-            <div><h2>Продажи по филиалам</h2><p>Доля филиала в общей выручке</p></div>
+            <div>
+              <h2>Продажи по филиалам</h2>
+              <p>Доля филиала в общей выручке</p>
+            </div>
           </div>
           <div className="team-branch-bars">
             {view.branches.map((branch) => (
               <div key={branch.key}>
-                <div><strong>{branch.name}</strong><span>{money.format(branch.revenue)}</span></div>
-                <i><b style={{ width: `${(branch.revenue / maxBranchRevenue) * 100}%` }} /></i>
+                <div>
+                  <strong>{branch.name}</strong>
+                  <span>{money.format(branch.revenue)}</span>
+                </div>
+                <i>
+                  <b
+                    style={{
+                      width: `${(branch.revenue / maxBranchRevenue) * 100}%`,
+                    }}
+                  />
+                </i>
               </div>
             ))}
           </div>
@@ -1510,13 +1689,18 @@ export function OnecTeam() {
           <strong>{view.rows[0]?.seller || "Нет данных"}</strong>
           <p>{view.rows[0]?.store || "Филиал не указан"}</p>
           <b>{money.format(view.rows[0]?.revenue || 0)}</b>
-          <small>{number.format(view.rows[0]?.quantity || 0)} проданных единиц</small>
+          <small>
+            {number.format(view.rows[0]?.quantity || 0)} проданных единиц
+          </small>
         </article>
       </section>
 
       <section className="panel onec-team-table-panel">
         <div className="stock-toolbar">
-          <div><h2>Рейтинг продавцов</h2><p>Кто и в каком филиале сделал продажи</p></div>
+          <div>
+            <h2>Рейтинг продавцов</h2>
+            <p>Кто и в каком филиале сделал продажи</p>
+          </div>
           <label className="search onec-stock-search">
             <span aria-hidden>⌕</span>
             <input
@@ -1530,18 +1714,37 @@ export function OnecTeam() {
         <div className="onec-table-wrap">
           <table className="onec-table onec-team-table">
             <thead>
-              <tr><th>Место</th><th>Продавец</th><th>Филиал</th><th>Продажи</th><th>Продано</th><th>Доля команды</th><th>Скидка</th></tr>
+              <tr>
+                <th>Место</th>
+                <th>Продавец</th>
+                <th>Филиал</th>
+                <th>Продажи</th>
+                <th>Продано</th>
+                <th>Доля команды</th>
+                <th>Скидка</th>
+              </tr>
             </thead>
             <tbody>
               {visibleRows.map((item) => (
                 <tr key={item.key}>
-                  <td><span className="team-rank-place">{item.rank}</span></td>
-                  <td><strong>{item.seller}</strong></td>
+                  <td>
+                    <span className="team-rank-place">{item.rank}</span>
+                  </td>
+                  <td>
+                    <strong>{item.seller}</strong>
+                  </td>
                   <td>{item.store}</td>
-                  <td><strong>{money.format(item.revenue)}</strong></td>
+                  <td>
+                    <strong>{money.format(item.revenue)}</strong>
+                  </td>
                   <td>{number.format(item.quantity)} ед.</td>
                   <td>
-                    <div className="team-share-cell"><span>{number.format(item.share)}%</span><i><b style={{ width: `${Math.min(item.share, 100)}%` }} /></i></div>
+                    <div className="team-share-cell">
+                      <span>{number.format(item.share)}%</span>
+                      <i>
+                        <b style={{ width: `${Math.min(item.share, 100)}%` }} />
+                      </i>
+                    </div>
                   </td>
                   <td>{money.format(item.discount)}</td>
                 </tr>
@@ -1550,11 +1753,27 @@ export function OnecTeam() {
           </table>
         </div>
         <div className="onec-pagination">
-          <span>Показано {visibleRows.length} из {view.rows.length}</span>
+          <span>
+            Показано {visibleRows.length} из {view.rows.length}
+          </span>
           <nav aria-label="Пагинация продавцов">
-            <button disabled={currentPage === 1} onClick={() => setPage((value) => Math.max(value - 1, 1))} type="button">←</button>
-            <span>{currentPage} / {pages}</span>
-            <button disabled={currentPage === pages} onClick={() => setPage((value) => Math.min(value + 1, pages))} type="button">→</button>
+            <button
+              disabled={currentPage === 1}
+              onClick={() => setPage((value) => Math.max(value - 1, 1))}
+              type="button"
+            >
+              ←
+            </button>
+            <span>
+              {currentPage} / {pages}
+            </span>
+            <button
+              disabled={currentPage === pages}
+              onClick={() => setPage((value) => Math.min(value + 1, pages))}
+              type="button"
+            >
+              →
+            </button>
           </nav>
         </div>
       </section>

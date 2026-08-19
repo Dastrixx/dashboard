@@ -80,7 +80,7 @@ type ProductRow = {
   abc: "A" | "B" | "C";
 };
 
-const API_URL = "http://localhost:4000";
+import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "";
 const DAY_MS = 86_400_000;
 const TABLE_PAGE_SIZE = 20;
 
@@ -144,10 +144,7 @@ function buildProductRows(
     });
 
   const totalRevenue =
-    [...aggregate.values()].reduce(
-      (sum, item) => sum + item.revenue,
-      0,
-    ) || 1;
+    [...aggregate.values()].reduce((sum, item) => sum + item.revenue, 0) || 1;
   let cumulative = 0;
 
   return [...aggregate.entries()]
@@ -218,8 +215,7 @@ export function OnecSales() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
   const [tablePage, setTablePage] = useState(1);
-  const [rankingPeriod, setRankingPeriod] =
-    useState<AnalyticsPeriod>("month");
+  const [rankingPeriod, setRankingPeriod] = useState<AnalyticsPeriod>("month");
   const [rankingCategory, setRankingCategory] = useState("");
   const [topLimit, setTopLimit] = useState(10);
   const [antiLimit, setAntiLimit] = useState(10);
@@ -263,11 +259,13 @@ export function OnecSales() {
             `${API_URL}/api/dashboard/onec-reports?top=500&days=60`,
             { signal: controller.signal },
           );
-          const referenceData = (await referenceResponse.json()) as Partial<OnecResponse>;
+          const referenceData =
+            (await referenceResponse.json()) as Partial<OnecResponse>;
 
           if (!referenceResponse.ok) {
             throw new Error(
-              referenceData.message || `Ошибка HTTP ${referenceResponse.status}`,
+              referenceData.message ||
+                `Ошибка HTTP ${referenceResponse.status}`,
             );
           }
 
@@ -380,14 +378,10 @@ export function OnecSales() {
       }))
       .sort((left, right) => right.value - left.value);
 
-    const bucketCount =
-      period === "day" ? 6 : period === "week" ? 7 : 30;
+    const bucketCount = period === "day" ? 6 : period === "week" ? 7 : 30;
     const bucketSize = duration / bucketCount;
 
-    const makeBuckets = (
-      source: OnecRetailReport[],
-      rangeStart: number,
-    ) =>
+    const makeBuckets = (source: OnecRetailReport[], rangeStart: number) =>
       Array.from({ length: bucketCount }, (_, index) => ({
         label:
           period === "month"
@@ -436,8 +430,7 @@ export function OnecSales() {
     );
     if (!latestTimestamp) return [];
 
-    const from =
-      latestTimestamp - PERIODS[rankingPeriod].days * DAY_MS + 1;
+    const from = latestTimestamp - PERIODS[rankingPeriod].days * DAY_MS + 1;
     const sourceReports = reports.filter((report) =>
       inRange(report.Date, from, latestTimestamp),
     );
@@ -462,8 +455,7 @@ export function OnecSales() {
   const topRankingRows = filteredRankingRows.slice(0, topLimit);
   const antiRankingRows = [...filteredRankingRows]
     .sort(
-      (left, right) =>
-        left.sold - right.sold || left.revenue - right.revenue,
+      (left, right) => left.sold - right.sold || left.revenue - right.revenue,
     )
     .slice(0, antiLimit);
 
@@ -476,9 +468,7 @@ export function OnecSales() {
       (row) =>
         (!category || row.category === category) &&
         (!normalizedQuery ||
-          `${row.name} ${row.article}`
-            .toLowerCase()
-            .includes(normalizedQuery)),
+          `${row.name} ${row.article}`.toLowerCase().includes(normalizedQuery)),
     );
   }, [analytics, category, query]);
 
@@ -565,8 +555,7 @@ export function OnecSales() {
       y:
         chartHeight -
         chartPadding -
-        (item.value / maxChartValue) *
-          (chartHeight - chartPadding * 2),
+        (item.value / maxChartValue) * (chartHeight - chartPadding * 2),
     }));
   const currentChartPoints = makeChartPoints(analytics.currentBuckets);
   const previousChartPoints = makeChartPoints(analytics.previousBuckets);
@@ -638,19 +627,25 @@ export function OnecSales() {
         </article>
 
         <article className="kpi-card">
-          <div className="kpi-top"><span>Продано</span></div>
+          <div className="kpi-top">
+            <span>Продано</span>
+          </div>
           <strong>{number.format(analytics.sold)} ед.</strong>
           <p>по товарным строкам документов</p>
         </article>
 
         <article className="kpi-card">
-          <div className="kpi-top"><span>Средняя цена продажи</span></div>
+          <div className="kpi-top">
+            <span>Средняя цена продажи</span>
+          </div>
           <strong>{money.format(analytics.averagePrice)}</strong>
           <p>выручка на проданную единицу</p>
         </article>
 
         <article className="kpi-card">
-          <div className="kpi-top"><span>Активных SKU</span></div>
+          <div className="kpi-top">
+            <span>Активных SKU</span>
+          </div>
           <strong>{number.format(analytics.activeSku)}</strong>
           <p>были продажи за период</p>
         </article>
@@ -661,13 +656,17 @@ export function OnecSales() {
           <div className="panel-head">
             <div>
               <h2>Динамика выручки</h2>
-              <p>
-                {PERIODS[period].label} в сравнении с предыдущим периодом
-              </p>
+              <p>{PERIODS[period].label} в сравнении с предыдущим периодом</p>
             </div>
             <div className="chart-key compact">
-              <span><i className="actual" />Текущий</span>
-              <span><i className="previous" />Предыдущий</span>
+              <span>
+                <i className="actual" />
+                Текущий
+              </span>
+              <span>
+                <i className="previous" />
+                Предыдущий
+              </span>
             </div>
           </div>
 
@@ -717,7 +716,9 @@ export function OnecSales() {
                   cy={point.y}
                   r="3"
                 >
-                  <title>{point.label}: {money.format(point.value)}</title>
+                  <title>
+                    {point.label}: {money.format(point.value)}
+                  </title>
                 </circle>
               ))}
             </svg>
@@ -745,7 +746,9 @@ export function OnecSales() {
                     {item.share.toFixed(1)}% · {money.format(item.value)}
                   </span>
                 </div>
-                <i><b style={{ width: `${item.share}%` }} /></i>
+                <i>
+                  <b style={{ width: `${item.share}%` }} />
+                </i>
               </div>
             ))}
             {!analytics.categoryRows.length && (
@@ -785,9 +788,7 @@ export function OnecSales() {
           <div>
             <span className="onec-source-kicker">Аналитика спроса</span>
             <h2>Рейтинг товаров</h2>
-            <p>
-              Выручка и количество продаж {PERIODS[rankingPeriod].caption}
-            </p>
+            <p>Выручка и количество продаж {PERIODS[rankingPeriod].caption}</p>
           </div>
           <div className="onec-ranking-filters">
             <label className="select-control">
@@ -801,7 +802,9 @@ export function OnecSales() {
               >
                 <option value="">Все категории</option>
                 {rankingCategories.map((item) => (
-                  <option value={item} key={item}>{item}</option>
+                  <option value={item} key={item}>
+                    {item}
+                  </option>
                 ))}
               </select>
             </label>
@@ -860,7 +863,9 @@ export function OnecSales() {
                   <b>{index + 1}</b>
                   <div>
                     <strong>{row.name}</strong>
-                    <span>{row.article} · {number.format(row.sold)} ед.</span>
+                    <span>
+                      {row.article} · {number.format(row.sold)} ед.
+                    </span>
                   </div>
                   <em>{money.format(row.revenue)}</em>
                 </div>
@@ -878,7 +883,8 @@ export function OnecSales() {
               >
                 Ещё {Math.min(10, filteredRankingRows.length - topLimit)}
                 <small>
-                  Показано {topRankingRows.length} из {filteredRankingRows.length}
+                  Показано {topRankingRows.length} из{" "}
+                  {filteredRankingRows.length}
                 </small>
               </button>
             )}
@@ -918,7 +924,9 @@ export function OnecSales() {
                   <b>{index + 1}</b>
                   <div>
                     <strong>{row.name}</strong>
-                    <span>{row.article} · {money.format(row.revenue)}</span>
+                    <span>
+                      {row.article} · {money.format(row.revenue)}
+                    </span>
                   </div>
                   <em>{number.format(row.sold)} продаж</em>
                 </div>
@@ -936,7 +944,8 @@ export function OnecSales() {
               >
                 Ещё {Math.min(10, filteredRankingRows.length - antiLimit)}
                 <small>
-                  Показано {antiRankingRows.length} из {filteredRankingRows.length}
+                  Показано {antiRankingRows.length} из{" "}
+                  {filteredRankingRows.length}
                 </small>
               </button>
             )}
@@ -1027,7 +1036,9 @@ export function OnecSales() {
             <tbody>
               {tableRows.map((row) => (
                 <tr key={row.key}>
-                  <td><code>{row.article}</code></td>
+                  <td>
+                    <code>{row.article}</code>
+                  </td>
                   <td>
                     <strong>{row.name}</strong>
                     <small className="onec-key">{row.key}</small>
@@ -1090,7 +1101,12 @@ export function OnecSales() {
         <span>Получено документов: {reports.length}</span>
         <span>Складов в справочнике: {warehouses.length}</span>
         <span>
-          Сервер: {loadMeta?.cache === "hit" ? "из кэша" : loadMeta?.cache === "shared" ? "общий запрос" : "из 1С"}
+          Сервер:{" "}
+          {loadMeta?.cache === "hit"
+            ? "из кэша"
+            : loadMeta?.cache === "shared"
+              ? "общий запрос"
+              : "из 1С"}
           {typeof loadMeta?.durationMs === "number"
             ? ` · ${loadMeta.durationMs} мс`
             : ""}
