@@ -553,6 +553,7 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     let checkLinesWithConsultant = 0;
     let historicalChecksScanned = 0;
     let historicalChecksWithConsultant = 0;
+    let historicalChecksTruncated = false;
     let reports = [];
     let cache = "not-used";
     let latestDate = null;
@@ -599,67 +600,75 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       grouped.set(key, current);
     };
 
-    const latestChecks = await onecGet("Document_ЧекККМ", {
-      $top: 20,
-      $select: "Date",
-      $filter: "Posted eq true",
-      $orderby: "Date desc",
-    });
-
-    if (latestChecks.length) {
-      const activity = resolveActivityAnchor(latestChecks, "Date");
-      latestDate = activity.anchorDate?.toISOString() || null;
-      absoluteLatestDate = activity.absoluteLatestDate?.toISOString() || null;
-      analysisAnchorAdjusted = activity.adjusted;
-      ignoredIsolatedDocuments = activity.ignoredDocuments;
-      const checkStartDate = new Date(
-        new Date(latestDate).getTime() - days * 86_400_000,
+    // Временно собираем всю доступную историю консультантов без ограничения
+    // день/неделя/месяц. Читаем чеки страницами, чтобы один большой ответ 1С не
+    // упирался в таймаут и не обрезал более старые документы.
+    {
+      const historicalChecks = [];
+      const maxChecks = Math.min(
+        Math.max(Number(process.env.ONEC_CONSULTANT_SCAN_LIMIT || 10_000), 1),
+        50_000,
       );
-      periodStart = checkStartDate.toISOString();
-      periodEnd = new Date(latestDate).toISOString();
-      const checkQuery = {
-        $top: 1000,
-        $select: [
-          "Ref_Key",
-          "Date",
-          "Posted",
-          "ВидОперации",
-          "Магазин_Key",
-          "Продавец_Key",
-          "Товары",
-        ].join(","),
-        $orderby: "Date desc",
-      };
-      let checks;
-
-      try {
-        checks = await onecGet("Document_ЧекККМ", {
-          ...checkQuery,
-          $filter: [
-            "Posted eq true",
-            `Date ge datetime'${toOdataDateTime(checkStartDate)}'`,
-          ].join(" and "),
-        });
-      } catch (error) {
-        console.warn(
-          "1С не приняла период консультантов по чекам, загружаем последние чеки:",
-          error instanceof Error ? error.message : error,
-        );
-        checks = await onecGet("Document_ЧекККМ", {
-          ...checkQuery,
-          $filter: "Posted eq true",
-        });
-      }
-      loadedChecks = checks.length;
-      checks = filterByPeriod(
-        checks,
+      const pageSize = Math.min(
+        Math.max(Number(process.env.ONEC_CONSULTANT_PAGE_SIZE || 100), 1),
+        500,
+      );
+      const select = [
+        "Ref_Key",
         "Date",
-        checkStartDate,
-        new Date(new Date(latestDate).getTime() + 1000),
-      );
-      scannedChecks = checks.length;
+        "Posted",
+        "ВидОперации",
+        "Магазин_Key",
+        "Продавец_Key",
+        "Товары",
+      ].join(",");
 
-      checks.forEach((check) => {
+      while (historicalChecks.length < maxChecks) {
+        const currentPageSize = Math.min(
+          pageSize,
+          maxChecks - historicalChecks.length,
+        );
+        const page = await onecGet("Document_ЧекККМ", {
+          $top: currentPageSize,
+          $skip: historicalChecks.length,
+          $select: select,
+          $filter: "Posted eq true",
+          $orderby: "Date desc",
+        });
+        historicalChecks.push(...page);
+        if (page.length < currentPageSize) break;
+      }
+
+      const checksWithConsultant = historicalChecks.filter((check) => {
+        if (check.Продавец_Key && check.Продавец_Key !== EMPTY_GUID) {
+          return true;
+        }
+        return (check.Товары || []).some(
+          (line) =>
+            line.Продавец_Key && line.Продавец_Key !== EMPTY_GUID,
+        );
+      });
+      historicalChecksScanned = historicalChecks.length;
+      historicalChecksWithConsultant = checksWithConsultant.length;
+      historicalChecksTruncated = historicalChecks.length >= maxChecks;
+      loadedChecks = historicalChecks.length;
+      scannedChecks = historicalChecks.length;
+      source = "Document_ЧекККМ.Продавец_Key · все доступные данные";
+
+      const timestamps = historicalChecks
+        .map((check) => new Date(check.Date).getTime())
+        .filter(Number.isFinite)
+        .sort((left, right) => left - right);
+      periodStart = timestamps.length
+        ? new Date(timestamps[0]).toISOString()
+        : null;
+      periodEnd = timestamps.length
+        ? new Date(timestamps[timestamps.length - 1]).toISOString()
+        : null;
+      latestDate = periodEnd;
+      absoluteLatestDate = periodEnd;
+
+      checksWithConsultant.forEach((check) => {
         const sign = /возврат/i.test(String(check.ВидОперации || ""))
           ? -1
           : 1;
@@ -676,106 +685,28 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       });
     }
 
-    // Последний документ в базе может быть одиночным тестовым чеком без
-    // консультанта. В таком случае период, рассчитанный от его даты, скрывает
-    // более ранние реальные продажи. Загружаем историю, находим последнюю дату,
-    // где Продавец_Key действительно заполнен, и применяем выбранный период уже
-    // к этой активности. Это не подменяет консультанта кассиром/ответственным.
-    if (!grouped.size) {
-      const historicalChecks = await onecGet("Document_ЧекККМ", {
-        $top: Math.min(
-          Math.max(Number(process.env.ONEC_CONSULTANT_SCAN_LIMIT || 500), 1),
-          2000,
-        ),
-        $select: [
-          "Ref_Key",
-          "Date",
-          "Posted",
-          "ВидОперации",
-          "Магазин_Key",
-          "Продавец_Key",
-          "Товары",
-        ].join(","),
-        $filter: "Posted eq true",
-        $orderby: "Date desc",
-      });
-      const checksWithConsultant = historicalChecks.filter((check) => {
-        if (check.Продавец_Key && check.Продавец_Key !== EMPTY_GUID) {
-          return true;
-        }
-        return (check.Товары || []).some(
-          (line) =>
-            line.Продавец_Key && line.Продавец_Key !== EMPTY_GUID,
-        );
-      });
-      historicalChecksScanned = historicalChecks.length;
-      historicalChecksWithConsultant = checksWithConsultant.length;
-
-      if (checksWithConsultant.length) {
-        const consultantActivity = resolveActivityAnchor(
-          checksWithConsultant,
-          "Date",
-        );
-        const consultantLatestDate = consultantActivity.anchorDate;
-        const consultantStartDate = new Date(
-          consultantLatestDate.getTime() - days * 86_400_000,
-        );
-        const periodChecks = filterByPeriod(
-          checksWithConsultant,
-          "Date",
-          consultantStartDate,
-          new Date(consultantLatestDate.getTime() + 1000),
-        );
-
-        latestDate = consultantLatestDate.toISOString();
-        absoluteLatestDate =
-          consultantActivity.absoluteLatestDate?.toISOString() ||
-          absoluteLatestDate;
-        analysisAnchorAdjusted = consultantActivity.adjusted;
-        ignoredIsolatedDocuments = consultantActivity.ignoredDocuments;
-        periodStart = consultantStartDate.toISOString();
-        periodEnd = consultantLatestDate.toISOString();
-        source = "Document_ЧекККМ.Продавец_Key (последняя активность)";
-        loadedChecks = historicalChecks.length;
-        scannedChecks = periodChecks.length;
-        salesLines = 0;
-        returnLines = 0;
-        linesWithConsultant = 0;
-        checkLines = 0;
-        checkLinesWithConsultant = 0;
-
-        periodChecks.forEach((check) => {
-          const sign = /возврат/i.test(String(check.ВидОперации || ""))
-            ? -1
-            : 1;
-          (check.Товары || []).forEach((line) => {
-            checkLines += 1;
-            addLine({
-              storeKey: check.Магазин_Key,
-              line,
-              sign,
-              documentSellerKey: check.Продавец_Key,
-              origin: "check",
-            });
-          });
-        });
-      }
-    }
-
     // В некоторых базах консультант переносится из чеков только при закрытии
     // смены. Тогда ищем его в строках отчёта о розничных продажах.
     if (!grouped.size) {
-      const reportResult = await loadReportPagesCached({ limit: 500, days });
+      const reportResult = await loadReportPagesCached({
+        limit: 500,
+        days: 36_500,
+      });
       reports = reportResult.items;
       cache = reportResult.cache;
-      latestDate = reports[0]?.Date || latestDate;
-      if (latestDate) {
-        periodStart = new Date(
-          new Date(latestDate).getTime() - days * 86_400_000,
+      const reportTimestamps = reports
+        .map((report) => new Date(report.Date).getTime())
+        .filter(Number.isFinite)
+        .sort((left, right) => left - right);
+      if (reportTimestamps.length) {
+        periodStart = new Date(reportTimestamps[0]).toISOString();
+        periodEnd = new Date(
+          reportTimestamps[reportTimestamps.length - 1],
         ).toISOString();
-        periodEnd = new Date(latestDate).toISOString();
+        latestDate = periodEnd;
       }
-      source = "Document_ОтчетОРозничныхПродажах.Товары.Продавец_Key";
+      source =
+        "Document_ОтчетОРозничныхПродажах.Товары.Продавец_Key · все доступные данные";
 
       reports.forEach((report) => {
         (report.Товары || []).forEach((line) =>
@@ -821,6 +752,7 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       references: { sellers: consultants, stores },
       meta: {
         days,
+        scope: "all",
         loaded: items.length,
         latestDate,
         absoluteLatestDate,
@@ -837,6 +769,7 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
           checkLinesWithConsultant,
           historicalChecksScanned,
           historicalChecksWithConsultant,
+          historicalChecksTruncated,
           reports: reports.length,
           salesLines,
           returnLines,

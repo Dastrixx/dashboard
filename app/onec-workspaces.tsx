@@ -125,6 +125,7 @@ type SellerPayload = {
     latestDate?: string | null;
     periodStart?: string | null;
     periodEnd?: string | null;
+    scope?: "all" | "period";
     absoluteLatestDate?: string | null;
     analysisAnchorAdjusted?: boolean;
     ignoredIsolatedDocuments?: number;
@@ -1604,6 +1605,12 @@ export function OnecTeam() {
             <p>
               {consultantPayload.meta?.source ||
                 "Продавец в товарной строке розничного отчёта"}
+              {consultantPayload.meta?.scope === "all" ? (
+                <>
+                  <br />Периодические фильтры временно отключены — показана вся
+                  доступная история 1С
+                </>
+              ) : null}
               {consultantPayload.meta?.periodStart &&
               consultantPayload.meta?.periodEnd ? (
                 <>
