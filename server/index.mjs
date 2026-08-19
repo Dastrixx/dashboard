@@ -555,6 +555,9 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     let historicalChecksScanned = 0;
     let historicalChecksWithConsultant = 0;
     let historicalChecksTruncated = false;
+    let checksWithResponsible = 0;
+    let cashShiftsWithCashier = 0;
+    let usedEmployeeFallback = false;
     let reports = [];
     let cache = "not-used";
     let latestDate = null;
@@ -565,7 +568,14 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     let periodEnd = null;
     let source = "Document_ЧекККМ.Товары.Продавец_Key";
 
-    const addLine = ({ storeKey, line, sign, documentSellerKey, origin }) => {
+    const addLine = ({
+      storeKey,
+      line,
+      sign,
+      documentSellerKey,
+      documentEmployeeType = "person",
+      origin,
+    }) => {
       if (sign > 0) salesLines += 1;
       else returnLines += 1;
 
@@ -574,14 +584,18 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
           ? line.Продавец_Key
           : documentSellerKey;
       if (!consultantKey || consultantKey === EMPTY_GUID) return;
+      const employeeType =
+        line.Продавец_Key && line.Продавец_Key !== EMPTY_GUID
+          ? "person"
+          : documentEmployeeType;
 
       linesWithConsultant += 1;
       if (origin === "check") checkLinesWithConsultant += 1;
       const resolvedStoreKey = storeKey || EMPTY_GUID;
-      const key = `${consultantKey}:${resolvedStoreKey}`;
+      const key = `${employeeType}:${consultantKey}:${resolvedStoreKey}`;
       const current = grouped.get(key) || {
         Продавец_Key: consultantKey,
-        СотрудникТип: "consultant",
+        СотрудникТип: employeeType,
         Магазин_Key: resolvedStoreKey,
         КоличествоTurnover: 0,
         СтоимостьTurnover: 0,
@@ -613,7 +627,10 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
           "Date",
           "Posted",
           "ВидОперации",
+          "КассаККМ_Key",
+          "НомерСменыККМ",
           "Магазин_Key",
+          "Ответственный_Key",
           "Продавец_Key",
           "Товары",
         ].join(","),
@@ -660,10 +677,85 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
             line,
             sign,
             documentSellerKey: check.Продавец_Key,
+            documentEmployeeType: "person",
             origin: "check",
           });
         });
       });
+
+      // Если личный продавец в чеках не заполнен, возвращаем тот источник,
+      // из которого раньше строился отчёт сотрудников: кассир смены, затем
+      // ответственный документа. Оба поля ссылаются на Catalog_Пользователи.
+      if (!grouped.size) {
+        const cashShifts = await onecGet("Document_КассоваяСмена", {
+          $top: 1000,
+          $select: [
+            "Ref_Key",
+            "Date",
+            "КассаККМ_Key",
+            "НомерСменыККТ",
+            "Кассир_Key",
+            "Магазин_Key",
+          ].join(","),
+          $filter: "Posted eq true",
+          $orderby: "Date desc",
+        });
+        const cashiersByShift = new Map();
+        cashShifts.forEach((shift) => {
+          if (shift.Кассир_Key && shift.Кассир_Key !== EMPTY_GUID) {
+            cashShiftsWithCashier += 1;
+            cashiersByShift.set(
+              `${shift.КассаККМ_Key}:${shift.НомерСменыККТ}`,
+              shift,
+            );
+          }
+        });
+        checksWithResponsible = checks.filter(
+          (check) =>
+            check.Ответственный_Key &&
+            check.Ответственный_Key !== EMPTY_GUID,
+        ).length;
+        salesLines = 0;
+        returnLines = 0;
+        linesWithConsultant = 0;
+        checkLines = 0;
+        checkLinesWithConsultant = 0;
+
+        checks.forEach((check) => {
+          const sign = /возврат/i.test(String(check.ВидОперации || ""))
+            ? -1
+            : 1;
+          const shift = cashiersByShift.get(
+            `${check.КассаККМ_Key}:${check.НомерСменыККМ}`,
+          );
+          const employeeKey =
+            (shift?.Кассир_Key && shift.Кассир_Key !== EMPTY_GUID
+              ? shift.Кассир_Key
+              : null) ||
+            (check.Ответственный_Key && check.Ответственный_Key !== EMPTY_GUID
+              ? check.Ответственный_Key
+              : null);
+
+          (check.Товары || []).forEach((line) => {
+            checkLines += 1;
+            addLine({
+              storeKey: check.Магазин_Key || shift?.Магазин_Key,
+              line,
+              sign,
+              documentSellerKey: employeeKey,
+              documentEmployeeType: "user",
+              origin: "check",
+            });
+          });
+        });
+
+        if (grouped.size) {
+          usedEmployeeFallback = true;
+          source = cashShiftsWithCashier
+            ? "Document_ЧекККМ + Document_КассоваяСмена · кассир/ответственный"
+            : "Document_ЧекККМ.Ответственный_Key · без периода";
+        }
+      }
     }
 
     // В некоторых базах консультант переносится из чеков только при закрытии
@@ -714,11 +806,23 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     const items = [...grouped.values()].sort(
       (left, right) => right.СтоимостьTurnover - left.СтоимостьTurnover,
     );
-    const consultants = await loadReferencesByKeysBatched(
-      "Catalog_ФизическиеЛица",
-      items.map((item) => item.Продавец_Key),
-      "Ref_Key,Description,Сотрудник,Магазин_Key",
-    );
+    const [people, users] = await Promise.all([
+      loadReferencesByKeysBatched(
+        "Catalog_ФизическиеЛица",
+        items
+          .filter((item) => item.СотрудникТип !== "user")
+          .map((item) => item.Продавец_Key),
+        "Ref_Key,Description,Сотрудник,Магазин_Key",
+      ),
+      loadReferencesByKeysBatched(
+        "Catalog_Пользователи",
+        items
+          .filter((item) => item.СотрудникТип === "user")
+          .map((item) => item.Продавец_Key),
+        "Ref_Key,Description,ФизическоеЛицо_Key,ФизЛицо_Key,Магазин_Key",
+      ),
+    ]);
+    const consultants = [...people, ...users];
     const stores = await loadReferencesByKeysBatched(
       "Catalog_Магазины",
       [
@@ -751,6 +855,9 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
           historicalChecksScanned,
           historicalChecksWithConsultant,
           historicalChecksTruncated,
+          checksWithResponsible,
+          cashShiftsWithCashier,
+          usedEmployeeFallback,
           reports: reports.length,
           salesLines,
           returnLines,
