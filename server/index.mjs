@@ -278,6 +278,88 @@ async function loadReportPagesCached({ limit, days }) {
   }
 }
 
+// Совместимый загрузчик для блока консультантов из коммита ec34f5a.
+// Важное отличие: если 1С отклоняет фильтр по Date, здесь возвращаются все
+// загруженные отчёты без повторной локальной фильтрации. Именно на этом
+// fallback в исходной реализации находились заполненные строки продавцов.
+async function loadConsultantReportPagesLegacy({ limit, days }) {
+  const configuredPageSize = Number(process.env.ONEC_PAGE_SIZE || 25);
+  const pageSize = Math.min(Math.max(configuredPageSize, 1), 100);
+  const latest = await onecGet(RETAIL_REPORT_ENTITY, {
+    $top: 1,
+    $select: "Date",
+    $filter: "Posted eq true",
+    $orderby: "Date desc",
+  });
+
+  if (!latest.length) return [];
+
+  const latestTimestamp = new Date(latest[0].Date).getTime();
+  const fromTimestamp = latestTimestamp - days * 86_400_000;
+  const dateFilter = [
+    "Posted eq true",
+    `Date ge datetime'${toOdataDateTime(fromTimestamp)}'`,
+  ].join(" and ");
+
+  async function load(filter) {
+    const result = [];
+
+    while (result.length < limit) {
+      const currentPageSize = Math.min(pageSize, limit - result.length);
+      const page = await onecGet(RETAIL_REPORT_ENTITY, {
+        $top: currentPageSize,
+        $skip: result.length,
+        $select: RETAIL_REPORT_SELECT,
+        $filter: filter,
+        $orderby: "Date desc",
+      });
+      result.push(...page);
+      if (page.length < currentPageSize) break;
+    }
+
+    return result;
+  }
+
+  try {
+    return await load(dateFilter);
+  } catch (error) {
+    console.warn(
+      "1С не приняла период консультантов в розничных отчётах, используем совместимый fallback ec34f5a:",
+      error instanceof Error ? error.message : error,
+    );
+    return load("Posted eq true");
+  }
+}
+
+async function loadConsultantReportPagesLegacyCached({ limit, days }) {
+  const key = `consultants-ec34:${limit}:${days}`;
+  const now = Date.now();
+  const cached = reportCache.get(key);
+
+  if (cached?.items && cached.expiresAt > now) {
+    return { items: cached.items, cache: "hit" };
+  }
+  if (cached?.promise) {
+    return { items: await cached.promise, cache: "shared" };
+  }
+
+  const ttlMs = Math.max(
+    Number(process.env.ONEC_REPORT_CACHE_TTL_MS || 120_000),
+    10_000,
+  );
+  const promise = loadConsultantReportPagesLegacy({ limit, days });
+  reportCache.set(key, { promise, expiresAt: now + ttlMs });
+
+  try {
+    const items = await promise;
+    reportCache.set(key, { items, expiresAt: Date.now() + ttlMs });
+    return { items, cache: "miss" };
+  } catch (error) {
+    reportCache.delete(key);
+    throw error;
+  }
+}
+
 async function loadReferencesByKeys(entity, keys, select) {
   const uniqueKeys = [
     ...new Set(
@@ -658,7 +740,10 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     // В некоторых базах консультант переносится из чеков только при закрытии
     // смены. Тогда ищем его в строках отчёта о розничных продажах.
     if (!grouped.size) {
-      const reportResult = await loadReportPagesCached({ limit: 500, days });
+      const reportResult = await loadConsultantReportPagesLegacyCached({
+        limit: 500,
+        days,
+      });
       reports = reportResult.items;
       cache = reportResult.cache;
       latestDate = reports[0]?.Date || latestDate;
