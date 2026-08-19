@@ -540,7 +540,6 @@ app.get("/api/dashboard/onec-product-categories", async (request, response) => {
 
 app.get("/api/dashboard/onec-consultants", async (request, response) => {
   try {
-    response.set("Cache-Control", "no-store");
     const days = [1, 7, 30].includes(Number(request.query.days))
       ? Number(request.query.days)
       : 30;
@@ -549,35 +548,14 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     let returnLines = 0;
     let linesWithConsultant = 0;
     let scannedChecks = 0;
-    let loadedChecks = 0;
     let checkLines = 0;
     let checkLinesWithConsultant = 0;
-    let historicalChecksScanned = 0;
-    let historicalChecksWithConsultant = 0;
-    let historicalChecksTruncated = false;
-    let checksWithResponsible = 0;
-    let cashShiftsWithCashier = 0;
-    let usedEmployeeFallback = false;
-    let directCheckLinesScanned = 0;
-    let directCheckLinesWithConsultant = 0;
     let reports = [];
     let cache = "not-used";
     let latestDate = null;
-    let absoluteLatestDate = null;
-    let analysisAnchorAdjusted = false;
-    let ignoredIsolatedDocuments = 0;
-    let periodStart = null;
-    let periodEnd = null;
     let source = "Document_ЧекККМ.Товары.Продавец_Key";
 
-    const addLine = ({
-      storeKey,
-      line,
-      sign,
-      documentSellerKey,
-      documentEmployeeType = "person",
-      origin,
-    }) => {
+    const addLine = ({ storeKey, line, sign, documentSellerKey, origin }) => {
       if (sign > 0) salesLines += 1;
       else returnLines += 1;
 
@@ -586,18 +564,14 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
           ? line.Продавец_Key
           : documentSellerKey;
       if (!consultantKey || consultantKey === EMPTY_GUID) return;
-      const employeeType =
-        line.Продавец_Key && line.Продавец_Key !== EMPTY_GUID
-          ? "person"
-          : documentEmployeeType;
 
       linesWithConsultant += 1;
       if (origin === "check") checkLinesWithConsultant += 1;
       const resolvedStoreKey = storeKey || EMPTY_GUID;
-      const key = `${employeeType}:${consultantKey}:${resolvedStoreKey}`;
+      const key = `${consultantKey}:${resolvedStoreKey}`;
       const current = grouped.get(key) || {
         Продавец_Key: consultantKey,
-        СотрудникТип: employeeType,
+        СотрудникТип: "consultant",
         Магазин_Key: resolvedStoreKey,
         КоличествоTurnover: 0,
         СтоимостьTurnover: 0,
@@ -617,217 +591,78 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       grouped.set(key, current);
     };
 
-    // Это тот же запрос, на котором консультанты уже находились в рабочем
-    // коммите Add consultant sales analytics from 1C. Для этой базы не
-    // используем $skip: табличная часть Товары с ним возвращается нестабильно.
-    // Период пока намеренно не передаём и не фильтруем локально.
-    {
-      const checks = await onecGet("Document_ЧекККМ", {
+    const latestChecks = await onecGet("Document_ЧекККМ", {
+      $top: 1,
+      $select: "Date",
+      $filter: "Posted eq true",
+      $orderby: "Date desc",
+    });
+
+    if (latestChecks.length) {
+      latestDate = latestChecks[0].Date;
+      const checkStartDate = new Date(
+        new Date(latestDate).getTime() - days * 86_400_000,
+      );
+      const checkQuery = {
         $top: 1000,
         $select: [
           "Ref_Key",
           "Date",
           "Posted",
           "ВидОперации",
-          "КассаККМ_Key",
-          "НомерСменыККМ",
           "Магазин_Key",
-          "Ответственный_Key",
           "Продавец_Key",
           "Товары",
         ].join(","),
-        $filter: "Posted eq true",
         $orderby: "Date desc",
-      });
-      const checksWithConsultant = checks.filter((check) => {
-        if (check.Продавец_Key && check.Продавец_Key !== EMPTY_GUID) {
-          return true;
-        }
-        return (check.Товары || []).some(
-          (line) =>
-            line.Продавец_Key && line.Продавец_Key !== EMPTY_GUID,
+      };
+      let checks;
+
+      try {
+        checks = await onecGet("Document_ЧекККМ", {
+          ...checkQuery,
+          $filter: [
+            "Posted eq true",
+            `Date ge datetime'${toOdataDateTime(checkStartDate)}'`,
+          ].join(" and "),
+        });
+      } catch (error) {
+        console.warn(
+          "1С не приняла период консультантов по чекам, загружаем последние чеки:",
+          error instanceof Error ? error.message : error,
         );
-      });
-      historicalChecksScanned = checks.length;
-      historicalChecksWithConsultant = checksWithConsultant.length;
-      historicalChecksTruncated = checks.length >= 1000;
-      loadedChecks = checks.length;
+        checks = await onecGet("Document_ЧекККМ", {
+          ...checkQuery,
+          $filter: "Posted eq true",
+        });
+      }
       scannedChecks = checks.length;
-      source = "Document_ЧекККМ.Товары.Продавец_Key · без периода";
 
-      const timestamps = checks
-        .map((check) => new Date(check.Date).getTime())
-        .filter(Number.isFinite)
-        .sort((left, right) => left - right);
-      periodStart = timestamps.length
-        ? new Date(timestamps[0]).toISOString()
-        : null;
-      periodEnd = timestamps.length
-        ? new Date(timestamps[timestamps.length - 1]).toISOString()
-        : null;
-      latestDate = periodEnd;
-      absoluteLatestDate = periodEnd;
-
-      // В standard.odata табличная часть опубликована также отдельной
-      // сущностью. В этой базе именно прямой endpoint строк может содержать
-      // Продавец_Key, даже когда Document_ЧекККМ.Товары приходит урезанным.
-      const directLines = await onecGet("Document_ЧекККМ_Товары", {
-        $top: 10_000,
-        $select: [
-          "Ref_Key",
-          "LineNumber",
-          "Продавец_Key",
-          "Количество",
-          "Цена",
-          "Сумма",
-          "Склад_Key",
-        ].join(","),
-      });
-      const directLinesWithConsultant = directLines.filter(
-        (line) =>
-          line.Продавец_Key && line.Продавец_Key !== EMPTY_GUID,
-      );
-      directCheckLinesScanned = directLines.length;
-      directCheckLinesWithConsultant = directLinesWithConsultant.length;
-      const checksByKey = new Map(
-        checks.map((check) => [check.Ref_Key, check]),
-      );
-
-      directLinesWithConsultant.forEach((line) => {
-        const check = checksByKey.get(line.Ref_Key);
-        const sign = /возврат/i.test(String(check?.ВидОперации || ""))
+      checks.forEach((check) => {
+        const sign = /возврат/i.test(String(check.ВидОперации || ""))
           ? -1
           : 1;
-        checkLines += 1;
-        addLine({
-          storeKey: check?.Магазин_Key,
-          line,
-          sign,
-          documentSellerKey: null,
-          documentEmployeeType: "person",
-          origin: "check",
+        (check.Товары || []).forEach((line) => {
+          checkLines += 1;
+          addLine({
+            storeKey: check.Магазин_Key,
+            line,
+            sign,
+            documentSellerKey: check.Продавец_Key,
+            origin: "check",
+          });
         });
       });
-      if (grouped.size) {
-        source = "Document_ЧекККМ_Товары.Продавец_Key · прямые строки чеков";
-      }
-
-      if (!grouped.size) {
-        checks.forEach((check) => {
-          const sign = /возврат/i.test(String(check.ВидОперации || ""))
-            ? -1
-            : 1;
-          (check.Товары || []).forEach((line) => {
-            checkLines += 1;
-            addLine({
-              storeKey: check.Магазин_Key,
-              line,
-              sign,
-              documentSellerKey: check.Продавец_Key,
-              documentEmployeeType: "person",
-              origin: "check",
-            });
-          });
-        });
-      }
-
-      // Если личный продавец в чеках не заполнен, возвращаем тот источник,
-      // из которого раньше строился отчёт сотрудников: кассир смены, затем
-      // ответственный документа. Оба поля ссылаются на Catalog_Пользователи.
-      if (!grouped.size) {
-        const cashShifts = await onecGet("Document_КассоваяСмена", {
-          $top: 1000,
-          $select: [
-            "Ref_Key",
-            "Date",
-            "КассаККМ_Key",
-            "НомерСменыККТ",
-            "Кассир_Key",
-            "Магазин_Key",
-          ].join(","),
-          $filter: "Posted eq true",
-          $orderby: "Date desc",
-        });
-        const cashiersByShift = new Map();
-        cashShifts.forEach((shift) => {
-          if (shift.Кассир_Key && shift.Кассир_Key !== EMPTY_GUID) {
-            cashShiftsWithCashier += 1;
-            cashiersByShift.set(
-              `${shift.КассаККМ_Key}:${shift.НомерСменыККТ}`,
-              shift,
-            );
-          }
-        });
-        checksWithResponsible = checks.filter(
-          (check) =>
-            check.Ответственный_Key &&
-            check.Ответственный_Key !== EMPTY_GUID,
-        ).length;
-        salesLines = 0;
-        returnLines = 0;
-        linesWithConsultant = 0;
-        checkLines = 0;
-        checkLinesWithConsultant = 0;
-
-        checks.forEach((check) => {
-          const sign = /возврат/i.test(String(check.ВидОперации || ""))
-            ? -1
-            : 1;
-          const shift = cashiersByShift.get(
-            `${check.КассаККМ_Key}:${check.НомерСменыККМ}`,
-          );
-          const employeeKey =
-            (shift?.Кассир_Key && shift.Кассир_Key !== EMPTY_GUID
-              ? shift.Кассир_Key
-              : null) ||
-            (check.Ответственный_Key && check.Ответственный_Key !== EMPTY_GUID
-              ? check.Ответственный_Key
-              : null);
-
-          (check.Товары || []).forEach((line) => {
-            checkLines += 1;
-            addLine({
-              storeKey: check.Магазин_Key || shift?.Магазин_Key,
-              line,
-              sign,
-              documentSellerKey: employeeKey,
-              documentEmployeeType: "user",
-              origin: "check",
-            });
-          });
-        });
-
-        if (grouped.size) {
-          usedEmployeeFallback = true;
-          source = cashShiftsWithCashier
-            ? "Document_ЧекККМ + Document_КассоваяСмена · кассир/ответственный"
-            : "Document_ЧекККМ.Ответственный_Key · без периода";
-        }
-      }
     }
 
     // В некоторых базах консультант переносится из чеков только при закрытии
     // смены. Тогда ищем его в строках отчёта о розничных продажах.
     if (!grouped.size) {
-      const reportResult = await loadReportPagesCached({
-        limit: 500,
-        days: 36_500,
-      });
+      const reportResult = await loadReportPagesCached({ limit: 500, days });
       reports = reportResult.items;
       cache = reportResult.cache;
-      const reportTimestamps = reports
-        .map((report) => new Date(report.Date).getTime())
-        .filter(Number.isFinite)
-        .sort((left, right) => left - right);
-      if (reportTimestamps.length) {
-        periodStart = new Date(reportTimestamps[0]).toISOString();
-        periodEnd = new Date(
-          reportTimestamps[reportTimestamps.length - 1],
-        ).toISOString();
-        latestDate = periodEnd;
-      }
-      source =
-        "Document_ОтчетОРозничныхПродажах.Товары.Продавец_Key · все доступные данные";
+      latestDate = reports[0]?.Date || latestDate;
+      source = "Document_ОтчетОРозничныхПродажах.Товары.Продавец_Key";
 
       reports.forEach((report) => {
         (report.Товары || []).forEach((line) =>
@@ -854,23 +689,11 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     const items = [...grouped.values()].sort(
       (left, right) => right.СтоимостьTurnover - left.СтоимостьTurnover,
     );
-    const [people, users] = await Promise.all([
-      loadReferencesByKeysBatched(
-        "Catalog_ФизическиеЛица",
-        items
-          .filter((item) => item.СотрудникТип !== "user")
-          .map((item) => item.Продавец_Key),
-        "Ref_Key,Description,Сотрудник,Магазин_Key",
-      ),
-      loadReferencesByKeysBatched(
-        "Catalog_Пользователи",
-        items
-          .filter((item) => item.СотрудникТип === "user")
-          .map((item) => item.Продавец_Key),
-        "Ref_Key,Description,ФизическоеЛицо_Key,ФизЛицо_Key,Магазин_Key",
-      ),
-    ]);
-    const consultants = [...people, ...users];
+    const consultants = await loadReferencesByKeysBatched(
+      "Catalog_ФизическиеЛица",
+      items.map((item) => item.Продавец_Key),
+      "Ref_Key,Description,Сотрудник,Магазин_Key",
+    );
     const stores = await loadReferencesByKeysBatched(
       "Catalog_Магазины",
       [
@@ -885,29 +708,14 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       references: { sellers: consultants, stores },
       meta: {
         days,
-        scope: "all",
         loaded: items.length,
         latestDate,
-        absoluteLatestDate,
-        analysisAnchorAdjusted,
-        ignoredIsolatedDocuments,
-        periodStart,
-        periodEnd,
         source,
         cache,
         diagnostics: {
           scannedChecks,
-          loadedChecks,
           checkLines,
           checkLinesWithConsultant,
-          historicalChecksScanned,
-          historicalChecksWithConsultant,
-          historicalChecksTruncated,
-          checksWithResponsible,
-          cashShiftsWithCashier,
-          usedEmployeeFallback,
-          directCheckLinesScanned,
-          directCheckLinesWithConsultant,
           reports: reports.length,
           salesLines,
           returnLines,
