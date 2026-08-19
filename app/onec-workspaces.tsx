@@ -123,12 +123,16 @@ type SellerPayload = {
     days?: number;
     loaded?: number;
     latestDate?: string | null;
+    periodStart?: string | null;
+    periodEnd?: string | null;
     source?: string;
     diagnostics?: {
       turnoverRows?: number;
       turnoverRowsWithSeller?: number;
       scannedChecks?: number;
+      loadedChecks?: number;
       scannedCashShifts?: number;
+      loadedCashShifts?: number;
       checksWithAssignedEmployee?: number;
       scannedPremiumRows?: number;
       scannedRealizations?: number;
@@ -1522,6 +1526,11 @@ export function OnecTeam() {
               {payload.meta?.latestDate
                 ? new Date(payload.meta.latestDate).toLocaleString("ru-RU")
                 : "без даты"}
+              {payload.meta?.periodStart && payload.meta?.periodEnd ? (
+                <>
+                  <br />Период: {new Date(payload.meta.periodStart).toLocaleString("ru-RU")} — {new Date(payload.meta.periodEnd).toLocaleString("ru-RU")}
+                </>
+              ) : null}
             </p>
           </div>
           <div className="team-filter-groups">
@@ -1586,6 +1595,12 @@ export function OnecTeam() {
             <p>
               {consultantPayload.meta?.source ||
                 "Продавец в товарной строке розничного отчёта"}
+              {consultantPayload.meta?.periodStart &&
+              consultantPayload.meta?.periodEnd ? (
+                <>
+                  <br />Период: {new Date(consultantPayload.meta.periodStart).toLocaleString("ru-RU")} — {new Date(consultantPayload.meta.periodEnd).toLocaleString("ru-RU")}
+                </>
+              ) : null}
             </p>
           </div>
           <div className="consultant-kpis">

@@ -123,6 +123,20 @@ function toOdataDateTime(timestamp) {
   return new Date(timestamp).toISOString().replace(/\.\d{3}Z$/, "");
 }
 
+function filterByPeriod(items, field, startDate, endDate) {
+  const startTimestamp = new Date(startDate).getTime();
+  const endTimestamp = new Date(endDate).getTime();
+
+  return items.filter((item) => {
+    const timestamp = new Date(item?.[field]).getTime();
+    return (
+      Number.isFinite(timestamp) &&
+      timestamp >= startTimestamp &&
+      timestamp <= endTimestamp
+    );
+  });
+}
+
 async function loadReportPages({ limit, days }) {
   const configuredPageSize = Number(process.env.ONEC_PAGE_SIZE || 25);
   const pageSize = Math.min(Math.max(configuredPageSize, 1), 100);
@@ -168,14 +182,27 @@ async function loadReportPages({ limit, days }) {
     return result;
   }
 
+  const endDate = new Date(latestTimestamp + 1000);
+  const startDate = new Date(fromTimestamp);
+
   try {
-    return await load(dateFilter);
+    return filterByPeriod(
+      await load(dateFilter),
+      "Date",
+      startDate,
+      endDate,
+    );
   } catch (error) {
     console.warn(
       "1С не приняла фильтр по дате, используем постраничную загрузку:",
       error instanceof Error ? error.message : error,
     );
-    return load("Posted eq true");
+    return filterByPeriod(
+      await load("Posted eq true"),
+      "Date",
+      startDate,
+      endDate,
+    );
   }
 }
 
@@ -479,11 +506,14 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     let returnLines = 0;
     let linesWithConsultant = 0;
     let scannedChecks = 0;
+    let loadedChecks = 0;
     let checkLines = 0;
     let checkLinesWithConsultant = 0;
     let reports = [];
     let cache = "not-used";
     let latestDate = null;
+    let periodStart = null;
+    let periodEnd = null;
     let source = "Document_ЧекККМ.Товары.Продавец_Key";
 
     const addLine = ({ storeKey, line, sign, documentSellerKey, origin }) => {
@@ -534,6 +564,8 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       const checkStartDate = new Date(
         new Date(latestDate).getTime() - days * 86_400_000,
       );
+      periodStart = checkStartDate.toISOString();
+      periodEnd = new Date(latestDate).toISOString();
       const checkQuery = {
         $top: 1000,
         $select: [
@@ -567,6 +599,13 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
           $filter: "Posted eq true",
         });
       }
+      loadedChecks = checks.length;
+      checks = filterByPeriod(
+        checks,
+        "Date",
+        checkStartDate,
+        new Date(new Date(latestDate).getTime() + 1000),
+      );
       scannedChecks = checks.length;
 
       checks.forEach((check) => {
@@ -593,6 +632,12 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       reports = reportResult.items;
       cache = reportResult.cache;
       latestDate = reports[0]?.Date || latestDate;
+      if (latestDate) {
+        periodStart = new Date(
+          new Date(latestDate).getTime() - days * 86_400_000,
+        ).toISOString();
+        periodEnd = new Date(latestDate).toISOString();
+      }
       source = "Document_ОтчетОРозничныхПродажах.Товары.Продавец_Key";
 
       reports.forEach((report) => {
@@ -641,10 +686,13 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
         days,
         loaded: items.length,
         latestDate,
+        periodStart,
+        periodEnd,
         source,
         cache,
         diagnostics: {
           scannedChecks,
+          loadedChecks,
           checkLines,
           checkLinesWithConsultant,
           reports: reports.length,
@@ -714,7 +762,9 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
     let effectiveLatestDate = latestDate;
     let source = "AccumulationRegister_Продажи/Turnovers";
     let scannedChecks = 0;
+    let loadedChecks = 0;
     let scannedCashShifts = 0;
+    let loadedCashShifts = 0;
     let checksWithAssignedEmployee = 0;
     let scannedPremiumRows = 0;
     let scannedRealizations = 0;
@@ -828,6 +878,13 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
           });
         }
 
+        loadedChecks = checks.length;
+        checks = filterByPeriod(
+          checks,
+          "Date",
+          checkStartDate,
+          new Date(effectiveLatestDate.getTime() + 1000),
+        );
         scannedChecks = checks.length;
         let cashShifts = [];
         const cashShiftSelect = [
@@ -863,6 +920,13 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
           });
         }
 
+        loadedCashShifts = cashShifts.length;
+        cashShifts = filterByPeriod(
+          cashShifts,
+          "Date",
+          checkStartDate,
+          new Date(effectiveLatestDate.getTime() + 1000),
+        );
         scannedCashShifts = cashShifts.length;
         const cashiersByShift = new Map();
         cashShifts.forEach((shift) => {
@@ -1079,6 +1143,10 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
         days,
         loaded: validItems.length,
         latestDate: effectiveLatestDate.toISOString(),
+        periodStart: new Date(
+          effectiveLatestDate.getTime() - days * 86_400_000,
+        ).toISOString(),
+        periodEnd: effectiveLatestDate.toISOString(),
         source,
         diagnostics: {
           turnoverRows: items.length,
@@ -1088,7 +1156,9 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
               item.Продавец_Key !== "00000000-0000-0000-0000-000000000000",
           ).length,
           scannedChecks,
+          loadedChecks,
           scannedCashShifts,
+          loadedCashShifts,
           checksWithAssignedEmployee,
           scannedPremiumRows,
           scannedRealizations,
