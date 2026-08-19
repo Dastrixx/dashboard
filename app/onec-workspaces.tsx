@@ -125,6 +125,9 @@ type SellerPayload = {
     latestDate?: string | null;
     periodStart?: string | null;
     periodEnd?: string | null;
+    absoluteLatestDate?: string | null;
+    analysisAnchorAdjusted?: boolean;
+    ignoredIsolatedDocuments?: number;
     source?: string;
     diagnostics?: {
       turnoverRows?: number;
@@ -1531,6 +1534,12 @@ export function OnecTeam() {
                   <br />Период: {new Date(payload.meta.periodStart).toLocaleString("ru-RU")} — {new Date(payload.meta.periodEnd).toLocaleString("ru-RU")}
                 </>
               ) : null}
+              {payload.meta?.analysisAnchorAdjusted &&
+              payload.meta?.absoluteLatestDate ? (
+                <>
+                  <br />Последний одиночный документ: {new Date(payload.meta.absoluteLatestDate).toLocaleString("ru-RU")}; для аналитики взят последний период регулярных продаж
+                </>
+              ) : null}
             </p>
           </div>
           <div className="team-filter-groups">
@@ -1599,6 +1608,12 @@ export function OnecTeam() {
               consultantPayload.meta?.periodEnd ? (
                 <>
                   <br />Период: {new Date(consultantPayload.meta.periodStart).toLocaleString("ru-RU")} — {new Date(consultantPayload.meta.periodEnd).toLocaleString("ru-RU")}
+                </>
+              ) : null}
+              {consultantPayload.meta?.analysisAnchorAdjusted &&
+              consultantPayload.meta?.absoluteLatestDate ? (
+                <>
+                  <br />Последний одиночный документ: {new Date(consultantPayload.meta.absoluteLatestDate).toLocaleString("ru-RU")}; он не сдвигает весь период анализа
                 </>
               ) : null}
             </p>

@@ -137,12 +137,53 @@ function filterByPeriod(items, field, startDate, endDate) {
   });
 }
 
+function resolveActivityAnchor(items, field) {
+  const timestamps = items
+    .map((item) => new Date(item?.[field]).getTime())
+    .filter(Number.isFinite)
+    .sort((left, right) => right - left);
+  const absoluteLatestTimestamp = timestamps[0] || null;
+  const isolationGapMs = Math.max(
+    Number(process.env.ONEC_ACTIVITY_GAP_DAYS || 45),
+    1,
+  ) * 86_400_000;
+  const maxIsolatedDocuments = Math.max(
+    Number(process.env.ONEC_MAX_ISOLATED_DOCUMENTS || 3),
+    1,
+  );
+  let anchorTimestamp = absoluteLatestTimestamp;
+  let ignoredDocuments = 0;
+
+  for (
+    let index = 0;
+    index < Math.min(timestamps.length - 1, maxIsolatedDocuments);
+    index += 1
+  ) {
+    if (timestamps[index] - timestamps[index + 1] > isolationGapMs) {
+      anchorTimestamp = timestamps[index + 1];
+      ignoredDocuments = index + 1;
+      break;
+    }
+  }
+
+  return {
+    anchorDate: anchorTimestamp ? new Date(anchorTimestamp) : null,
+    absoluteLatestDate: absoluteLatestTimestamp
+      ? new Date(absoluteLatestTimestamp)
+      : null,
+    adjusted: Boolean(
+      anchorTimestamp && absoluteLatestTimestamp !== anchorTimestamp,
+    ),
+    ignoredDocuments,
+  };
+}
+
 async function loadReportPages({ limit, days }) {
   const configuredPageSize = Number(process.env.ONEC_PAGE_SIZE || 25);
   const pageSize = Math.min(Math.max(configuredPageSize, 1), 100);
 
   const latest = await onecGet(RETAIL_REPORT_ENTITY, {
-    $top: 1,
+    $top: 20,
     $select: "Date",
     $filter: "Posted eq true",
     $orderby: "Date desc",
@@ -152,7 +193,8 @@ async function loadReportPages({ limit, days }) {
     return [];
   }
 
-  const latestTimestamp = new Date(latest[0].Date).getTime();
+  const activity = resolveActivityAnchor(latest, "Date");
+  const latestTimestamp = activity.anchorDate.getTime();
   const fromTimestamp = latestTimestamp - days * 86_400_000;
   const dateFilter = [
     "Posted eq true",
@@ -512,6 +554,9 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     let reports = [];
     let cache = "not-used";
     let latestDate = null;
+    let absoluteLatestDate = null;
+    let analysisAnchorAdjusted = false;
+    let ignoredIsolatedDocuments = 0;
     let periodStart = null;
     let periodEnd = null;
     let source = "Document_ЧекККМ.Товары.Продавец_Key";
@@ -553,14 +598,18 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     };
 
     const latestChecks = await onecGet("Document_ЧекККМ", {
-      $top: 1,
+      $top: 20,
       $select: "Date",
       $filter: "Posted eq true",
       $orderby: "Date desc",
     });
 
     if (latestChecks.length) {
-      latestDate = latestChecks[0].Date;
+      const activity = resolveActivityAnchor(latestChecks, "Date");
+      latestDate = activity.anchorDate?.toISOString() || null;
+      absoluteLatestDate = activity.absoluteLatestDate?.toISOString() || null;
+      analysisAnchorAdjusted = activity.adjusted;
+      ignoredIsolatedDocuments = activity.ignoredDocuments;
       const checkStartDate = new Date(
         new Date(latestDate).getTime() - days * 86_400_000,
       );
@@ -686,6 +735,9 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
         days,
         loaded: items.length,
         latestDate,
+        absoluteLatestDate,
+        analysisAnchorAdjusted,
+        ignoredIsolatedDocuments,
         periodStart,
         periodEnd,
         source,
@@ -722,7 +774,7 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
     const latestRecords = await onecGet(
       "AccumulationRegister_Продажи_RecordType",
       {
-        $top: 1,
+        $top: 20,
         $select: "Period",
         $filter: "Active eq true",
         $orderby: "Period desc",
@@ -737,7 +789,8 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
       });
     }
 
-    const latestDate = new Date(latestRecords[0].Period);
+    const registerActivity = resolveActivityAnchor(latestRecords, "Period");
+    const latestDate = registerActivity.anchorDate;
     const startDate = new Date(latestDate.getTime() - days * 86_400_000);
     const items = await onecTurnovers("AccumulationRegister_Продажи", {
       startPeriod: startDate,
@@ -760,6 +813,9 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
       )
       .map((item) => ({ ...item, СотрудникТип: "person" }));
     let effectiveLatestDate = latestDate;
+    let absoluteLatestDate = registerActivity.absoluteLatestDate;
+    let analysisAnchorAdjusted = registerActivity.adjusted;
+    let ignoredIsolatedDocuments = registerActivity.ignoredDocuments;
     let source = "AccumulationRegister_Продажи/Turnovers";
     let scannedChecks = 0;
     let loadedChecks = 0;
@@ -773,7 +829,7 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
       const latestPremiumRows = await onecGet(
         "AccumulationRegister_ПремииПоЛичнымПродажам_RecordType",
         {
-          $top: 1,
+          $top: 20,
           $select: "Period",
           $filter: "Active eq true",
           $orderby: "Period desc",
@@ -781,7 +837,14 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
       );
 
       if (latestPremiumRows.length) {
-        effectiveLatestDate = new Date(latestPremiumRows[0].Period);
+        const premiumActivity = resolveActivityAnchor(
+          latestPremiumRows,
+          "Period",
+        );
+        effectiveLatestDate = premiumActivity.anchorDate;
+        absoluteLatestDate = premiumActivity.absoluteLatestDate;
+        analysisAnchorAdjusted = premiumActivity.adjusted;
+        ignoredIsolatedDocuments = premiumActivity.ignoredDocuments;
         const premiumStartDate = new Date(
           effectiveLatestDate.getTime() - days * 86_400_000,
         );
@@ -829,14 +892,18 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
 
     if (!validItems.length) {
       const latestChecks = await onecGet("Document_ЧекККМ", {
-        $top: 1,
+        $top: 20,
         $select: "Date",
         $filter: "Posted eq true",
         $orderby: "Date desc",
       });
 
       if (latestChecks.length) {
-        effectiveLatestDate = new Date(latestChecks[0].Date);
+        const checkActivity = resolveActivityAnchor(latestChecks, "Date");
+        effectiveLatestDate = checkActivity.anchorDate;
+        absoluteLatestDate = checkActivity.absoluteLatestDate;
+        analysisAnchorAdjusted = checkActivity.adjusted;
+        ignoredIsolatedDocuments = checkActivity.ignoredDocuments;
         const checkStartDate = new Date(
           effectiveLatestDate.getTime() - days * 86_400_000,
         );
@@ -1041,14 +1108,21 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
 
     if (!validItems.length) {
       const latestRealizations = await onecGet("Document_РеализацияТоваров", {
-        $top: 1,
+        $top: 20,
         $select: "Date",
         $filter: "Posted eq true",
         $orderby: "Date desc",
       });
 
       if (latestRealizations.length) {
-        effectiveLatestDate = new Date(latestRealizations[0].Date);
+        const realizationActivity = resolveActivityAnchor(
+          latestRealizations,
+          "Date",
+        );
+        effectiveLatestDate = realizationActivity.anchorDate;
+        absoluteLatestDate = realizationActivity.absoluteLatestDate;
+        analysisAnchorAdjusted = realizationActivity.adjusted;
+        ignoredIsolatedDocuments = realizationActivity.ignoredDocuments;
         const realizationStartDate = new Date(
           effectiveLatestDate.getTime() - days * 86_400_000,
         );
@@ -1143,6 +1217,9 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
         days,
         loaded: validItems.length,
         latestDate: effectiveLatestDate.toISOString(),
+        absoluteLatestDate: absoluteLatestDate?.toISOString() || null,
+        analysisAnchorAdjusted,
+        ignoredIsolatedDocuments,
         periodStart: new Date(
           effectiveLatestDate.getTime() - days * 86_400_000,
         ).toISOString(),
