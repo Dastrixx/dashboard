@@ -1270,6 +1270,7 @@ export function OnecTeam() {
           }),
           fetch(`${API_URL}/api/dashboard/onec-consultants?days=${period}`, {
             signal: controller.signal,
+            cache: "no-store",
           }),
         ]);
         const [sellerData, consultantData] = (await Promise.all([

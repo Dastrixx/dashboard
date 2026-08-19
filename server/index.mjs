@@ -540,6 +540,7 @@ app.get("/api/dashboard/onec-product-categories", async (request, response) => {
 
 app.get("/api/dashboard/onec-consultants", async (request, response) => {
   try {
+    response.set("Cache-Control", "no-store");
     const days = [1, 7, 30].includes(Number(request.query.days))
       ? Number(request.query.days)
       : 30;
@@ -600,46 +601,26 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       grouped.set(key, current);
     };
 
-    // Временно собираем всю доступную историю консультантов без ограничения
-    // день/неделя/месяц. Читаем чеки страницами, чтобы один большой ответ 1С не
-    // упирался в таймаут и не обрезал более старые документы.
+    // Это тот же запрос, на котором консультанты уже находились в рабочем
+    // коммите Add consultant sales analytics from 1C. Для этой базы не
+    // используем $skip: табличная часть Товары с ним возвращается нестабильно.
+    // Период пока намеренно не передаём и не фильтруем локально.
     {
-      const historicalChecks = [];
-      const maxChecks = Math.min(
-        Math.max(Number(process.env.ONEC_CONSULTANT_SCAN_LIMIT || 10_000), 1),
-        50_000,
-      );
-      const pageSize = Math.min(
-        Math.max(Number(process.env.ONEC_CONSULTANT_PAGE_SIZE || 100), 1),
-        500,
-      );
-      const select = [
-        "Ref_Key",
-        "Date",
-        "Posted",
-        "ВидОперации",
-        "Магазин_Key",
-        "Продавец_Key",
-        "Товары",
-      ].join(",");
-
-      while (historicalChecks.length < maxChecks) {
-        const currentPageSize = Math.min(
-          pageSize,
-          maxChecks - historicalChecks.length,
-        );
-        const page = await onecGet("Document_ЧекККМ", {
-          $top: currentPageSize,
-          $skip: historicalChecks.length,
-          $select: select,
-          $filter: "Posted eq true",
-          $orderby: "Date desc",
-        });
-        historicalChecks.push(...page);
-        if (page.length < currentPageSize) break;
-      }
-
-      const checksWithConsultant = historicalChecks.filter((check) => {
+      const checks = await onecGet("Document_ЧекККМ", {
+        $top: 1000,
+        $select: [
+          "Ref_Key",
+          "Date",
+          "Posted",
+          "ВидОперации",
+          "Магазин_Key",
+          "Продавец_Key",
+          "Товары",
+        ].join(","),
+        $filter: "Posted eq true",
+        $orderby: "Date desc",
+      });
+      const checksWithConsultant = checks.filter((check) => {
         if (check.Продавец_Key && check.Продавец_Key !== EMPTY_GUID) {
           return true;
         }
@@ -648,14 +629,14 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
             line.Продавец_Key && line.Продавец_Key !== EMPTY_GUID,
         );
       });
-      historicalChecksScanned = historicalChecks.length;
+      historicalChecksScanned = checks.length;
       historicalChecksWithConsultant = checksWithConsultant.length;
-      historicalChecksTruncated = historicalChecks.length >= maxChecks;
-      loadedChecks = historicalChecks.length;
-      scannedChecks = historicalChecks.length;
-      source = "Document_ЧекККМ.Продавец_Key · все доступные данные";
+      historicalChecksTruncated = checks.length >= 1000;
+      loadedChecks = checks.length;
+      scannedChecks = checks.length;
+      source = "Document_ЧекККМ.Товары.Продавец_Key · без периода";
 
-      const timestamps = historicalChecks
+      const timestamps = checks
         .map((check) => new Date(check.Date).getTime())
         .filter(Number.isFinite)
         .sort((left, right) => left - right);
@@ -668,7 +649,7 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       latestDate = periodEnd;
       absoluteLatestDate = periodEnd;
 
-      checksWithConsultant.forEach((check) => {
+      checks.forEach((check) => {
         const sign = /возврат/i.test(String(check.ВидОперации || ""))
           ? -1
           : 1;
