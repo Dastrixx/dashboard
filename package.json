@@ -16,7 +16,7 @@
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
     "dev:client": "vite",
-    "dev:server": "node --env-file=.env --watch server/index.mjs",
+    "dev:server": "node --env-file-if-exists=.env --watch server/index.mjs",
     "dev:full": "concurrently -n CLIENT,SERVER -c green,blue \"npm:dev:client\" \"npm:dev:server\""
   },
   "dependencies": {
