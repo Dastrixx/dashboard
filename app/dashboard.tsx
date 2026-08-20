@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeftRight,
   Boxes,
@@ -20,15 +21,13 @@ import {
   OnecStock,
   OnecTeam,
 } from "./onec-workspaces";
-
-type Role = "owner" | "manager";
-type Section =
-  | "overview"
-  | "products"
-  | "stock"
-  | "team"
-  | "procurement"
-  | "online";
+import {
+  dashboardRoute,
+  DEFAULT_DASHBOARD_ROUTE,
+  NAVIGATION,
+  type Role,
+  type Section,
+} from "./dashboard-routes";
 type Session = { role: Role; name: string; email: string };
 type Period = 7 | 30 | 90;
 
@@ -67,13 +66,17 @@ function Online() {
   );
 }
 
-export function Dashboard({ initialRole }: { initialRole: Role }) {
+export function Dashboard({
+  initialRole,
+  initialSection,
+}: {
+  initialRole: Role;
+  initialSection: Section;
+}) {
+  const router = useRouter();
   const role = initialRole;
   const [session, setSession] = useState<Session | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [section, setSection] = useState<Section>(
-    initialRole === "owner" ? "overview" : "products",
-  );
   const [period, setPeriod] = useState<Period>(30);
 
   useEffect(() => {
@@ -88,9 +91,7 @@ export function Dashboard({ initialRole }: { initialRole: Role }) {
       const parsed = JSON.parse(stored) as Session;
 
       if (parsed.role !== initialRole) {
-        window.location.replace(
-          parsed.role === "owner" ? "/owner" : "/manager",
-        );
+        window.location.replace(DEFAULT_DASHBOARD_ROUTE[parsed.role]);
         return;
       }
 
@@ -103,26 +104,8 @@ export function Dashboard({ initialRole }: { initialRole: Role }) {
     }
   }, [initialRole]);
 
-  const activeSection: Section =
-    role === "owner"
-      ? "overview"
-      : section === "overview"
-        ? "products"
-        : section;
-
-  const nav = useMemo(
-    () =>
-      role === "owner"
-        ? [{ id: "overview", label: "Обзор" }]
-        : [
-            { id: "products", label: "Товары и продажи" },
-            { id: "stock", label: "Склад и остатки" },
-            { id: "team", label: "Продавцы" },
-            { id: "procurement", label: "Закуп / Перемещение" },
-            { id: "online", label: "Онлайн" },
-          ],
-    [role],
-  );
+  const activeSection = initialSection;
+  const nav = NAVIGATION[role];
 
   const titles: Record<Section, [string, string]> = {
     overview: ["Обзор бизнеса", "Продажи и возвраты по данным 1С"],
@@ -137,9 +120,8 @@ export function Dashboard({ initialRole }: { initialRole: Role }) {
   };
 
   const changeSection = (nextSection: Section) => {
-    setSection(nextSection);
     setMenuOpen(false);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    router.push(dashboardRoute(role, nextSection));
   };
 
   const logout = () => {

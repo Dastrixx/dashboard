@@ -1,5 +1,6 @@
-import { Dashboard } from "../dashboard";
+import { redirect } from "next/navigation";
+import { DEFAULT_DASHBOARD_ROUTE } from "../dashboard-routes";
 
 export default function OwnerPage(){
-  return <Dashboard initialRole="owner"/>;
+  redirect(DEFAULT_DASHBOARD_ROUTE.owner);
 }
