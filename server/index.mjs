@@ -1404,7 +1404,7 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
 
 app.get("/api/dashboard/onec-check-analytics", async (request, response) => {
   try {
-    const days = [1, 7, 30].includes(Number(request.query.days))
+    const days = [1, 7, 30, 90].includes(Number(request.query.days))
       ? Number(request.query.days)
       : 30;
     const limit = Math.min(
