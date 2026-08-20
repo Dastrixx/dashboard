@@ -1,6 +1,7 @@
 # Дашборд аналитики продаж
 
-Полный проект на React и Node.js. Интерфейс и API запускаются отдельно. Сейчас сервер возвращает демонстрационные данные и подготовлен как слой между React и будущей интеграцией с 1С.
+Полный проект на React и Node.js. Интерфейс и API запускаются отдельно. Рабочие
+экраны получают продажи, остатки, товары, склады и сотрудников через OData 1С.
 
 ## Стек
 
@@ -42,12 +43,24 @@ npm run dev:server
 
 ```text
 app/
-  dashboard.tsx       основные экраны и интерактивная логика
-  dashboard-data.ts   типы и демонстрационные данные
-  globals.css         дизайн-система и адаптивные стили
+  dashboard.tsx          навигация и оболочка дашборда
+  dashboard-data.ts      типы и резервные демонстрационные данные
+  onec-workspaces.tsx    стабильная точка экспорта экранов 1С
+  onec/
+    types.ts             типы ответов API и сущностей 1С
+    shared.tsx           API URL, форматтеры и общие состояния
+    overview.tsx         обзор продаж
+    stock.tsx            склады, остатки и складские операции
+    team.tsx             продавцы и консультанты
+    procurement.tsx      экран закупа и перемещений
+  globals.css            дизайн-система и адаптивные стили
 server/
-  index.mjs      Express API
-  data.mjs       демонстрационные данные
+  index.mjs              Express-маршруты и orchestration
+  onec.mjs               низкоуровневый клиент OData 1С
+  dashboard/
+    constants.mjs        имена сущностей, GUID и бизнес-категории
+    utils.mjs            чистые функции дат и категоризации
+  data.mjs               резервные демонстрационные данные
 ```
 
 ## API
@@ -58,7 +71,23 @@ server/
 - `GET /api/sellers`
 - `POST /api/replenishment-requests`
 
-Для интеграции с 1С замени чтение `dashboardData` в `server/index.mjs` на сервис OData, HTTP-сервис 1С или запросы к промежуточной базе. Если сохранить текущий формат ответов, React-интерфейс менять не потребуется.
+Доступ к 1С настраивается только на Node.js-сервере:
+
+```env
+ONEC_ODATA_URL=http://host/base/ru_RU/odata/standard.odata
+ONEC_USER=odata.user
+ONEC_PASSWORD=secret
+```
+
+Логин и пароль 1С не передаются в клиентский React-код.
+
+Перед коммитом рекомендуется выполнить:
+
+```bash
+npm run typecheck
+npm run lint
+npm run build
+```
 
 Логика порога складской заявки сейчас находится в `locationMetrics` внутри
 `app/dashboard.tsx`. Товар попадает в заявку при остатке не более 50% от

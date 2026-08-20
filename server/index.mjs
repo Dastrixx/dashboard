@@ -2,6 +2,20 @@ import cors from "cors";
 import express from "express";
 import { dashboardData } from "./data.mjs";
 import {
+  EMPTY_GUID,
+  GUID_PATTERN,
+  RETAIL_REPORT_ENTITY,
+  RETAIL_REPORT_SELECT,
+} from "./dashboard/constants.mjs";
+import {
+  enrichProductsWithBusinessCategories,
+  filterByPeriod,
+  publicBusinessCategories,
+  resolveActivityAnchor,
+  summarizeProductReference,
+  toOdataDateTime,
+} from "./dashboard/utils.mjs";
+import {
   onecBalance,
   onecGet,
   onecGetByKey,
@@ -79,55 +93,12 @@ const referenceCache = new Map();
 const reportCache = new Map();
 let productKindsCache = null;
 
-const GUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const EMPTY_GUID = "00000000-0000-0000-0000-000000000000";
-const BUSINESS_CATEGORIES = [
-  {
-    Ref_Key: "home-textile",
-    Description: "Домашний текстиль",
-    aliases: ["домашний текстиль", "плед"],
-  },
-  {
-    Ref_Key: "tableware",
-    Description: "Посуда",
-    aliases: ["посуда", "посуда китай"],
-  },
-  {
-    Ref_Key: "clothing",
-    Description: "Одежда",
-    aliases: ["одежда"],
-  },
-  {
-    Ref_Key: "household-chemicals",
-    Description: "Бытовая химия",
-    aliases: ["детская химия", "мыломойка", "бытовая химия"],
-  },
-];
-
-const RETAIL_REPORT_ENTITY = "Document_ОтчетОРозничныхПродажах";
-const RETAIL_REPORT_SELECT = [
-  "Ref_Key",
-  "Number",
-  "Date",
-  "Posted",
-  "СуммаДокумента",
-  "СуммаВозвратов",
-  "Магазин_Key",
-  "КассаККМ_Key",
-  "Товары",
-].join(",");
-
-function toOdataDateTime(timestamp) {
-  return new Date(timestamp).toISOString().replace(/\.\d{3}Z$/, "");
-}
-
 async function loadReportPages({ limit, days }) {
   const configuredPageSize = Number(process.env.ONEC_PAGE_SIZE || 25);
   const pageSize = Math.min(Math.max(configuredPageSize, 1), 100);
 
   const latest = await onecGet(RETAIL_REPORT_ENTITY, {
-    $top: 1,
+    $top: 20,
     $select: "Date",
     $filter: "Posted eq true",
     $orderby: "Date desc",
@@ -137,7 +108,8 @@ async function loadReportPages({ limit, days }) {
     return [];
   }
 
-  const latestTimestamp = new Date(latest[0].Date).getTime();
+  const activity = resolveActivityAnchor(latest, "Date");
+  const latestTimestamp = activity.anchorDate.getTime();
   const fromTimestamp = latestTimestamp - days * 86_400_000;
   const dateFilter = [
     "Posted eq true",
@@ -167,14 +139,27 @@ async function loadReportPages({ limit, days }) {
     return result;
   }
 
+  const endDate = new Date(latestTimestamp + 1000);
+  const startDate = new Date(fromTimestamp);
+
   try {
-    return await load(dateFilter);
+    return filterByPeriod(
+      await load(dateFilter),
+      "Date",
+      startDate,
+      endDate,
+    );
   } catch (error) {
     console.warn(
       "1С не приняла фильтр по дате, используем постраничную загрузку:",
       error instanceof Error ? error.message : error,
     );
-    return load("Posted eq true");
+    return filterByPeriod(
+      await load("Posted eq true"),
+      "Date",
+      startDate,
+      endDate,
+    );
   }
 }
 
@@ -196,6 +181,88 @@ async function loadReportPagesCached({ limit, days }) {
     10_000,
   );
   const promise = loadReportPages({ limit, days });
+  reportCache.set(key, { promise, expiresAt: now + ttlMs });
+
+  try {
+    const items = await promise;
+    reportCache.set(key, { items, expiresAt: Date.now() + ttlMs });
+    return { items, cache: "miss" };
+  } catch (error) {
+    reportCache.delete(key);
+    throw error;
+  }
+}
+
+// Совместимый загрузчик для блока консультантов из коммита ec34f5a.
+// Важное отличие: если 1С отклоняет фильтр по Date, здесь возвращаются все
+// загруженные отчёты без повторной локальной фильтрации. Именно на этом
+// fallback в исходной реализации находились заполненные строки продавцов.
+async function loadConsultantReportPagesLegacy({ limit, days }) {
+  const configuredPageSize = Number(process.env.ONEC_PAGE_SIZE || 25);
+  const pageSize = Math.min(Math.max(configuredPageSize, 1), 100);
+  const latest = await onecGet(RETAIL_REPORT_ENTITY, {
+    $top: 1,
+    $select: "Date",
+    $filter: "Posted eq true",
+    $orderby: "Date desc",
+  });
+
+  if (!latest.length) return [];
+
+  const latestTimestamp = new Date(latest[0].Date).getTime();
+  const fromTimestamp = latestTimestamp - days * 86_400_000;
+  const dateFilter = [
+    "Posted eq true",
+    `Date ge datetime'${toOdataDateTime(fromTimestamp)}'`,
+  ].join(" and ");
+
+  async function load(filter) {
+    const result = [];
+
+    while (result.length < limit) {
+      const currentPageSize = Math.min(pageSize, limit - result.length);
+      const page = await onecGet(RETAIL_REPORT_ENTITY, {
+        $top: currentPageSize,
+        $skip: result.length,
+        $select: RETAIL_REPORT_SELECT,
+        $filter: filter,
+        $orderby: "Date desc",
+      });
+      result.push(...page);
+      if (page.length < currentPageSize) break;
+    }
+
+    return result;
+  }
+
+  try {
+    return await load(dateFilter);
+  } catch (error) {
+    console.warn(
+      "1С не приняла период консультантов в розничных отчётах, используем совместимый fallback ec34f5a:",
+      error instanceof Error ? error.message : error,
+    );
+    return load("Posted eq true");
+  }
+}
+
+async function loadConsultantReportPagesLegacyCached({ limit, days }) {
+  const key = `consultants-ec34:${limit}:${days}`;
+  const now = Date.now();
+  const cached = reportCache.get(key);
+
+  if (cached?.items && cached.expiresAt > now) {
+    return { items: cached.items, cache: "hit" };
+  }
+  if (cached?.promise) {
+    return { items: await cached.promise, cache: "shared" };
+  }
+
+  const ttlMs = Math.max(
+    Number(process.env.ONEC_REPORT_CACHE_TTL_MS || 120_000),
+    10_000,
+  );
+  const promise = loadConsultantReportPagesLegacy({ limit, days });
   reportCache.set(key, { promise, expiresAt: now + ttlMs });
 
   try {
@@ -266,23 +333,6 @@ async function loadReferencesByKeysBatched(entity, keys, select) {
   return loadReferencesByKeys(entity, keys, select);
 }
 
-function normalizeReferenceName(value) {
-  return String(value || "")
-    .trim()
-    .toLocaleLowerCase("ru-RU")
-    .replace(/\s+/g, " ");
-}
-
-function resolveBusinessCategory(kindName) {
-  const normalizedName = normalizeReferenceName(kindName);
-
-  return (
-    BUSINESS_CATEGORIES.find((category) =>
-      category.aliases.some((alias) => normalizedName === alias),
-    ) || null
-  );
-}
-
 async function loadProductKindsCatalog() {
   const now = Date.now();
 
@@ -313,70 +363,6 @@ async function loadProductKindsCatalog() {
     productKindsCache = null;
     throw error;
   }
-}
-
-function enrichProductsWithBusinessCategories(products, productKinds) {
-  const kindByKey = new Map(
-    productKinds.map((kind) => [kind.Ref_Key, kind]),
-  );
-
-  return products.map((product) => {
-    const kind = kindByKey.get(product.ВидНоменклатуры_Key);
-    const category = resolveBusinessCategory(kind?.Description);
-
-    return {
-      ...product,
-      ВидНоменклатуры: kind?.Description || null,
-      BusinessCategory_Key: category?.Ref_Key || null,
-      BusinessCategory: category?.Description || null,
-    };
-  });
-}
-
-function publicBusinessCategories() {
-  return BUSINESS_CATEGORIES.map(({ Ref_Key, Description }) => ({
-    Ref_Key,
-    Description,
-  }));
-}
-
-function summarizeProductReference(products, field, references = []) {
-  const referenceByKey = new Map(
-    references.map((reference) => [reference.Ref_Key, reference]),
-  );
-  const summaryByKey = new Map();
-
-  for (const product of products) {
-    const key = product[field];
-
-    if (!GUID_PATTERN.test(key || "") || key === EMPTY_GUID) {
-      continue;
-    }
-
-    const current = summaryByKey.get(key) || {
-      key,
-      name: referenceByKey.get(key)?.Description || null,
-      productsCount: 0,
-      productExamples: [],
-    };
-
-    current.productsCount += 1;
-
-    if (current.productExamples.length < 5) {
-      current.productExamples.push({
-        key: product.Ref_Key,
-        code: product.Code,
-        article: product.Артикул,
-        name: product.Description,
-      });
-    }
-
-    summaryByKey.set(key, current);
-  }
-
-  return [...summaryByKey.values()].sort(
-    (left, right) => right.productsCount - left.productsCount,
-  );
 }
 
 app.get("/api/dashboard/onec-product-categories", async (request, response) => {
@@ -468,6 +454,206 @@ app.get("/api/dashboard/onec-product-categories", async (request, response) => {
   }
 });
 
+app.get("/api/dashboard/onec-consultants", async (request, response) => {
+  try {
+    const days = [1, 7, 30].includes(Number(request.query.days))
+      ? Number(request.query.days)
+      : 30;
+    const grouped = new Map();
+    let salesLines = 0;
+    let returnLines = 0;
+    let linesWithConsultant = 0;
+    let scannedChecks = 0;
+    let checkLines = 0;
+    let checkLinesWithConsultant = 0;
+    let reports = [];
+    let cache = "not-used";
+    let latestDate = null;
+    let source = "Document_ЧекККМ.Товары.Продавец_Key";
+
+    const addLine = ({ storeKey, line, sign, documentSellerKey, origin }) => {
+      if (sign > 0) salesLines += 1;
+      else returnLines += 1;
+
+      const consultantKey =
+        line.Продавец_Key && line.Продавец_Key !== EMPTY_GUID
+          ? line.Продавец_Key
+          : documentSellerKey;
+      if (!consultantKey || consultantKey === EMPTY_GUID) return;
+
+      linesWithConsultant += 1;
+      if (origin === "check") checkLinesWithConsultant += 1;
+      const resolvedStoreKey = storeKey || EMPTY_GUID;
+      const key = `${consultantKey}:${resolvedStoreKey}`;
+      const current = grouped.get(key) || {
+        Продавец_Key: consultantKey,
+        СотрудникТип: "consultant",
+        Магазин_Key: resolvedStoreKey,
+        КоличествоTurnover: 0,
+        СтоимостьTurnover: 0,
+        СтоимостьБезСкидокTurnover: 0,
+        СтрокПродаж: 0,
+        СтрокВозвратов: 0,
+      };
+      const quantity = Number(line.Количество || 0);
+      const amount = Number(line.Сумма || 0);
+      const fullPrice = Number(line.Цена || 0) * quantity;
+
+      current.КоличествоTurnover += sign * quantity;
+      current.СтоимостьTurnover += sign * amount;
+      current.СтоимостьБезСкидокTurnover += sign * Math.max(fullPrice, amount);
+      if (sign > 0) current.СтрокПродаж += 1;
+      else current.СтрокВозвратов += 1;
+      grouped.set(key, current);
+    };
+
+    const latestChecks = await onecGet("Document_ЧекККМ", {
+      $top: 1,
+      $select: "Date",
+      $filter: "Posted eq true",
+      $orderby: "Date desc",
+    });
+
+    if (latestChecks.length) {
+      latestDate = latestChecks[0].Date;
+      const checkStartDate = new Date(
+        new Date(latestDate).getTime() - days * 86_400_000,
+      );
+      const checkQuery = {
+        $top: 1000,
+        $select: [
+          "Ref_Key",
+          "Date",
+          "Posted",
+          "ВидОперации",
+          "Магазин_Key",
+          "Продавец_Key",
+          "Товары",
+        ].join(","),
+        $orderby: "Date desc",
+      };
+      let checks;
+
+      try {
+        checks = await onecGet("Document_ЧекККМ", {
+          ...checkQuery,
+          $filter: [
+            "Posted eq true",
+            `Date ge datetime'${toOdataDateTime(checkStartDate)}'`,
+          ].join(" and "),
+        });
+      } catch (error) {
+        console.warn(
+          "1С не приняла период консультантов по чекам, загружаем последние чеки:",
+          error instanceof Error ? error.message : error,
+        );
+        checks = await onecGet("Document_ЧекККМ", {
+          ...checkQuery,
+          $filter: "Posted eq true",
+        });
+      }
+      scannedChecks = checks.length;
+
+      checks.forEach((check) => {
+        const sign = /возврат/i.test(String(check.ВидОперации || ""))
+          ? -1
+          : 1;
+        (check.Товары || []).forEach((line) => {
+          checkLines += 1;
+          addLine({
+            storeKey: check.Магазин_Key,
+            line,
+            sign,
+            documentSellerKey: check.Продавец_Key,
+            origin: "check",
+          });
+        });
+      });
+    }
+
+    // В некоторых базах консультант переносится из чеков только при закрытии
+    // смены. Тогда ищем его в строках отчёта о розничных продажах.
+    if (!grouped.size) {
+      const reportResult = await loadConsultantReportPagesLegacyCached({
+        limit: 500,
+        days,
+      });
+      reports = reportResult.items;
+      cache = reportResult.cache;
+      latestDate = reports[0]?.Date || latestDate;
+      source = "Document_ОтчетОРозничныхПродажах.Товары.Продавец_Key";
+
+      reports.forEach((report) => {
+        (report.Товары || []).forEach((line) =>
+          addLine({
+            storeKey: report.Магазин_Key,
+            line,
+            sign: 1,
+            documentSellerKey: null,
+            origin: "retail-report",
+          }),
+        );
+        (report.ВозвращенныеТовары || []).forEach((line) =>
+          addLine({
+            storeKey: report.Магазин_Key,
+            line,
+            sign: -1,
+            documentSellerKey: null,
+            origin: "retail-report",
+          }),
+        );
+      });
+    }
+
+    const items = [...grouped.values()].sort(
+      (left, right) => right.СтоимостьTurnover - left.СтоимостьTurnover,
+    );
+    const consultants = await loadReferencesByKeysBatched(
+      "Catalog_ФизическиеЛица",
+      items.map((item) => item.Продавец_Key),
+      "Ref_Key,Description,Сотрудник,Магазин_Key",
+    );
+    const stores = await loadReferencesByKeysBatched(
+      "Catalog_Магазины",
+      [
+        ...items.map((item) => item.Магазин_Key),
+        ...consultants.map((item) => item.Магазин_Key),
+      ],
+      "Ref_Key,Code,Description",
+    );
+
+    response.json({
+      items,
+      references: { sellers: consultants, stores },
+      meta: {
+        days,
+        loaded: items.length,
+        latestDate,
+        source,
+        cache,
+        diagnostics: {
+          scannedChecks,
+          checkLines,
+          checkLinesWithConsultant,
+          reports: reports.length,
+          salesLines,
+          returnLines,
+          linesWithConsultant,
+          consultants: consultants.length,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Ошибка загрузки продаж консультантов 1С:", error);
+    response.status(502).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : "Не удалось получить продажи консультантов из 1С",
+    });
+  }
+});
+
 app.get("/api/dashboard/onec-sellers", async (request, response) => {
   try {
     const days = [1, 7, 30].includes(Number(request.query.days))
@@ -476,7 +662,7 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
     const latestRecords = await onecGet(
       "AccumulationRegister_Продажи_RecordType",
       {
-        $top: 1,
+        $top: 20,
         $select: "Period",
         $filter: "Active eq true",
         $orderby: "Period desc",
@@ -491,7 +677,8 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
       });
     }
 
-    const latestDate = new Date(latestRecords[0].Period);
+    const registerActivity = resolveActivityAnchor(latestRecords, "Period");
+    const latestDate = registerActivity.anchorDate;
     const startDate = new Date(latestDate.getTime() - days * 86_400_000);
     const items = await onecTurnovers("AccumulationRegister_Продажи", {
       startPeriod: startDate,
@@ -506,14 +693,23 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
         "СтоимостьБезСкидокTurnover",
       ].join(","),
     });
-    let validItems = items.filter(
-      (item) =>
-        item.Продавец_Key &&
-        item.Продавец_Key !== "00000000-0000-0000-0000-000000000000",
-    );
+    let validItems = items
+      .filter(
+        (item) =>
+          item.Продавец_Key &&
+          item.Продавец_Key !== "00000000-0000-0000-0000-000000000000",
+      )
+      .map((item) => ({ ...item, СотрудникТип: "person" }));
     let effectiveLatestDate = latestDate;
+    let absoluteLatestDate = registerActivity.absoluteLatestDate;
+    let analysisAnchorAdjusted = registerActivity.adjusted;
+    let ignoredIsolatedDocuments = registerActivity.ignoredDocuments;
     let source = "AccumulationRegister_Продажи/Turnovers";
     let scannedChecks = 0;
+    let loadedChecks = 0;
+    let scannedCashShifts = 0;
+    let loadedCashShifts = 0;
+    let checksWithAssignedEmployee = 0;
     let scannedPremiumRows = 0;
     let scannedRealizations = 0;
 
@@ -521,7 +717,7 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
       const latestPremiumRows = await onecGet(
         "AccumulationRegister_ПремииПоЛичнымПродажам_RecordType",
         {
-          $top: 1,
+          $top: 20,
           $select: "Period",
           $filter: "Active eq true",
           $orderby: "Period desc",
@@ -529,7 +725,14 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
       );
 
       if (latestPremiumRows.length) {
-        effectiveLatestDate = new Date(latestPremiumRows[0].Period);
+        const premiumActivity = resolveActivityAnchor(
+          latestPremiumRows,
+          "Period",
+        );
+        effectiveLatestDate = premiumActivity.anchorDate;
+        absoluteLatestDate = premiumActivity.absoluteLatestDate;
+        analysisAnchorAdjusted = premiumActivity.adjusted;
+        ignoredIsolatedDocuments = premiumActivity.ignoredDocuments;
         const premiumStartDate = new Date(
           effectiveLatestDate.getTime() - days * 86_400_000,
         );
@@ -562,6 +765,7 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
           )
           .map((item) => ({
             Продавец_Key: item.Продавец_Key,
+            СотрудникТип: "person",
             Магазин_Key:
               item.МагазинПродаж_Key || item.МагазинРасчетаПремий_Key,
             КоличествоTurnover: Number(item.Количество || 0),
@@ -576,14 +780,18 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
 
     if (!validItems.length) {
       const latestChecks = await onecGet("Document_ЧекККМ", {
-        $top: 1,
+        $top: 20,
         $select: "Date",
         $filter: "Posted eq true",
         $orderby: "Date desc",
       });
 
       if (latestChecks.length) {
-        effectiveLatestDate = new Date(latestChecks[0].Date);
+        const checkActivity = resolveActivityAnchor(latestChecks, "Date");
+        effectiveLatestDate = checkActivity.anchorDate;
+        absoluteLatestDate = checkActivity.absoluteLatestDate;
+        analysisAnchorAdjusted = checkActivity.adjusted;
+        ignoredIsolatedDocuments = checkActivity.ignoredDocuments;
         const checkStartDate = new Date(
           effectiveLatestDate.getTime() - days * 86_400_000,
         );
@@ -592,8 +800,11 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
           "Date",
           "Posted",
           "ВидОперации",
+          "КассаККМ_Key",
+          "НомерСменыККМ",
           "Магазин_Key",
           "Продавец_Key",
+          "Ответственный_Key",
           "СуммаДокумента",
           "Товары",
         ].join(",");
@@ -622,15 +833,87 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
           });
         }
 
+        loadedChecks = checks.length;
+        checks = filterByPeriod(
+          checks,
+          "Date",
+          checkStartDate,
+          new Date(effectiveLatestDate.getTime() + 1000),
+        );
         scannedChecks = checks.length;
+        let cashShifts = [];
+        const cashShiftSelect = [
+          "Ref_Key",
+          "Date",
+          "Posted",
+          "КассаККМ_Key",
+          "НомерСменыККТ",
+          "Кассир_Key",
+          "Магазин_Key",
+        ].join(",");
+
+        try {
+          cashShifts = await onecGet("Document_КассоваяСмена", {
+            $top: 500,
+            $select: cashShiftSelect,
+            $filter: [
+              "Posted eq true",
+              `Date ge datetime'${toOdataDateTime(checkStartDate)}'`,
+            ].join(" and "),
+            $orderby: "Date desc",
+          });
+        } catch (error) {
+          console.warn(
+            "1С не приняла фильтр кассовых смен по дате, загружаем последние смены:",
+            error instanceof Error ? error.message : error,
+          );
+          cashShifts = await onecGet("Document_КассоваяСмена", {
+            $top: 500,
+            $select: cashShiftSelect,
+            $filter: "Posted eq true",
+            $orderby: "Date desc",
+          });
+        }
+
+        loadedCashShifts = cashShifts.length;
+        cashShifts = filterByPeriod(
+          cashShifts,
+          "Date",
+          checkStartDate,
+          new Date(effectiveLatestDate.getTime() + 1000),
+        );
+        scannedCashShifts = cashShifts.length;
+        const cashiersByShift = new Map();
+        cashShifts.forEach((shift) => {
+          if (
+            shift.КассаККМ_Key &&
+            shift.НомерСменыККТ !== undefined &&
+            shift.Кассир_Key &&
+            shift.Кассир_Key !== EMPTY_GUID
+          ) {
+            cashiersByShift.set(
+              `${shift.КассаККМ_Key}:${shift.НомерСменыККТ}`,
+              shift,
+            );
+          }
+        });
+
         const groupedChecks = new Map();
-        const addTurnover = ({ sellerKey, storeKey, quantity, revenue, fullPrice }) => {
+        const addTurnover = ({
+          sellerKey,
+          employeeType,
+          storeKey,
+          quantity,
+          revenue,
+          fullPrice,
+        }) => {
           if (!sellerKey || sellerKey === "00000000-0000-0000-0000-000000000000") {
             return;
           }
-          const key = `${sellerKey}:${storeKey}`;
+          const key = `${employeeType}:${sellerKey}:${storeKey}`;
           const current = groupedChecks.get(key) || {
             Продавец_Key: sellerKey,
+            СотрудникТип: employeeType,
             Магазин_Key: storeKey,
             КоличествоTurnover: 0,
             СтоимостьTurnover: 0,
@@ -645,10 +928,37 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
         checks.forEach((check) => {
           const sign = /возврат/i.test(String(check.ВидОперации || "")) ? -1 : 1;
           const lines = check.Товары || [];
+          const shift = cashiersByShift.get(
+            `${check.КассаККМ_Key}:${check.НомерСменыККМ}`,
+          );
+          const directSellerKey =
+            check.Продавец_Key && check.Продавец_Key !== EMPTY_GUID
+              ? check.Продавец_Key
+              : null;
+          const cashierKey =
+            shift?.Кассир_Key && shift.Кассир_Key !== EMPTY_GUID
+              ? shift.Кассир_Key
+              : null;
+          const responsibleKey =
+            check.Ответственный_Key && check.Ответственный_Key !== EMPTY_GUID
+              ? check.Ответственный_Key
+              : null;
+          const fallbackEmployeeKey = directSellerKey || cashierKey || responsibleKey;
+          const fallbackEmployeeType = directSellerKey ? "person" : "user";
+          const resolvedStoreKey =
+            check.Магазин_Key && check.Магазин_Key !== EMPTY_GUID
+              ? check.Магазин_Key
+              : shift?.Магазин_Key;
+
+          if (fallbackEmployeeKey) {
+            checksWithAssignedEmployee += 1;
+          }
+
           if (!lines.length) {
             addTurnover({
-              sellerKey: check.Продавец_Key,
-              storeKey: check.Магазин_Key,
+              sellerKey: fallbackEmployeeKey,
+              employeeType: fallbackEmployeeType,
+              storeKey: resolvedStoreKey,
               quantity: 0,
               revenue: sign * Number(check.СуммаДокумента || 0),
               fullPrice: sign * Number(check.СуммаДокумента || 0),
@@ -662,12 +972,14 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
               Number(line.СуммаАвтоматическойСкидки || 0) +
               Number(line.СуммаРучнойСкидки || 0) +
               Number(line.СуммаСкидкиОплатыБонусом || 0);
+            const lineSellerKey =
+              line.Продавец_Key && line.Продавец_Key !== EMPTY_GUID
+                ? line.Продавец_Key
+                : null;
             addTurnover({
-              sellerKey:
-                line.Продавец_Key && line.Продавец_Key !== "00000000-0000-0000-0000-000000000000"
-                  ? line.Продавец_Key
-                  : check.Продавец_Key,
-              storeKey: check.Магазин_Key,
+              sellerKey: lineSellerKey || fallbackEmployeeKey,
+              employeeType: lineSellerKey ? "person" : fallbackEmployeeType,
+              storeKey: resolvedStoreKey,
               quantity: sign * Number(line.Количество || 0),
               revenue: sign * revenue,
               fullPrice: sign * (revenue + discounts),
@@ -676,20 +988,29 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
         });
 
         validItems = [...groupedChecks.values()];
-        source = "Document_ЧекККМ (fallback)";
+        source = cashiersByShift.size
+          ? "Document_ЧекККМ + Document_КассоваяСмена (fallback)"
+          : "Document_ЧекККМ (fallback)";
       }
     }
 
     if (!validItems.length) {
       const latestRealizations = await onecGet("Document_РеализацияТоваров", {
-        $top: 1,
+        $top: 20,
         $select: "Date",
         $filter: "Posted eq true",
         $orderby: "Date desc",
       });
 
       if (latestRealizations.length) {
-        effectiveLatestDate = new Date(latestRealizations[0].Date);
+        const realizationActivity = resolveActivityAnchor(
+          latestRealizations,
+          "Date",
+        );
+        effectiveLatestDate = realizationActivity.anchorDate;
+        absoluteLatestDate = realizationActivity.absoluteLatestDate;
+        analysisAnchorAdjusted = realizationActivity.adjusted;
+        ignoredIsolatedDocuments = realizationActivity.ignoredDocuments;
         const realizationStartDate = new Date(
           effectiveLatestDate.getTime() - days * 86_400_000,
         );
@@ -726,6 +1047,7 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
             const key = `${sellerKey}:${document.Магазин_Key}`;
             const current = groupedRealizations.get(key) || {
               Продавец_Key: sellerKey,
+              СотрудникТип: "person",
               Магазин_Key: document.Магазин_Key,
               КоличествоTurnover: 0,
               СтоимостьTurnover: 0,
@@ -748,11 +1070,25 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
         }
       }
     }
-    const sellers = await loadReferencesByKeysBatched(
+    const personKeys = validItems
+      .filter((item) => item.СотрудникТип !== "user")
+      .map((item) => item.Продавец_Key);
+    const userKeys = validItems
+      .filter((item) => item.СотрудникТип === "user")
+      .map((item) => item.Продавец_Key);
+    const [people, users] = await Promise.all([
+      loadReferencesByKeysBatched(
       "Catalog_ФизическиеЛица",
-      validItems.map((item) => item.Продавец_Key),
+      personKeys,
       "Ref_Key,Description,Магазин_Key",
-    );
+      ),
+      loadReferencesByKeysBatched(
+        "Catalog_Пользователи",
+        userKeys,
+        "Ref_Key,Description,ФизическоеЛицо_Key,ФизЛицо_Key,Магазин_Key",
+      ),
+    ]);
+    const sellers = [...people, ...users];
     const stores = await loadReferencesByKeysBatched(
       "Catalog_Магазины",
       [
@@ -769,6 +1105,13 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
         days,
         loaded: validItems.length,
         latestDate: effectiveLatestDate.toISOString(),
+        absoluteLatestDate: absoluteLatestDate?.toISOString() || null,
+        analysisAnchorAdjusted,
+        ignoredIsolatedDocuments,
+        periodStart: new Date(
+          effectiveLatestDate.getTime() - days * 86_400_000,
+        ).toISOString(),
+        periodEnd: effectiveLatestDate.toISOString(),
         source,
         diagnostics: {
           turnoverRows: items.length,
@@ -778,6 +1121,10 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
               item.Продавец_Key !== "00000000-0000-0000-0000-000000000000",
           ).length,
           scannedChecks,
+          loadedChecks,
+          scannedCashShifts,
+          loadedCashShifts,
+          checksWithAssignedEmployee,
           scannedPremiumRows,
           scannedRealizations,
           resultRows: validItems.length,
