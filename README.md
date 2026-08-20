@@ -46,6 +46,7 @@ app/
   dashboard.tsx          навигация и оболочка дашборда
   dashboard-data.ts      типы и резервные демонстрационные данные
   onec-workspaces.tsx    стабильная точка экспорта экранов 1С
+  onec-sales.tsx         стабильная точка экспорта аналитики товаров
   onec/
     types.ts             типы ответов API и сущностей 1С
     shared.tsx           API URL, форматтеры и общие состояния
@@ -53,6 +54,17 @@ app/
     stock.tsx            склады, остатки и складские операции
     team.tsx             продавцы и консультанты
     procurement.tsx      экран закупа и перемещений
+    sales/
+      index.tsx           компоновка экрана «Товары и продажи»
+      types.ts            типы продаж, чеков и справочников
+      config.ts           периоды, форматтеры и URL API
+      hooks.ts            загрузка отчётов, справочников и чеков
+      analytics.ts        чистые формулы продаж, ABC и CSV
+      overview.tsx        KPI, фильтр периода и графики выручки
+      check-analytics-panel.tsx
+                          чеки, средний чек, скидки и сертификаты
+      product-ranking.tsx топ и антитоп товаров
+      abc-analysis.tsx    ABC-сводка, поиск и пагинация
   globals.css            дизайн-система и адаптивные стили
 server/
   index.mjs              Express-маршруты и orchestration
@@ -60,6 +72,7 @@ server/
   dashboard/
     constants.mjs        имена сущностей, GUID и бизнес-категории
     utils.mjs            чистые функции дат и категоризации
+    checks.mjs           загрузка и агрегация чеков 1С
   data.mjs               резервные демонстрационные данные
 ```
 
@@ -70,6 +83,11 @@ server/
 - `GET /api/products?search=&category=`
 - `GET /api/sellers`
 - `POST /api/replenishment-requests`
+- `GET /api/dashboard/onec-reports?top=&days=`
+- `GET /api/dashboard/onec-check-analytics?days=1|7|30`
+- `GET /api/dashboard/onec-stock?top=`
+- `GET /api/dashboard/onec-sellers?days=`
+- `GET /api/dashboard/onec-consultants?days=`
 
 Доступ к 1С настраивается только на Node.js-сервере:
 
