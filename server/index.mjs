@@ -22,6 +22,7 @@ import {
   onecMetadata,
   onecTurnovers,
 } from "./onec.mjs";
+import { loadCheckAnalytics } from "./dashboard/checks.mjs";
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -1397,6 +1398,48 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
         error instanceof Error
           ? error.message
           : "Не удалось получить отчёты 1С",
+    });
+  }
+});
+
+app.get("/api/dashboard/onec-check-analytics", async (request, response) => {
+  try {
+    const days = [1, 7, 30].includes(Number(request.query.days))
+      ? Number(request.query.days)
+      : 30;
+    const limit = Math.min(
+      Math.max(
+        Number(request.query.limit) ||
+          Number(process.env.ONEC_CHECK_ANALYTICS_LIMIT || 5000),
+        100,
+      ),
+      10_000,
+    );
+    const startedAt = Date.now();
+    const analytics = await loadCheckAnalytics({ days, limit });
+
+    response.json({
+      items: analytics,
+      meta: {
+        days,
+        loaded: analytics.loaded,
+        latestDate: analytics.latestDate,
+        absoluteLatestDate: analytics.absoluteLatestDate,
+        analysisAnchorAdjusted: analytics.analysisAnchorAdjusted,
+        ignoredIsolatedDocuments: analytics.ignoredIsolatedDocuments,
+        truncated: analytics.truncated,
+        cache: analytics.cache,
+        durationMs: Date.now() - startedAt,
+        source: "Document_ЧекККМ",
+      },
+    });
+  } catch (error) {
+    console.error("Ошибка загрузки аналитики чеков 1С:", error);
+    response.status(502).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : "Не удалось получить аналитику чеков из 1С",
     });
   }
 });

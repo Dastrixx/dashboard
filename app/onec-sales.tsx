@@ -69,6 +69,42 @@ type OnecResponse = {
   message?: string;
 };
 
+type CheckSummary = {
+  checks: number;
+  revenue: number;
+  averageCheck: number;
+  returns: number;
+  returnsAmount: number;
+  grossRevenue: number;
+  discounts: number;
+  discountShare: number;
+  certificatePayments: number;
+  certificatesUsed: number;
+};
+
+type CheckSeriesItem = {
+  label: string;
+  checks: number;
+  revenue: number;
+  averageCheck: number;
+};
+
+type CheckAnalytics = {
+  current: CheckSummary;
+  previous: CheckSummary;
+  series: CheckSeriesItem[];
+  periodStart: string | null;
+  periodEnd: string | null;
+  latestDate: string | null;
+  loaded: number;
+  truncated: boolean;
+};
+
+type CheckAnalyticsResponse = {
+  items?: CheckAnalytics;
+  message?: string;
+};
+
 type ProductRow = {
   key: string;
   article: string;
@@ -107,6 +143,10 @@ const compactNumber = new Intl.NumberFormat("ru-RU", {
   notation: "compact",
   maximumFractionDigits: 1,
 });
+
+function percentageChange(current: number, previous: number) {
+  return previous > 0 ? ((current - previous) / previous) * 100 : null;
+}
 
 const shortDate = new Intl.DateTimeFormat("ru-RU", {
   day: "2-digit",
@@ -224,6 +264,11 @@ export function OnecSales() {
   const [referencesLoading, setReferencesLoading] = useState(false);
   const [referenceError, setReferenceError] = useState("");
   const [loadMeta, setLoadMeta] = useState<OnecResponse["meta"]>();
+  const [checkAnalytics, setCheckAnalytics] = useState<CheckAnalytics | null>(
+    null,
+  );
+  const [checksLoading, setChecksLoading] = useState(true);
+  const [checksError, setChecksError] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -322,6 +367,50 @@ export function OnecSales() {
     loadReports();
     return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadChecks() {
+      try {
+        setChecksLoading(true);
+        setChecksError("");
+        const response = await fetch(
+          `${API_URL}/api/dashboard/onec-check-analytics?days=${PERIODS[period].days}`,
+          { signal: controller.signal },
+        );
+        const data = (await response.json()) as CheckAnalyticsResponse;
+
+        if (!response.ok) {
+          throw new Error(data.message || `Ошибка HTTP ${response.status}`);
+        }
+        if (!data.items) {
+          throw new Error("1С вернула пустой ответ по чекам");
+        }
+
+        setCheckAnalytics(data.items);
+      } catch (loadError) {
+        if (
+          loadError instanceof DOMException &&
+          loadError.name === "AbortError"
+        ) {
+          return;
+        }
+
+        setCheckAnalytics(null);
+        setChecksError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Не удалось загрузить аналитику чеков",
+        );
+      } finally {
+        setChecksLoading(false);
+      }
+    }
+
+    loadChecks();
+    return () => controller.abort();
+  }, [period]);
 
   const analytics = useMemo(() => {
     const latestTimestamp = Math.max(
@@ -569,6 +658,65 @@ export function OnecSales() {
   });
   const referencesReady =
     loadMeta?.referencesLoaded === true && !referenceError;
+  const checkChartMaximum = Math.max(
+    ...(checkAnalytics?.series.map((item) => item.checks) || []),
+    1,
+  );
+  const checkCards = checkAnalytics
+    ? [
+        {
+          label: "Чеков продаж",
+          value: number.format(checkAnalytics.current.checks),
+          note: `предыдущий период: ${number.format(checkAnalytics.previous.checks)}`,
+          change: percentageChange(
+            checkAnalytics.current.checks,
+            checkAnalytics.previous.checks,
+          ),
+        },
+        {
+          label: "Средний чек",
+          value: money.format(checkAnalytics.current.averageCheck),
+          note: `предыдущий: ${money.format(checkAnalytics.previous.averageCheck)}`,
+          change: percentageChange(
+            checkAnalytics.current.averageCheck,
+            checkAnalytics.previous.averageCheck,
+          ),
+        },
+        {
+          label: "Выручка по чекам",
+          value: money.format(checkAnalytics.current.revenue),
+          note: "без чеков возврата",
+          change: percentageChange(
+            checkAnalytics.current.revenue,
+            checkAnalytics.previous.revenue,
+          ),
+        },
+        {
+          label: "Возвраты",
+          value: `${number.format(checkAnalytics.current.returns)} · ${money.format(checkAnalytics.current.returnsAmount)}`,
+          note: "количество и сумма чеков возврата",
+          change: null,
+        },
+        {
+          label: "Скидки",
+          value: money.format(checkAnalytics.current.discounts),
+          note: `${checkAnalytics.current.discountShare.toFixed(1)}% от суммы до скидок · ${money.format(checkAnalytics.current.grossRevenue)}`,
+          change: percentageChange(
+            checkAnalytics.current.discounts,
+            checkAnalytics.previous.discounts,
+          ),
+        },
+        {
+          label: "Оплата сертификатами",
+          value: money.format(checkAnalytics.current.certificatePayments),
+          note: `погашено сертификатов: ${number.format(checkAnalytics.current.certificatesUsed)}`,
+          change: percentageChange(
+            checkAnalytics.current.certificatePayments,
+            checkAnalytics.previous.certificatePayments,
+          ),
+        },
+      ]
+    : [];
 
   return (
     <div
@@ -649,6 +797,109 @@ export function OnecSales() {
           <strong>{number.format(analytics.activeSku)}</strong>
           <p>были продажи за период</p>
         </article>
+      </section>
+
+      <section className="panel onec-check-analytics">
+        <div className="panel-head onec-check-head">
+          <div>
+            <span className="onec-source-kicker">Document_ЧекККМ</span>
+            <h2>Аналитика по чекам</h2>
+            <p>
+              Количество, средний чек и возвраты {PERIODS[period].caption}
+            </p>
+          </div>
+          {checkAnalytics?.periodEnd && (
+            <span className="onec-period-note">
+              Последний чек: {" "}
+              {new Date(checkAnalytics.periodEnd).toLocaleString("ru-RU")}
+            </span>
+          )}
+        </div>
+
+        {checksLoading ? (
+          <div className="onec-check-state" aria-live="polite">
+            <span className="onec-spinner" />
+            <span>Загружаем чеки из 1С…</span>
+          </div>
+        ) : checksError ? (
+          <div className="onec-check-state error" role="status">
+            <strong>Продажи загружены, но чеки временно недоступны.</strong>
+            <span>{checksError}</span>
+          </div>
+        ) : checkAnalytics ? (
+          <>
+            <div className="onec-check-kpis">
+              {checkCards.map((item) => (
+                <article key={item.label}>
+                  <div>
+                    <span>{item.label}</span>
+                    {item.change !== null && (
+                      <b
+                        className={
+                          item.change >= 0 ? "trend" : "trend neutral"
+                        }
+                      >
+                        {item.change >= 0 ? "+" : ""}
+                        {item.change.toFixed(1)}%
+                      </b>
+                    )}
+                  </div>
+                  <strong>{item.value}</strong>
+                  <small>{item.note}</small>
+                </article>
+              ))}
+            </div>
+
+            <div className="onec-check-chart-wrap">
+              <div className="onec-check-chart-title">
+                <strong>Динамика количества чеков</strong>
+                <span>Над столбцом — чеки, снизу — средний чек</span>
+              </div>
+              {checkAnalytics.series.some((item) => item.checks > 0) ? (
+                <div
+                  className="onec-check-chart"
+                  style={{
+                    gridTemplateColumns: `repeat(${checkAnalytics.series.length}, minmax(34px, 1fr))`,
+                  }}
+                >
+                  {checkAnalytics.series.map((item, index) => (
+                    <div
+                      className="onec-check-column"
+                      key={`${item.label}-${index}`}
+                    >
+                      <b>{item.checks || "—"}</b>
+                      <i>
+                        <span
+                          style={{
+                            height: `${Math.max(
+                              (item.checks / checkChartMaximum) * 100,
+                              item.checks ? 5 : 0,
+                            )}%`,
+                          }}
+                        />
+                      </i>
+                      <small>{item.label}</small>
+                      <em>
+                        {item.checks ? money.format(item.averageCheck) : "—"}
+                      </em>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="onec-no-data">
+                  За выбранный период чеков продаж нет
+                </p>
+              )}
+            </div>
+
+            {checkAnalytics.truncated && (
+              <p className="onec-check-limit-warning">
+                Достигнут лимит загрузки чеков. Увеличьте
+                ONEC_CHECK_ANALYTICS_LIMIT в .env для полного расчёта.
+              </p>
+            )}
+          </>
+        ) : null}
       </section>
 
       <section className="charts-grid onec-real-analysis-grid">
