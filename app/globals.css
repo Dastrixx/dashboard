@@ -266,6 +266,7 @@ body{overflow-x:hidden}
   font-size:13px;font-weight:800;box-shadow:0 10px 24px rgba(11,122,85,.2);
 }
 .login-submit:hover{background:var(--green)}
+.login-submit:disabled{cursor:wait;opacity:.68}
 .demo-access{padding-top:3px;text-align:center}
 .demo-access>span{display:block;font-size:10px;color:#8a9690;margin-bottom:9px}
 .demo-access>div{display:grid;grid-template-columns:1fr 1fr;gap:8px}

@@ -47,7 +47,7 @@ export function useOwnerOverview(period: Period): OwnerOverviewState {
         setReportsError("");
         const response = await fetch(
           `${API_URL}/api/dashboard/onec-reports?top=500&days=${period * 2}&references=false`,
-          { signal: controller.signal },
+          { signal: controller.signal, credentials: "include" },
         );
         const payload = await readJson<OwnerReportsResponse>(response);
         setReports(Array.isArray(payload.items) ? payload.items : []);
@@ -67,7 +67,7 @@ export function useOwnerOverview(period: Period): OwnerOverviewState {
         setReferencesError("");
         const response = await fetch(
           `${API_URL}/api/dashboard/onec-reports?top=500&days=${period * 2}`,
-          { signal: controller.signal },
+          { signal: controller.signal, credentials: "include" },
         );
         const payload = await readJson<OwnerReportsResponse>(response);
         setProducts(
@@ -99,10 +99,11 @@ export function useOwnerOverview(period: Period): OwnerOverviewState {
         const [periodResponse, todayResponse] = await Promise.all([
           fetch(
             `${API_URL}/api/dashboard/onec-check-analytics?days=${period}`,
-            { signal: controller.signal },
+            { signal: controller.signal, credentials: "include" },
           ),
           fetch(`${API_URL}/api/dashboard/onec-check-analytics?days=1`, {
             signal: controller.signal,
+            credentials: "include",
           }),
         ]);
         const [periodPayload, todayPayload] = await Promise.all([

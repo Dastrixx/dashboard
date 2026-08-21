@@ -31,10 +31,12 @@ export function OnecTeam() {
         const [sellerResponse, consultantResponse] = await Promise.all([
           fetch(`${API_URL}/api/dashboard/onec-sellers?days=${period}`, {
             signal: controller.signal,
+            credentials: "include",
           }),
           fetch(`${API_URL}/api/dashboard/onec-consultants?days=${period}`, {
             signal: controller.signal,
             cache: "no-store",
+            credentials: "include",
           }),
         ]);
         const [sellerData, consultantData] = (await Promise.all([

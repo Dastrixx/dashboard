@@ -1,5 +1,14 @@
 import cors from "cors";
 import express from "express";
+import {
+  authenticateRequest,
+  authStore,
+  authorizeDashboardApi,
+  createAuthRouter,
+  initializeAuth,
+  isAllowedCorsOrigin,
+  verifyRequestOrigin,
+} from "./auth/index.mjs";
 import { dashboardData } from "./data.mjs";
 import {
   EMPTY_GUID,
@@ -27,12 +36,33 @@ import { loadCheckAnalytics } from "./dashboard/checks.mjs";
 const app = express();
 const port = Number(process.env.PORT || 4000);
 
-app.use(cors({ origin: process.env.CLIENT_URL || true }));
-app.use(express.json());
+app.disable("x-powered-by");
+app.set("trust proxy", 1);
+app.use((_, response, next) => {
+  response.set("X-Content-Type-Options", "nosniff");
+  response.set("X-Frame-Options", "DENY");
+  response.set("Referrer-Policy", "same-origin");
+  next();
+});
+app.use(
+  cors({
+    credentials: true,
+    origin(origin, callback) {
+      callback(null, isAllowedCorsOrigin(origin) ? origin || false : false);
+    },
+  }),
+);
+app.use(express.json({ limit: "32kb" }));
+app.use("/api/auth", createAuthRouter());
 
 app.get("/api/health", (_request, response) => {
   response.json({ ok: true, service: "3kvadrata-api" });
 });
+
+app.use("/api", authenticateRequest, (request, response, next) => {
+  if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return next();
+  return verifyRequestOrigin(request, response, next);
+}, authorizeDashboardApi);
 
 app.get("/api/dashboard", (_request, response) => {
   response.json(dashboardData);
@@ -1461,6 +1491,14 @@ app.get("/api/onec/:entity", async (request, response) => {
     });
   }
 });
+
+await initializeAuth();
+
+if (authStore.countUsers() === 0) {
+  console.warn(
+    "В базе авторизации нет пользователей. Выполните npm run auth:create-user",
+  );
+}
 
 app.listen(port, () => {
   console.log(`3КВАДРАТА API: http://localhost:${port}`);

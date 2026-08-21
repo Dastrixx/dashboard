@@ -16,6 +16,12 @@ import {
 } from "lucide-react";
 import { OnecSales } from "./onec-sales";
 import {
+  AuthError,
+  getCurrentUser,
+  logout as endSession,
+  type AuthUser,
+} from "./auth-client";
+import {
   OnecOverview,
   OnecProcurement,
   OnecStock,
@@ -28,7 +34,6 @@ import {
   type Role,
   type Section,
 } from "./dashboard-routes";
-type Session = { role: Role; name: string; email: string };
 type Period = 7 | 30 | 90;
 
 function Icon({ name }: { name: string }) {
@@ -69,39 +74,42 @@ function Online() {
 export function Dashboard({
   initialRole,
   initialSection,
+  initialUser,
 }: {
   initialRole: Role;
   initialSection: Section;
+  initialUser: AuthUser;
 }) {
   const router = useRouter();
   const role = initialRole;
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<AuthUser | null>(initialUser);
   const [menuOpen, setMenuOpen] = useState(false);
   const [period, setPeriod] = useState<Period>(30);
 
   useEffect(() => {
-    const stored = window.localStorage.getItem("analytics-session");
-
-    if (!stored) {
-      window.location.replace("/login");
-      return;
-    }
-
-    try {
-      const parsed = JSON.parse(stored) as Session;
-
-      if (parsed.role !== initialRole) {
-        window.location.replace(DEFAULT_DASHBOARD_ROUTE[parsed.role]);
-        return;
+    const controller = new AbortController();
+    const verifySession = async () => {
+      try {
+        const user = await getCurrentUser(controller.signal);
+        if (user.role !== initialRole) {
+          window.location.replace(DEFAULT_DASHBOARD_ROUTE[user.role]);
+          return;
+        }
+        setSession(user);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (!(error instanceof AuthError) || error.status === 401) {
+          window.location.replace("/login");
+        }
       }
+    };
 
-      // Сессия хранится вне React и читается только после гидратации клиента.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSession(parsed);
-    } catch {
-      window.localStorage.removeItem("analytics-session");
-      window.location.replace("/login");
-    }
+    void verifySession();
+    const heartbeat = window.setInterval(verifySession, 5 * 60_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(heartbeat);
+    };
   }, [initialRole]);
 
   const activeSection = initialSection;
@@ -124,9 +132,12 @@ export function Dashboard({
     router.push(dashboardRoute(role, nextSection));
   };
 
-  const logout = () => {
-    window.localStorage.removeItem("analytics-session");
-    window.location.replace("/login");
+  const logout = async () => {
+    try {
+      await endSession();
+    } finally {
+      window.location.replace("/login");
+    }
   };
 
   if (!session) {

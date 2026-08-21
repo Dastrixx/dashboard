@@ -39,7 +39,7 @@ export function useSalesData() {
       try {
         const response = await fetch(
           `${API_URL}/api/dashboard/onec-reports?top=500&days=60`,
-          { signal: controller.signal },
+          { signal: controller.signal, credentials: "include" },
         );
         const data = (await response.json()) as Partial<OnecSalesResponse>;
 
@@ -82,7 +82,7 @@ export function useSalesData() {
         setError("");
         const response = await fetch(
           `${API_URL}/api/dashboard/onec-reports?top=500&days=60&references=false`,
-          { signal: controller.signal },
+          { signal: controller.signal, credentials: "include" },
         );
         const data = (await response.json()) as Partial<OnecSalesResponse>;
 
@@ -142,7 +142,7 @@ export function useCheckAnalytics(period: AnalyticsPeriod) {
         setError("");
         const response = await fetch(
           `${API_URL}/api/dashboard/onec-check-analytics?days=${PERIODS[period].days}`,
-          { signal: controller.signal },
+          { signal: controller.signal, credentials: "include" },
         );
         const payload = (await response.json()) as CheckAnalyticsResponse;
 

@@ -2,51 +2,40 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { ChartNoAxesCombined, Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
-
-type Role="owner"|"manager";
-
-const accounts=[
-  {email:"owner@analytics.kz",password:"owner123",role:"owner" as Role,name:"Александр"},
-  {email:"manager@analytics.kz",password:"manager123",role:"manager" as Role,name:"Менеджер"},
-];
+import { AuthError, getCurrentUser, login } from "./auth-client";
+import { DEFAULT_DASHBOARD_ROUTE } from "./dashboard-routes";
 
 export function Login(){
   const [email,setEmail]=useState("");
   const [password,setPassword]=useState("");
   const [showPassword,setShowPassword]=useState(false);
   const [error,setError]=useState("");
+  const [submitting,setSubmitting]=useState(false);
 
   useEffect(()=>{
-    const stored=window.localStorage.getItem("analytics-session");
-    if(!stored)return;
-    try{
-      const session=JSON.parse(stored) as {role:Role};
-      window.location.replace(session.role==="owner"?"/owner":"/manager");
-    }catch{
-      window.localStorage.removeItem("analytics-session");
-    }
+    const controller=new AbortController();
+    getCurrentUser(controller.signal)
+      .then(user=>window.location.replace(DEFAULT_DASHBOARD_ROUTE[user.role]))
+      .catch(()=>undefined);
+    return()=>controller.abort();
   },[]);
 
-  const submit=(event:FormEvent)=>{
+  const submit=async(event:FormEvent)=>{
     event.preventDefault();
-    const account=accounts.find(item=>item.email===email.trim().toLowerCase()&&item.password===password);
-    if(!account){
-      setError("Неверный логин или пароль");
-      return;
+    try{
+      setSubmitting(true);
+      setError("");
+      const user=await login(email.trim().toLowerCase(),password);
+      window.location.replace(DEFAULT_DASHBOARD_ROUTE[user.role]);
+    }catch(loginError){
+      setError(
+        loginError instanceof AuthError
+          ? loginError.message
+          : "Не удалось выполнить вход",
+      );
+    }finally{
+      setSubmitting(false);
     }
-    window.localStorage.setItem("analytics-session",JSON.stringify({
-      role:account.role,
-      name:account.name,
-      email:account.email,
-    }));
-    window.location.replace(account.role==="owner"?"/owner":"/manager");
-  };
-
-  const fillDemo=(role:Role)=>{
-    const account=accounts.find(item=>item.role===role)!;
-    setEmail(account.email);
-    setPassword(account.password);
-    setError("");
   };
 
   return <main className="login-page">
@@ -62,9 +51,8 @@ export function Login(){
         <label className="login-field"><span>Email</span><div><Mail size={18}/><input type="email" value={email} onChange={event=>setEmail(event.target.value)} placeholder="name@company.kz" autoComplete="username" required/></div></label>
         <label className="login-field"><span>Пароль</span><div><LockKeyhole size={18}/><input type={showPassword?"text":"password"} value={password} onChange={event=>setPassword(event.target.value)} placeholder="Введите пароль" autoComplete="current-password" required/><button type="button" aria-label={showPassword?"Скрыть пароль":"Показать пароль"} onClick={()=>setShowPassword(value=>!value)}>{showPassword?<EyeOff size={18}/>:<Eye size={18}/>}</button></div></label>
         {error&&<div className="login-error" role="alert">{error}</div>}
-        <button className="login-submit" type="submit">Войти</button>
-        <div className="demo-access"><span>Быстрый демо-вход</span><div><button type="button" onClick={()=>fillDemo("owner")}>Владелец</button><button type="button" onClick={()=>fillDemo("manager")}>Менеджер</button></div></div>
-        <p className="login-note">Демо-пароли подставятся автоматически</p>
+        <button className="login-submit" type="submit" disabled={submitting}>{submitting?"Проверяем…":"Войти"}</button>
+        <p className="login-note">Защищённая серверная сессия</p>
       </form>
     </section>
   </main>;

@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { Dashboard } from "../../dashboard";
 import { isManagerSection } from "../../dashboard-routes";
+import { requireDashboardUser } from "../../server-auth";
 
 export default async function ManagerSectionPage({
   params,
@@ -13,5 +14,12 @@ export default async function ManagerSectionPage({
     notFound();
   }
 
-  return <Dashboard initialRole="manager" initialSection={section} />;
+  const user = await requireDashboardUser("manager");
+  return (
+    <Dashboard
+      initialRole="manager"
+      initialSection={section}
+      initialUser={user}
+    />
+  );
 }

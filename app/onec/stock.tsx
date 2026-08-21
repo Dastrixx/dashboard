@@ -26,7 +26,7 @@ export function OnecStock() {
         setError("");
         const response = await fetch(
           `${API_URL}/api/dashboard/onec-stock?top=5000`,
-          { signal: controller.signal },
+          { signal: controller.signal, credentials: "include" },
         );
         const data = (await response.json()) as StockPayload;
         if (!response.ok) {
