@@ -31,7 +31,7 @@ export function OwnerKpis({
     <section className="owner-kpi-grid" aria-label="Показатели на сегодня">
       <article className="owner-kpi-card featured">
         <div>
-          <span>Выручка сегодня</span>
+          <span>Чистая выручка за последний день</span>
           <Trend
             value={change(
               analytics.today.revenue,
@@ -90,7 +90,7 @@ export function OwnerKpis({
 
       <article className="owner-kpi-card">
         <div>
-          <span>Продано сегодня</span>
+          <span>Продано за последний день</span>
           <Trend
             value={change(analytics.today.sold, analytics.today.previousSold)}
           />

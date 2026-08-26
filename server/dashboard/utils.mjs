@@ -5,15 +5,73 @@ import {
 } from "./constants.mjs";
 
 export function toOdataDateTime(timestamp) {
-  return new Date(timestamp).toISOString().replace(/\.\d{3}Z$/, "");
+  const offsetMinutes = onecTimezoneOffsetMinutes();
+  return new Date(Number(timestamp) + offsetMinutes * 60_000)
+    .toISOString()
+    .replace(/\.\d{3}Z$/, "");
+}
+
+export function parseOnecDateTime(value) {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number") return value;
+
+  const text = String(value || "").trim();
+  if (!text) return Number.NaN;
+  if (/Z$|[+-]\d{2}:?\d{2}$/i.test(text)) return Date.parse(text);
+
+  const match = text.match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?$/,
+  );
+  if (!match) return Date.parse(text);
+
+  const [, year, month, day, hour, minute, second, milliseconds = "0"] = match;
+  const localAsUtc = Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second),
+    Number(milliseconds.padEnd(3, "0")),
+  );
+  return localAsUtc - onecTimezoneOffsetMinutes() * 60_000;
+}
+
+export function normalizeOnecDateTime(value) {
+  const timestamp = parseOnecDateTime(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : value;
+}
+
+export function describeDataFreshness(value, now = Date.now()) {
+  const timestamp = parseOnecDateTime(value);
+  if (!Number.isFinite(timestamp)) {
+    return { status: "unknown", ageHours: null, maxAgeHours: null };
+  }
+
+  const maxAgeHours = Math.max(
+    Number(process.env.ONEC_FRESHNESS_MAX_HOURS || 36),
+    1,
+  );
+  const ageHours = (now - timestamp) / 3_600_000;
+  const status = ageHours < -0.25
+    ? "future"
+    : ageHours <= maxAgeHours
+      ? "fresh"
+      : "stale";
+
+  return {
+    status,
+    ageHours: Number(ageHours.toFixed(1)),
+    maxAgeHours,
+  };
 }
 
 export function filterByPeriod(items, field, startDate, endDate) {
-  const startTimestamp = new Date(startDate).getTime();
-  const endTimestamp = new Date(endDate).getTime();
+  const startTimestamp = parseOnecDateTime(startDate);
+  const endTimestamp = parseOnecDateTime(endDate);
 
   return items.filter((item) => {
-    const timestamp = new Date(item?.[field]).getTime();
+    const timestamp = parseOnecDateTime(item?.[field]);
     return (
       Number.isFinite(timestamp) &&
       timestamp >= startTimestamp &&
@@ -24,7 +82,7 @@ export function filterByPeriod(items, field, startDate, endDate) {
 
 export function resolveActivityAnchor(items, field) {
   const timestamps = items
-    .map((item) => new Date(item?.[field]).getTime())
+    .map((item) => parseOnecDateTime(item?.[field]))
     .filter(Number.isFinite)
     .sort((left, right) => right - left);
   const absoluteLatestTimestamp = timestamps[0] || null;
@@ -37,6 +95,17 @@ export function resolveActivityAnchor(items, field) {
   );
   let anchorTimestamp = absoluteLatestTimestamp;
   let ignoredDocuments = 0;
+
+  if (process.env.ONEC_IGNORE_ISOLATED_DOCUMENTS !== "true") {
+    return {
+      anchorDate: anchorTimestamp ? new Date(anchorTimestamp) : null,
+      absoluteLatestDate: absoluteLatestTimestamp
+        ? new Date(absoluteLatestTimestamp)
+        : null,
+      adjusted: false,
+      ignoredDocuments: 0,
+    };
+  }
 
   for (
     let index = 0;
@@ -60,6 +129,11 @@ export function resolveActivityAnchor(items, field) {
     ),
     ignoredDocuments,
   };
+}
+
+function onecTimezoneOffsetMinutes() {
+  const value = Number(process.env.ONEC_TIMEZONE_OFFSET_MINUTES || 360);
+  return Number.isFinite(value) ? value : 360;
 }
 
 export function normalizeReferenceName(value) {

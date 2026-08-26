@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   enrichProductsWithBusinessCategories,
   filterByPeriod,
+  normalizeOnecDateTime,
+  parseOnecDateTime,
   resolveActivityAnchor,
   summarizeProductReference,
 } from "../server/dashboard/utils.mjs";
@@ -29,7 +31,9 @@ test("filterByPeriod keeps both range boundaries", () => {
 
 test("resolveActivityAnchor ignores an isolated late document", () => {
   const previousGap = process.env.ONEC_ACTIVITY_GAP_DAYS;
+  const previousMode = process.env.ONEC_IGNORE_ISOLATED_DOCUMENTS;
   process.env.ONEC_ACTIVITY_GAP_DAYS = "45";
+  process.env.ONEC_IGNORE_ISOLATED_DOCUMENTS = "true";
 
   try {
     const activity = resolveActivityAnchor(
@@ -47,6 +51,55 @@ test("resolveActivityAnchor ignores an isolated late document", () => {
   } finally {
     if (previousGap === undefined) delete process.env.ONEC_ACTIVITY_GAP_DAYS;
     else process.env.ONEC_ACTIVITY_GAP_DAYS = previousGap;
+    if (previousMode === undefined) {
+      delete process.env.ONEC_IGNORE_ISOLATED_DOCUMENTS;
+    } else {
+      process.env.ONEC_IGNORE_ISOLATED_DOCUMENTS = previousMode;
+    }
+  }
+});
+
+test("resolveActivityAnchor uses the actual newest document by default", () => {
+  const previousMode = process.env.ONEC_IGNORE_ISOLATED_DOCUMENTS;
+  delete process.env.ONEC_IGNORE_ISOLATED_DOCUMENTS;
+
+  try {
+    const activity = resolveActivityAnchor(
+      [
+        { Date: "2025-12-23T10:00:00Z" },
+        { Date: "2025-07-31T10:00:00Z" },
+      ],
+      "Date",
+    );
+
+    assert.equal(activity.adjusted, false);
+    assert.equal(activity.anchorDate?.toISOString(), "2025-12-23T10:00:00.000Z");
+  } finally {
+    if (previousMode === undefined) {
+      delete process.env.ONEC_IGNORE_ISOLATED_DOCUMENTS;
+    } else {
+      process.env.ONEC_IGNORE_ISOLATED_DOCUMENTS = previousMode;
+    }
+  }
+});
+
+test("1C date without timezone is interpreted in configured timezone", () => {
+  const previousOffset = process.env.ONEC_TIMEZONE_OFFSET_MINUTES;
+  process.env.ONEC_TIMEZONE_OFFSET_MINUTES = "360";
+
+  try {
+    const timestamp = parseOnecDateTime("2025-12-23T19:48:15");
+    assert.equal(new Date(timestamp).toISOString(), "2025-12-23T13:48:15.000Z");
+    assert.equal(
+      normalizeOnecDateTime("2025-12-23T19:48:15"),
+      "2025-12-23T13:48:15.000Z",
+    );
+  } finally {
+    if (previousOffset === undefined) {
+      delete process.env.ONEC_TIMEZONE_OFFSET_MINUTES;
+    } else {
+      process.env.ONEC_TIMEZONE_OFFSET_MINUTES = previousOffset;
+    }
   }
 });
 

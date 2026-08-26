@@ -19,6 +19,27 @@ export function inRange(value: string, from: number, to: number) {
   return timestamp >= from && timestamp <= to;
 }
 
+function grossRevenue(reports: OnecRetailReport[]) {
+  return reports.reduce(
+    (sum, report) => sum + Number(report.СуммаДокумента || 0),
+    0,
+  );
+}
+
+function returnsAmount(reports: OnecRetailReport[]) {
+  return reports.reduce(
+    (sum, report) => sum + Number(report.СуммаВозвратов || 0),
+    0,
+  );
+}
+
+function netRevenue(report: OnecRetailReport) {
+  return (
+    Number(report.СуммаДокумента || 0) -
+    Number(report.СуммаВозвратов || 0)
+  );
+}
+
 export function buildProductRows(
   reports: OnecRetailReport[],
   products: OnecProductReference[],
@@ -32,20 +53,26 @@ export function buildProductRows(
   );
   const aggregate = new Map<string, { revenue: number; sold: number }>();
 
-  reports
-    .flatMap((report) => report.Товары || [])
-    .forEach((line) => {
+  const addLine = (line: OnecRetailReport["Товары"][number], sign: 1 | -1) => {
       const current = aggregate.get(line.Номенклатура_Key) || {
         revenue: 0,
         sold: 0,
       };
-      current.revenue += Number(line.Сумма || 0);
-      current.sold += Number(line.Количество || 0);
+      current.revenue += sign * Number(line.Сумма || 0);
+      current.sold += sign * Number(line.Количество || 0);
       aggregate.set(line.Номенклатура_Key, current);
-    });
+  };
+
+  reports.forEach((report) => {
+    (report.Товары || []).forEach((line) => addLine(line, 1));
+    (report.ВозвращенныеТовары || []).forEach((line) => addLine(line, -1));
+  });
 
   const totalRevenue =
-    [...aggregate.values()].reduce((sum, item) => sum + item.revenue, 0) || 1;
+    [...aggregate.values()].reduce(
+      (sum, item) => sum + Math.max(item.revenue, 0),
+      0,
+    ) || 1;
   let cumulative = 0;
 
   return [...aggregate.entries()]
@@ -71,7 +98,7 @@ export function buildProductRows(
     })
     .sort((left, right) => right.revenue - left.revenue)
     .map((row): ProductRow => {
-      const share = (row.revenue / totalRevenue) * 100;
+      const share = (Math.max(row.revenue, 0) / totalRevenue) * 100;
       cumulative += share;
 
       return {
@@ -108,7 +135,7 @@ function buildRevenueBuckets(
       buckets.length - 1,
     );
     if (bucketIndex >= 0) {
-      buckets[bucketIndex].value += Number(report.СуммаДокумента || 0);
+      buckets[bucketIndex].value += netRevenue(report);
     }
   });
 
@@ -137,17 +164,27 @@ export function buildSalesAnalytics(
   const previousReports = reports.filter((report) =>
     inRange(report.Date, previousFrom, previousTo),
   );
-  const revenue = currentReports.reduce(
-    (sum, report) => sum + Number(report.СуммаДокумента || 0),
-    0,
-  );
-  const previousRevenue = previousReports.reduce(
-    (sum, report) => sum + Number(report.СуммаДокумента || 0),
-    0,
-  );
-  const sold = currentReports
-    .flatMap((report) => report.Товары || [])
-    .reduce((sum, line) => sum + Number(line.Количество || 0), 0);
+  const currentGrossRevenue = grossRevenue(currentReports);
+  const currentReturns = returnsAmount(currentReports);
+  const previousGross = grossRevenue(previousReports);
+  const previousReturnAmount = returnsAmount(previousReports);
+  const revenue = currentGrossRevenue - currentReturns;
+  const previousRevenue = previousGross - previousReturnAmount;
+  const soldQuantity = (items: OnecRetailReport[]) =>
+    items.reduce(
+      (sum, report) =>
+        sum +
+        (report.Товары || []).reduce(
+          (lineSum, line) => lineSum + Number(line.Количество || 0),
+          0,
+        ) -
+        (report.ВозвращенныеТовары || []).reduce(
+          (lineSum, line) => lineSum + Number(line.Количество || 0),
+          0,
+        ),
+      0,
+    );
+  const sold = soldQuantity(currentReports);
   const rows = buildProductRows(currentReports, products, categories);
   const categoryMap = new Map<string, number>(
     categories.map((category) => [category.Description, 0]),
@@ -177,6 +214,10 @@ export function buildSalesAnalytics(
     currentReports,
     revenue,
     previousRevenue,
+    grossRevenue: currentGrossRevenue,
+    previousGrossRevenue: previousGross,
+    returns: currentReturns,
+    previousReturns: previousReturnAmount,
     sold,
     averagePrice: sold ? revenue / sold : 0,
     activeSku: rows.length,

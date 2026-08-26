@@ -14,7 +14,10 @@ const DAY_MS = 86_400_000;
 
 function reportRevenue(reports: OnecRetailReport[]) {
   return reports.reduce(
-    (sum, report) => sum + Number(report.СуммаДокумента || 0),
+    (sum, report) =>
+      sum +
+      Number(report.СуммаДокумента || 0) -
+      Number(report.СуммаВозвратов || 0),
     0,
   );
 }
@@ -27,9 +30,19 @@ function reportReturns(reports: OnecRetailReport[]) {
 }
 
 function soldQuantity(reports: OnecRetailReport[]) {
-  return reports
-    .flatMap((report) => report.Товары || [])
-    .reduce((sum, line) => sum + Number(line.Количество || 0), 0);
+  return reports.reduce(
+    (sum, report) =>
+      sum +
+      (report.Товары || []).reduce(
+        (lineSum, line) => lineSum + Number(line.Количество || 0),
+        0,
+      ) -
+      (report.ВозвращенныеТовары || []).reduce(
+        (lineSum, line) => lineSum + Number(line.Количество || 0),
+        0,
+      ),
+    0,
+  );
 }
 
 function inRange(report: OnecRetailReport, from: number, to: number) {
@@ -68,7 +81,9 @@ function buildComparison(
         Math.max(Math.floor((timestamp - rangeStart) / bucketSize), 0),
         buckets.length - 1,
       );
-      buckets[index][field] += Number(report.СуммаДокумента || 0);
+      buckets[index][field] +=
+        Number(report.СуммаДокумента || 0) -
+        Number(report.СуммаВозвратов || 0);
     });
   };
 

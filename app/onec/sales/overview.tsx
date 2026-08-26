@@ -1,6 +1,7 @@
 import { makeChartPoints } from "./analytics";
 import { compactNumber, money, number, PERIODS } from "./config";
 import type { AnalyticsPeriod, SalesAnalytics } from "./types";
+import { dataFreshness } from "../shared";
 
 type SalesSummaryProps = {
   analytics: SalesAnalytics;
@@ -8,6 +9,7 @@ type SalesSummaryProps = {
   onPeriodChange: (period: AnalyticsPeriod) => void;
   referencesLoading: boolean;
   referenceError: string;
+  truncated?: boolean;
 };
 
 export function SalesSummary({
@@ -16,7 +18,10 @@ export function SalesSummary({
   onPeriodChange,
   referencesLoading,
   referenceError,
+  truncated,
 }: SalesSummaryProps) {
+  const freshness = dataFreshness(analytics.latestTimestamp);
+
   return (
     <>
       <section className="analytics-filter-bar">
@@ -42,6 +47,12 @@ export function SalesSummary({
                 analytics.latestTimestamp,
               ).toLocaleDateString("ru-RU")}`}
         </span>
+        <span className={freshness.fresh ? "onec-posted" : "onec-draft"}>
+          {freshness.label}
+        </span>
+        {truncated && (
+          <span className="onec-draft">Выборка ограничена сервером</span>
+        )}
       </section>
 
       {referenceError && (
@@ -54,7 +65,7 @@ export function SalesSummary({
       <section className="kpi-grid product-kpis">
         <article className="kpi-card">
           <div className="kpi-top">
-            <span>Выручка {PERIODS[period].caption}</span>
+            <span>Чистая выручка {PERIODS[period].caption}</span>
             {analytics.growth !== null && (
               <b
                 className={
@@ -67,20 +78,22 @@ export function SalesSummary({
             )}
           </div>
           <strong>{money.format(analytics.revenue)}</strong>
-          <p>по проведённым отчётам 1С</p>
+          <p>
+            Продажи {money.format(analytics.grossRevenue)} · возвраты −{money.format(analytics.returns)}
+          </p>
         </article>
 
         <article className="kpi-card">
           <div className="kpi-top">
-            <span>Продано</span>
+            <span>Продано после возвратов</span>
           </div>
           <strong>{number.format(analytics.sold)} ед.</strong>
-          <p>по товарным строкам документов</p>
+          <p>продажи минус возвращённые единицы</p>
         </article>
 
         <article className="kpi-card">
           <div className="kpi-top">
-            <span>Средняя цена продажи</span>
+            <span>Средняя чистая цена</span>
           </div>
           <strong>{money.format(analytics.averagePrice)}</strong>
           <p>выручка на проданную единицу</p>

@@ -10,6 +10,8 @@ export type OnecProductLine = {
   Продавец_Key: string;
 };
 
+export type OnecReturnLine = OnecProductLine;
+
 export type OnecRetailReport = {
   Ref_Key: string;
   Number: string;
@@ -20,6 +22,7 @@ export type OnecRetailReport = {
   Магазин_Key: string;
   КассаККМ_Key: string;
   Товары: OnecProductLine[];
+  ВозвращенныеТовары?: OnecReturnLine[];
 };
 
 export type OnecProductReference = {
@@ -54,6 +57,13 @@ export type SalesLoadMeta = {
   cache?: "hit" | "miss" | "shared";
   durationMs?: number;
   referencesLoaded?: boolean;
+  latestDate?: string | null;
+  truncated?: boolean;
+  freshness?: {
+    status: "fresh" | "stale" | "future" | "unknown";
+    ageHours: number | null;
+    maxAgeHours: number | null;
+  };
 };
 
 export type OnecSalesResponse = {
@@ -128,6 +138,10 @@ export type SalesAnalytics = {
   currentReports: OnecRetailReport[];
   revenue: number;
   previousRevenue: number;
+  grossRevenue: number;
+  previousGrossRevenue: number;
+  returns: number;
+  previousReturns: number;
   sold: number;
   averagePrice: number;
   activeSku: number;

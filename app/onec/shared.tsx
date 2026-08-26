@@ -16,6 +16,28 @@ export const number = new Intl.NumberFormat("ru-RU", {
   maximumFractionDigits: 2,
 });
 
+export function dataFreshness(timestamp: number | string) {
+  const value =
+    typeof timestamp === "number" ? timestamp : new Date(timestamp).getTime();
+  const ageHours = (Date.now() - value) / 3_600_000;
+
+  if (!Number.isFinite(value)) {
+    return { fresh: false, label: "Дата данных неизвестна" };
+  }
+  if (ageHours < -0.25) {
+    return { fresh: false, label: "Дата данных находится в будущем" };
+  }
+  if (ageHours <= 36) {
+    return { fresh: true, label: "Данные актуальны" };
+  }
+
+  const days = Math.floor(ageHours / 24);
+  return {
+    fresh: false,
+    label: `Нет новых данных ${days > 0 ? `${days} дн.` : `${Math.round(ageHours)} ч.`}`,
+  };
+}
+
 export function useOnecReports(period: Period | 10 = 10) {
   const [reports, setReports] = useState<OnecReport[]>([]);
   const [loading, setLoading] = useState(true);

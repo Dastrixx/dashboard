@@ -17,8 +17,11 @@ import {
   RETAIL_REPORT_SELECT,
 } from "./dashboard/constants.mjs";
 import {
+  describeDataFreshness,
   enrichProductsWithBusinessCategories,
   filterByPeriod,
+  normalizeOnecDateTime,
+  parseOnecDateTime,
   publicBusinessCategories,
   resolveActivityAnchor,
   summarizeProductReference,
@@ -59,10 +62,20 @@ app.get("/api/health", (_request, response) => {
   response.json({ ok: true, service: "3kvadrata-api" });
 });
 
-app.use("/api", authenticateRequest, (request, response, next) => {
-  if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return next();
-  return verifyRequestOrigin(request, response, next);
-}, authorizeDashboardApi);
+app.use(
+  "/api",
+  authenticateRequest,
+  (_request, response, next) => {
+    response.set("Cache-Control", "no-store, max-age=0");
+    response.set("Pragma", "no-cache");
+    next();
+  },
+  (request, response, next) => {
+    if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return next();
+    return verifyRequestOrigin(request, response, next);
+  },
+  authorizeDashboardApi,
+);
 
 app.get("/api/dashboard", (_request, response) => {
   response.json(dashboardData);
@@ -208,8 +221,8 @@ async function loadReportPagesCached({ limit, days }) {
   }
 
   const ttlMs = Math.max(
-    Number(process.env.ONEC_REPORT_CACHE_TTL_MS || 120_000),
-    10_000,
+    Number(process.env.ONEC_REPORT_CACHE_TTL_MS || 30_000),
+    5_000,
   );
   const promise = loadReportPages({ limit, days });
   reportCache.set(key, { promise, expiresAt: now + ttlMs });
@@ -240,7 +253,7 @@ async function loadConsultantReportPagesLegacy({ limit, days }) {
 
   if (!latest.length) return [];
 
-  const latestTimestamp = new Date(latest[0].Date).getTime();
+  const latestTimestamp = parseOnecDateTime(latest[0].Date);
   const fromTimestamp = latestTimestamp - days * 86_400_000;
   const dateFilter = [
     "Posted eq true",
@@ -290,8 +303,8 @@ async function loadConsultantReportPagesLegacyCached({ limit, days }) {
   }
 
   const ttlMs = Math.max(
-    Number(process.env.ONEC_REPORT_CACHE_TTL_MS || 120_000),
-    10_000,
+    Number(process.env.ONEC_REPORT_CACHE_TTL_MS || 30_000),
+    5_000,
   );
   const promise = loadConsultantReportPagesLegacy({ limit, days });
   reportCache.set(key, { promise, expiresAt: now + ttlMs });
@@ -548,7 +561,7 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     if (latestChecks.length) {
       latestDate = latestChecks[0].Date;
       const checkStartDate = new Date(
-        new Date(latestDate).getTime() - days * 86_400_000,
+        parseOnecDateTime(latestDate) - days * 86_400_000,
       );
       const checkQuery = {
         $top: 1000,
@@ -659,7 +672,8 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       meta: {
         days,
         loaded: items.length,
-        latestDate,
+        latestDate: latestDate ? normalizeOnecDateTime(latestDate) : null,
+        freshness: describeDataFreshness(latestDate),
         source,
         cache,
         diagnostics: {
@@ -1136,6 +1150,7 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
         days,
         loaded: validItems.length,
         latestDate: effectiveLatestDate.toISOString(),
+        freshness: describeDataFreshness(effectiveLatestDate),
         absoluteLatestDate: absoluteLatestDate?.toISOString() || null,
         analysisAnchorAdjusted,
         ignoredIsolatedDocuments,
@@ -1179,10 +1194,13 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
       Math.max(Number(request.query.top) || 5000, 1),
       10000,
     );
+    const balancePeriod = request.query.period
+      ? new Date(String(request.query.period))
+      : new Date();
     const balances = await onecBalance(
       "AccumulationRegister_ТоварыНаСкладах",
       {
-        period: request.query.period || new Date(),
+        period: balancePeriod,
         dimensions: "Склад,Номенклатура",
         top,
         select: [
@@ -1303,6 +1321,15 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
       productKinds,
     );
     const categories = publicBusinessCategories();
+    const latestOperationTimestamp = Math.max(
+      ...[...receipts, ...writeOffs, ...recounts]
+        .map((document) => parseOnecDateTime(document.Date))
+        .filter(Number.isFinite),
+      0,
+    );
+    const latestOperationDate = latestOperationTimestamp
+      ? new Date(latestOperationTimestamp).toISOString()
+      : null;
 
     response.json({
       items: balances,
@@ -1316,7 +1343,11 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
       operations: { receipts, writeOffs, recounts },
       meta: {
         loaded: balances.length,
-        asOf: new Date().toISOString(),
+        requestedAt: new Date().toISOString(),
+        asOf: balancePeriod.toISOString(),
+        balancePeriod: balancePeriod.toISOString(),
+        latestOperationDate,
+        operationFreshness: describeDataFreshness(latestOperationDate),
         source: "AccumulationRegister_ТоварыНаСкладах/Balance",
         operationErrors,
       },
@@ -1334,7 +1365,7 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
 
 app.get("/api/dashboard/onec-reports", async (request, response) => {
   try {
-    const top = Math.min(
+    const requestedTop = Math.min(
       Math.max(Number(request.query.top) || 1, 1),
       500,
     );
@@ -1344,8 +1375,25 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
     );
 
     const startedAt = Date.now();
-    const reportResult = await loadReportPagesCached({ limit: top, days });
-    const items = reportResult.items;
+    const reportResult = await loadReportPagesCached({
+      limit: requestedTop + 1,
+      days,
+    });
+    const truncated = reportResult.items.length > requestedTop;
+    const items = reportResult.items.slice(0, requestedTop).map((report) => ({
+      ...report,
+      Date: normalizeOnecDateTime(report.Date),
+    }));
+    const latestDate = items[0]?.Date || null;
+    const commonMeta = {
+      loaded: items.length,
+      days,
+      latestDate,
+      freshness: describeDataFreshness(latestDate),
+      truncated,
+      cache: reportResult.cache,
+      durationMs: Date.now() - startedAt,
+    };
 
     if (request.query.references === "false") {
       return response.json({
@@ -1356,20 +1404,21 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
           categories: [],
         },
         meta: {
-          loaded: items.length,
-          days,
-          cache: reportResult.cache,
-          durationMs: Date.now() - startedAt,
+          ...commonMeta,
           referencesLoaded: false,
         },
       });
     }
 
     const productKeys = items.flatMap((report) =>
-      (report.Товары || []).map((line) => line.Номенклатура_Key),
+      [...(report.Товары || []), ...(report.ВозвращенныеТовары || [])].map(
+        (line) => line.Номенклатура_Key,
+      ),
     );
     const warehouseKeys = items.flatMap((report) =>
-      (report.Товары || []).map((line) => line.Склад_Key),
+      [...(report.Товары || []), ...(report.ВозвращенныеТовары || [])].map(
+        (line) => line.Склад_Key,
+      ),
     );
 
     const [rawProducts, warehouses, productKinds] = await Promise.all([
@@ -1413,10 +1462,7 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
         productKinds,
       },
       meta: {
-        loaded: items.length,
-        days,
-        cache: reportResult.cache,
-        durationMs: Date.now() - startedAt,
+        ...commonMeta,
         referencesLoaded: true,
       },
     });
@@ -1457,6 +1503,7 @@ app.get("/api/dashboard/onec-check-analytics", async (request, response) => {
         absoluteLatestDate: analytics.absoluteLatestDate,
         analysisAnchorAdjusted: analytics.analysisAnchorAdjusted,
         ignoredIsolatedDocuments: analytics.ignoredIsolatedDocuments,
+        freshness: describeDataFreshness(analytics.latestDate),
         truncated: analytics.truncated,
         cache: analytics.cache,
         durationMs: Date.now() - startedAt,

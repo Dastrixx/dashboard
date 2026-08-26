@@ -1,6 +1,7 @@
 import { onecGet } from "../onec.mjs";
 import {
   filterByPeriod,
+  parseOnecDateTime,
   resolveActivityAnchor,
   toOdataDateTime,
 } from "./utils.mjs";
@@ -112,7 +113,7 @@ function buildBuckets(checks, rangeStart, rangeEnd, days) {
   for (const check of checks) {
     if (isReturnCheck(check)) continue;
 
-    const timestamp = new Date(check.Date).getTime();
+    const timestamp = parseOnecDateTime(check.Date);
     const index = Math.min(
       Math.max(Math.floor((timestamp - rangeStart) / bucketSize), 0),
       buckets.length - 1,
@@ -138,12 +139,12 @@ export function buildCheckAnalytics(
   const previousTo = currentFrom - 1;
   const previousFrom = previousTo - duration + 1;
   const current = checks.filter((check) =>
-    new Date(check.Date).getTime() >= currentFrom &&
-    new Date(check.Date).getTime() <= latestTimestamp,
+    parseOnecDateTime(check.Date) >= currentFrom &&
+    parseOnecDateTime(check.Date) <= latestTimestamp,
   );
   const previous = checks.filter((check) =>
-    new Date(check.Date).getTime() >= previousFrom &&
-    new Date(check.Date).getTime() <= previousTo,
+    parseOnecDateTime(check.Date) >= previousFrom &&
+    parseOnecDateTime(check.Date) <= previousTo,
   );
 
   return {
@@ -263,8 +264,8 @@ export async function loadCheckAnalytics({ days, limit }) {
   }
 
   const ttlMs = Math.max(
-    Number(process.env.ONEC_REPORT_CACHE_TTL_MS || 120_000),
-    10_000,
+    Number(process.env.ONEC_REPORT_CACHE_TTL_MS || 30_000),
+    5_000,
   );
   const promise = (async () => {
     const [loaded, certificatePaymentKeys] = await Promise.all([

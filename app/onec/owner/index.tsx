@@ -1,6 +1,6 @@
 "use client";
 
-import { DataState } from "../shared";
+import { DataState, dataFreshness } from "../shared";
 import type { Period } from "../types";
 import { CategorySales } from "./categories";
 import { OwnerCheckSummary } from "./check-summary";
@@ -25,18 +25,25 @@ export function OnecOverview({ period }: { period: Period }) {
   }
 
   const { analytics } = state;
+  const freshness = dataFreshness(analytics.latestDate);
 
   return (
     <div className="page-stack owner-overview">
       <section className="onec-source-panel owner-source-panel">
         <div>
           <span className="onec-source-kicker">Реальные данные 1С</span>
-          <h2>Состояние бизнеса на сегодня</h2>
+          <h2>
+            {freshness.fresh
+              ? "Состояние бизнеса на сегодня"
+              : "Состояние бизнеса на последнюю дату продаж"}
+          </h2>
           <p>
             Последний документ: {new Date(analytics.latestDate).toLocaleString("ru-RU")}
           </p>
         </div>
-        <span className="onec-posted">OData подключена</span>
+        <span className={freshness.fresh ? "onec-posted" : "onec-draft"}>
+          {freshness.label}
+        </span>
       </section>
 
       <OwnerKpis

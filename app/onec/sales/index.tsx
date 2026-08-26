@@ -87,6 +87,7 @@ export function OnecSales() {
         onPeriodChange={setPeriod}
         referencesLoading={sales.referencesLoading}
         referenceError={sales.referenceError}
+        truncated={sales.loadMeta?.truncated}
       />
 
       <CheckAnalyticsPanel
