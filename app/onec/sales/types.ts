@@ -80,6 +80,7 @@ export type OnecSalesResponse = {
 export type CheckSummary = {
   checks: number;
   revenue: number;
+  netRevenue: number;
   averageCheck: number;
   returns: number;
   returnsAmount: number;
