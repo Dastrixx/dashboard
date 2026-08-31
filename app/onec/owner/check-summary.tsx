@@ -37,13 +37,17 @@ export function OwnerCheckSummary({
         <strong>{number.format(checks.current.checks)}</strong>
       </div>
       <div>
-        <span>Выручка по чекам</span>
+        <span>Продажи по чекам</span>
         <strong>{money.format(checks.current.revenue)}</strong>
+      </div>
+      <div>
+        <span>Чистые продажи</span>
+        <strong>{money.format(checks.current.netRevenue)}</strong>
       </div>
       <div>
         <span>Скидки</span>
         <strong>{money.format(checks.current.discounts)}</strong>
-        <small>{checks.current.discountShare.toFixed(1)}% до скидок</small>
+        <small>{checks.current.discountShare.toFixed(1)}% · сумма до скидок {money.format(checks.current.grossRevenue)}</small>
       </div>
       <div>
         <span>Сертификаты</span>
