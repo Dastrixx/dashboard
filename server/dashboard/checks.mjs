@@ -70,13 +70,19 @@ function summarizeChecks(checks, certificatePaymentKeys = new Set()) {
   );
   const certificatesUsed = sales.reduce(
     (sum, check) =>
-      sum + (check.ПогашениеПодарочныхСертификатов || []).length,
+      sum +
+      (check.ПогашениеПодарочныхСертификатов || []).reduce(
+        (certificateSum, row) =>
+          certificateSum + Number(row.Количество || 1),
+        0,
+      ),
     0,
   );
 
   return {
     checks: sales.length,
     revenue,
+    netRevenue: revenue - returnsAmount,
     averageCheck: sales.length ? revenue / sales.length : 0,
     returns: returns.length,
     returnsAmount,
@@ -134,13 +140,15 @@ export function buildCheckAnalytics(
   days,
   certificatePaymentKeys = new Set(),
 ) {
-  const duration = days * DAY_MS;
-  const currentFrom = latestTimestamp - duration + 1;
+  const latestDate = new Date(latestTimestamp);
+  latestDate.setHours(0, 0, 0, 0);
+  const currentFrom = latestDate.getTime() - (days - 1) * DAY_MS;
+  const currentTo = latestDate.getTime() + DAY_MS - 1;
   const previousTo = currentFrom - 1;
-  const previousFrom = previousTo - duration + 1;
+  const previousFrom = currentFrom - days * DAY_MS;
   const current = checks.filter((check) =>
     parseOnecDateTime(check.Date) >= currentFrom &&
-    parseOnecDateTime(check.Date) <= latestTimestamp,
+    parseOnecDateTime(check.Date) <= currentTo,
   );
   const previous = checks.filter((check) =>
     parseOnecDateTime(check.Date) >= previousFrom &&
@@ -150,9 +158,9 @@ export function buildCheckAnalytics(
   return {
     current: summarizeChecks(current, certificatePaymentKeys),
     previous: summarizeChecks(previous, certificatePaymentKeys),
-    series: buildBuckets(current, currentFrom, latestTimestamp + 1, days),
+    series: buildBuckets(current, currentFrom, currentTo + 1, days),
     periodStart: new Date(currentFrom).toISOString(),
-    periodEnd: new Date(latestTimestamp).toISOString(),
+    periodEnd: new Date(currentTo).toISOString(),
   };
 }
 
