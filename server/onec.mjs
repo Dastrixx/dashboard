@@ -1,3 +1,5 @@
+import { toOdataDateTime } from "./dashboard/utils.mjs";
+
 function getConfig() {
   return {
     baseUrl: process.env.ONEC_ODATA_URL?.replace(/\/$/, ""),
@@ -128,8 +130,8 @@ export function onecBalance(register, options = {}) {
   }
 
   const period = options.period
-    ? new Date(options.period).toISOString().replace(/\.\d{3}Z$/, "")
-    : new Date().toISOString().replace(/\.\d{3}Z$/, "");
+    ? toOdataDateTime(new Date(options.period).getTime())
+    : toOdataDateTime(Date.now());
   const condition = quoteOdataString(options.condition || "");
   const dimensions = quoteOdataString(
     options.dimensions || "Склад,Номенклатура",
@@ -153,10 +155,8 @@ export function onecTurnovers(register, options = {}) {
     throw new Error("Недопустимое имя регистра накопления 1С");
   }
 
-  const toDateTime = (value) =>
-    new Date(value).toISOString().replace(/\.\d{3}Z$/, "");
-  const startPeriod = toDateTime(options.startPeriod);
-  const endPeriod = toDateTime(options.endPeriod);
+  const startPeriod = toOdataDateTime(new Date(options.startPeriod).getTime());
+  const endPeriod = toOdataDateTime(new Date(options.endPeriod).getTime());
   const condition = quoteOdataString(options.condition || "");
   const dimensions = quoteOdataString(options.dimensions || "");
   const path = [

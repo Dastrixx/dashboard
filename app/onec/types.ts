@@ -86,6 +86,14 @@ export type StockPayload = {
   meta?: {
     loaded?: number;
     asOf?: string;
+    requestedAt?: string;
+    balancePeriod?: string;
+    latestOperationDate?: string | null;
+    operationFreshness?: {
+      status: "fresh" | "stale" | "future" | "unknown";
+      ageHours: number | null;
+      maxAgeHours: number | null;
+    };
     source?: string;
     operationErrors?: Record<string, string>;
   };
@@ -148,4 +156,3 @@ export type SellerPayload = {
   };
   message?: string;
 };
-
