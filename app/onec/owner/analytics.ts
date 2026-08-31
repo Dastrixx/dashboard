@@ -50,6 +50,22 @@ function inRange(report: OnecRetailReport, from: number, to: number) {
   return timestamp >= from && timestamp <= to;
 }
 
+function startOfCalendarDay(timestamp: number) {
+  const date = new Date(timestamp);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function periodBounds(latestTimestamp: number, days: Period) {
+  const latestDayStart = startOfCalendarDay(latestTimestamp);
+  const currentFrom = latestDayStart - (days - 1) * DAY_MS;
+  const currentTo = latestDayStart + DAY_MS - 1;
+  const previousTo = currentFrom - 1;
+  const previousFrom = currentFrom - days * DAY_MS;
+
+  return { currentFrom, currentTo, previousFrom, previousTo };
+}
+
 function buildComparison(
   current: OnecRetailReport[],
   previous: OnecRetailReport[],
@@ -142,12 +158,10 @@ export function buildOwnerOverview(
   );
   if (!latestTimestamp) return null;
 
-  const duration = days * DAY_MS;
-  const currentFrom = latestTimestamp - duration + 1;
-  const previousTo = currentFrom - 1;
-  const previousFrom = previousTo - duration + 1;
+  const { currentFrom, currentTo, previousFrom, previousTo } =
+    periodBounds(latestTimestamp, days);
   const current = reports.filter((report) =>
-    inRange(report, currentFrom, latestTimestamp),
+    inRange(report, currentFrom, currentTo),
   );
   const previous = reports.filter((report) =>
     inRange(report, previousFrom, previousTo),
