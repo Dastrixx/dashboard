@@ -123,10 +123,15 @@ export function useOwnerOverview(
               : `${API_URL}/api/dashboard/onec-check-analytics?days=${period}`,
             { signal: controller.signal, credentials: "include" },
           ),
-          fetch(`${API_URL}/api/dashboard/onec-check-analytics?days=1`, {
-            signal: controller.signal,
-            credentials: "include",
-          }),
+          fetch(
+            dateRange
+              ? `${API_URL}/api/dashboard/onec-check-analytics?from=${dateRange.to}&to=${dateRange.to}`
+              : `${API_URL}/api/dashboard/onec-check-analytics?days=1`,
+            {
+              signal: controller.signal,
+              credentials: "include",
+            },
+          ),
         ]);
         const [periodPayload, todayPayload] = await Promise.all([
           readJson<CheckAnalyticsResponse>(periodResponse),
