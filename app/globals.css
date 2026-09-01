@@ -1330,3 +1330,48 @@ body{overflow-x:hidden}
   .owner-chart-bars{height:170px}
   .owner-insight-list{grid-template-columns:1fr}
 }
+
+
+/* Owner arbitrary date range and dedicated category analytics */
+.owner-period-controls{
+  display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap;
+}
+.owner-date-range{
+  display:flex;align-items:flex-end;gap:7px;padding:5px;
+  border:1px solid #d8e6df;border-radius:12px;background:#f7faf8;
+}
+.owner-date-range label{display:flex;flex-direction:column;gap:3px}
+.owner-date-range label>span{
+  padding-left:3px;color:var(--muted);font-size:7px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.06em;
+}
+.owner-date-range input{
+  min-height:34px;padding:0 8px;border:1px solid var(--line);border-radius:8px;
+  background:#fff;color:#42514a;font:inherit;font-size:9px;outline:0;
+}
+.owner-date-range input:focus{border-color:#9ecbb8;box-shadow:0 0 0 2px rgba(11,122,85,.08)}
+.owner-date-range button{
+  min-height:34px;padding:0 11px;border:1px solid #cfe1d8;border-radius:8px;
+  background:#fff;color:var(--green2);font-size:9px;font-weight:750;
+}
+.owner-date-range button:hover:not(:disabled),.owner-date-range button.active{
+  border-color:var(--green2);background:var(--green2);color:#fff;
+}
+.owner-date-range button:disabled{opacity:.4;cursor:not-allowed}
+.owner-category-section{width:100%}
+.owner-category-section .owner-category-panel{width:100%}
+.owner-category-section .owner-category-list{
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 22px;
+}
+.owner-main-grid{grid-template-columns:minmax(0,1fr)}
+
+@media(max-width:900px){
+  .owner-period-controls{width:100%;justify-content:flex-start}
+}
+@media(max-width:760px){
+  .owner-period-controls,.owner-date-range{width:100%}
+  .owner-date-range{display:grid;grid-template-columns:1fr 1fr}
+  .owner-date-range button{grid-column:1/-1}
+  .owner-date-range input{width:100%}
+  .owner-category-section .owner-category-list{grid-template-columns:1fr}
+}
