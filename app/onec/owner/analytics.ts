@@ -150,21 +150,47 @@ export function buildOwnerOverview(
   products: OnecProductReference[],
   categories: OnecCategoryReference[],
   days: Period,
+  dateRange?: { from: string; to: string } | null,
 ): OwnerOverviewAnalytics | null {
   const reports = sourceReports.filter((report) => report.Posted);
-  const latestTimestamp = Math.max(
+  const absoluteLatestTimestamp = Math.max(
     ...reports.map((report) => new Date(report.Date).getTime()),
     0,
   );
-  if (!latestTimestamp) return null;
+  if (!absoluteLatestTimestamp) return null;
 
-  const { currentFrom, currentTo, previousFrom, previousTo } =
-    periodBounds(latestTimestamp, days);
+  const customFrom = dateRange
+    ? new Date(`${dateRange.from}T00:00:00`).getTime()
+    : null;
+  const customTo = dateRange
+    ? new Date(`${dateRange.to}T23:59:59.999`).getTime()
+    : null;
+  const customDuration =
+    customFrom !== null && customTo !== null ? customTo - customFrom + 1 : 0;
+  const bounds =
+    customFrom !== null &&
+    customTo !== null &&
+    Number.isFinite(customFrom) &&
+    Number.isFinite(customTo) &&
+    customFrom <= customTo
+      ? {
+          currentFrom: customFrom,
+          currentTo: customTo,
+          previousFrom: customFrom - customDuration,
+          previousTo: customFrom - 1,
+        }
+      : periodBounds(absoluteLatestTimestamp, days);
+  const { currentFrom, currentTo, previousFrom, previousTo } = bounds;
   const current = reports.filter((report) =>
     inRange(report, currentFrom, currentTo),
   );
   const previous = reports.filter((report) =>
     inRange(report, previousFrom, previousTo),
+  );
+  if (!current.length) return null;
+
+  const latestTimestamp = Math.max(
+    ...current.map((report) => new Date(report.Date).getTime()),
   );
 
   const activityDates = [...new Set(reports.map((report) => report.Date.slice(0, 10)))]
@@ -209,7 +235,7 @@ export function buildOwnerOverview(
       currentFrom,
       previousFrom,
       latestTimestamp,
-      days,
+      Math.max(Math.round((currentTo - currentFrom + 1) / DAY_MS), 1),
     ),
     categories: buildCategories(current, products, categories),
   };
