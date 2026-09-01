@@ -72,7 +72,7 @@ function buildComparison(
   currentFrom: number,
   previousFrom: number,
   latestTimestamp: number,
-  days: Period,
+  days: number,
 ): OwnerComparisonBucket[] {
   const bucketCount = days === 7 ? 7 : 15;
   const duration = days * DAY_MS;
