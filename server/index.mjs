@@ -83,6 +83,34 @@ app.use(
 app.get("/api/dashboard", (_request, response) => {
   response.json(dashboardData);
 });
+app.get("/api/dashboard/team-plan", (request, response) => {
+  const period = [1, 7, 30].includes(Number(request.query.period))
+    ? Number(request.query.period)
+    : 30;
+  const storeKey = String(request.query.storeKey || "all");
+  response.json({ item: authStore.getTeamSalesPlan(storeKey, period) });
+});
+
+app.put("/api/dashboard/team-plan", (request, response) => {
+  if (request.auth.user.role !== "manager") {
+    return response.status(403).json({ message: "Только руководитель может менять план команды" });
+  }
+
+  try {
+    const item = authStore.setTeamSalesPlan({
+      storeKey: request.body?.storeKey || "all",
+      periodDays: request.body?.period,
+      amount: request.body?.amount,
+      updatedBy: request.auth.user.id,
+    });
+    return response.json({ item });
+  } catch (error) {
+    return response.status(400).json({
+      message: error instanceof Error ? error.message : "Не удалось сохранить план",
+    });
+  }
+});
+
 
 app.get("/api/products", (request, response) => {
   const query = String(request.query.search || "")
