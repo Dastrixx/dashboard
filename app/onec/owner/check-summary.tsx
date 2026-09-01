@@ -1,17 +1,16 @@
 import type { CheckAnalytics } from "../sales/types";
-import type { Period } from "../types";
-import { money, number, periodLabel } from "./format";
+import { money, number } from "./format";
 
 export function OwnerCheckSummary({
   checks,
   loading,
   error,
-  period,
+  periodCaption,
 }: {
   checks: CheckAnalytics | null;
   loading: boolean;
   error: string;
-  period: Period;
+  periodCaption: string;
 }) {
   if (loading) {
     return (
@@ -33,7 +32,7 @@ export function OwnerCheckSummary({
   return (
     <section className="owner-check-strip" aria-label="Показатели чеков за период">
       <div>
-        <span>Чеков · {periodLabel[period]}</span>
+        <span>Чеков · {periodCaption}</span>
         <strong>{number.format(checks.current.checks)}</strong>
       </div>
       <div>
