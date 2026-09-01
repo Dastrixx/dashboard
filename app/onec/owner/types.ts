@@ -20,6 +20,11 @@ export type OwnerReportsResponse = {
   message?: string;
 };
 
+export type OwnerDateRange = {
+  from: string;
+  to: string;
+};
+
 export type OwnerCategory = {
   label: string;
   revenue: number;
