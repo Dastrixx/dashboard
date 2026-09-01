@@ -1,12 +1,19 @@
 import { compactMoney, money, number } from "./format";
+import type { MarginAnalytics } from "../sales/types";
 import type { OwnerOverviewAnalytics } from "./types";
 
 export function RevenueComparison({
   analytics,
   periodCaption,
+  margin,
+  marginLoading,
+  marginError,
 }: {
   analytics: OwnerOverviewAnalytics;
   periodCaption: string;
+  margin: MarginAnalytics | null;
+  marginLoading: boolean;
+  marginError: string;
 }) {
   const maximum = Math.max(
     ...analytics.comparison.flatMap((bucket) => [
@@ -44,6 +51,37 @@ export function RevenueComparison({
           <span>Предыдущий период</span>
           <strong>{money.format(analytics.period.previousRevenue)}</strong>
           <small>{number.format(analytics.period.previousSold)} ед. продано</small>
+        </div>
+      </div>
+
+      <div className="owner-margin-dynamics">
+        <div>
+          <span>Маржа текущего периода</span>
+          <strong>
+            {marginLoading
+              ? "…"
+              : margin
+                ? `${margin.current.marginPercent.toFixed(1)}%`
+                : "—"}
+          </strong>
+          <small>
+            {margin
+              ? `валовая прибыль ${money.format(margin.current.profit)}`
+              : marginError || "Себестоимость из регистра продаж 1С"}
+          </small>
+        </div>
+        <div>
+          <span>Предыдущий период</span>
+          <strong>
+            {margin ? `${margin.previous.marginPercent.toFixed(1)}%` : "—"}
+          </strong>
+          <small>
+            {margin
+              ? `${margin.current.marginPercent - margin.previous.marginPercent >= 0 ? "+" : ""}${(
+                  margin.current.marginPercent - margin.previous.marginPercent
+                ).toFixed(1)} п.п. динамика маржи`
+              : "нет базы для сравнения"}
+          </small>
         </div>
       </div>
 
