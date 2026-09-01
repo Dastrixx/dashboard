@@ -1253,6 +1253,103 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
   }
 });
 
+async function loadMarginPeriod(startDate, endDate) {
+  const rows = await onecTurnovers("AccumulationRegister_Продажи", {
+    startPeriod: startDate,
+    endPeriod: endDate,
+    dimensions: "",
+    top: 10,
+    select: [
+      "СтоимостьTurnover",
+      "ор_СебестоимостьTurnover",
+    ].join(","),
+  });
+  const revenue = rows.reduce(
+    (sum, item) => sum + Number(item.СтоимостьTurnover || 0),
+    0,
+  );
+  const cost = rows.reduce(
+    (sum, item) => sum + Number(item.ор_СебестоимостьTurnover || 0),
+    0,
+  );
+  const profit = revenue - cost;
+  return {
+    revenue,
+    cost,
+    profit,
+    marginPercent: revenue > 0 ? (profit / revenue) * 100 : 0,
+  };
+}
+
+app.get("/api/dashboard/onec-margin", async (request, response) => {
+  try {
+    const from = typeof request.query.from === "string" ? request.query.from : "";
+    const to = typeof request.query.to === "string" ? request.query.to : "";
+    const hasCustomRange = /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to);
+    const days = [1, 7, 30, 90].includes(Number(request.query.days))
+      ? Number(request.query.days)
+      : 30;
+
+    let currentFrom;
+    let currentTo;
+
+    if (hasCustomRange) {
+      currentFrom = new Date(parseOnecDateTime(`${from}T00:00:00`));
+      currentTo = new Date(parseOnecDateTime(`${to}T23:59:59`) + 1000);
+    } else {
+      const latest = await onecGet("AccumulationRegister_Продажи_RecordType", {
+        $top: 20,
+        $select: "Period",
+        $filter: "Active eq true",
+        $orderby: "Period desc",
+      });
+      if (!latest.length) {
+        return response.json({
+          items: {
+            current: { revenue: 0, cost: 0, profit: 0, marginPercent: 0 },
+            previous: { revenue: 0, cost: 0, profit: 0, marginPercent: 0 },
+          },
+          meta: { source: "AccumulationRegister_Продажи/Turnovers" },
+        });
+      }
+      const activity = resolveActivityAnchor(latest, "Period");
+      const anchor = activity.anchorDate;
+      const dayStart = new Date(anchor);
+      dayStart.setHours(0, 0, 0, 0);
+      currentFrom = new Date(dayStart.getTime() - (days - 1) * 86_400_000);
+      currentTo = new Date(dayStart.getTime() + 86_400_000);
+    }
+
+    const duration = currentTo.getTime() - currentFrom.getTime();
+    const previousTo = new Date(currentFrom.getTime());
+    const previousFrom = new Date(previousTo.getTime() - duration);
+
+    const [current, previous] = await Promise.all([
+      loadMarginPeriod(currentFrom, currentTo),
+      loadMarginPeriod(previousFrom, previousTo),
+    ]);
+
+    response.json({
+      items: { current, previous },
+      meta: {
+        source: "AccumulationRegister_Продажи/Turnovers",
+        revenueField: "СтоимостьTurnover",
+        costField: "ор_СебестоимостьTurnover",
+        periodStart: currentFrom.toISOString(),
+        periodEnd: currentTo.toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error("Ошибка расчёта маржи 1С:", error);
+    response.status(502).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : "Не удалось получить маржу из 1С",
+    });
+  }
+});
+
 app.get("/api/dashboard/onec-stock", async (request, response) => {
   try {
     const top = Math.min(
