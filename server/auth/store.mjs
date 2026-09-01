@@ -52,6 +52,15 @@ export class AuthStore {
         ON auth_sessions(user_id);
       CREATE INDEX IF NOT EXISTS auth_sessions_expiry_idx
         ON auth_sessions(idle_expires_at, absolute_expires_at);
+
+      CREATE TABLE IF NOT EXISTS team_sales_plans (
+        store_key TEXT NOT NULL,
+        period_days INTEGER NOT NULL CHECK (period_days IN (1, 7, 30)),
+        amount REAL NOT NULL CHECK (amount >= 0),
+        updated_by TEXT,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (store_key, period_days)
+      );
     `);
   }
 
@@ -200,6 +209,59 @@ export class AuthStore {
     this.db
       .prepare("DELETE FROM auth_sessions WHERE token_hash = ?")
       .run(hashToken(token));
+  }
+
+  getTeamSalesPlan(storeKey, periodDays) {
+    const row = this.db.prepare(`
+      SELECT
+        store_key AS storeKey,
+        period_days AS periodDays,
+        amount,
+        updated_by AS updatedBy,
+        updated_at AS updatedAt
+      FROM team_sales_plans
+      WHERE store_key = ? AND period_days = ?
+    `).get(String(storeKey || "all"), Number(periodDays));
+
+    return row || {
+      storeKey: String(storeKey || "all"),
+      periodDays: Number(periodDays),
+      amount: 0,
+      updatedBy: null,
+      updatedAt: null,
+    };
+  }
+
+  setTeamSalesPlan({ storeKey, periodDays, amount, updatedBy }) {
+    const normalizedStoreKey = String(storeKey || "all");
+    const normalizedPeriod = Number(periodDays);
+    const normalizedAmount = Number(amount);
+    if (![1, 7, 30].includes(normalizedPeriod)) {
+      throw new Error("Период плана должен быть 1, 7 или 30 дней");
+    }
+    if (!Number.isFinite(normalizedAmount) || normalizedAmount < 0) {
+      throw new Error("План продаж должен быть неотрицательным числом");
+    }
+
+    const updatedAt = Date.now();
+    this.db.prepare(`
+      INSERT INTO team_sales_plans (
+        store_key, period_days, amount, updated_by, updated_at
+      ) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(store_key, period_days)
+      DO UPDATE SET
+        amount = excluded.amount,
+        updated_by = excluded.updated_by,
+        updated_at = excluded.updated_at
+    `).run(
+      normalizedStoreKey,
+      normalizedPeriod,
+      normalizedAmount,
+      updatedBy || null,
+      updatedAt,
+    );
+
+    return this.getTeamSalesPlan(normalizedStoreKey, normalizedPeriod);
   }
 
   cleanupExpiredSessions(now = Date.now()) {
