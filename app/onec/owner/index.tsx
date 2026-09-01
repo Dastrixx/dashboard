@@ -71,7 +71,13 @@ export function OnecOverview({
       />
 
       <section className="owner-main-grid">
-        <RevenueComparison analytics={analytics} periodCaption={periodCaption} />
+        <RevenueComparison
+          analytics={analytics}
+          periodCaption={periodCaption}
+          margin={state.margin}
+          marginLoading={state.marginLoading}
+          marginError={state.marginError}
+        />
       </section>
 
       <section className="owner-category-section">
