@@ -20,6 +20,46 @@ export function OnecTeam() {
   const [storeKey, setStoreKey] = useState("all");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [teamPlan, setTeamPlan] = useState(0);
+  const [planInput, setPlanInput] = useState("");
+  const [planLoading, setPlanLoading] = useState(true);
+  const [planSaving, setPlanSaving] = useState(false);
+  const [planMessage, setPlanMessage] = useState("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadPlan() {
+      try {
+        setPlanLoading(true);
+        setPlanMessage("");
+        const response = await fetch(
+          `${API_URL}/api/dashboard/team-plan?storeKey=${encodeURIComponent(storeKey)}&period=${period}`,
+          { signal: controller.signal, credentials: "include", cache: "no-store" },
+        );
+        const data = (await response.json()) as {
+          item?: { amount?: number };
+          message?: string;
+        };
+        if (!response.ok) {
+          throw new Error(data.message || `Ошибка HTTP ${response.status}`);
+        }
+        const amount = Number(data.item?.amount || 0);
+        setTeamPlan(amount);
+        setPlanInput(amount ? String(amount) : "");
+      } catch (loadError) {
+        if (loadError instanceof DOMException && loadError.name === "AbortError") return;
+        setPlanMessage(
+          loadError instanceof Error ? loadError.message : "Не удалось загрузить план команды",
+        );
+      } finally {
+        if (!controller.signal.aborted) setPlanLoading(false);
+      }
+    }
+
+    loadPlan();
+    return () => controller.abort();
+  }, [period, storeKey]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -237,6 +277,46 @@ export function OnecTeam() {
     };
   }, [consultantPayload, storeKey, search]);
 
+  const saveTeamPlan = async () => {
+    const amount = Number(planInput.replace(",", "."));
+    if (!Number.isFinite(amount) || amount < 0) {
+      setPlanMessage("Укажите корректную сумму плана");
+      return;
+    }
+
+    try {
+      setPlanSaving(true);
+      setPlanMessage("");
+      const response = await fetch(`${API_URL}/api/dashboard/team-plan`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          storeKey,
+          period,
+          amount,
+        }),
+      });
+      const data = (await response.json()) as {
+        item?: { amount?: number };
+        message?: string;
+      };
+      if (!response.ok) {
+        throw new Error(data.message || `Ошибка HTTP ${response.status}`);
+      }
+      const savedAmount = Number(data.item?.amount || amount);
+      setTeamPlan(savedAmount);
+      setPlanInput(savedAmount ? String(savedAmount) : "");
+      setPlanMessage("План команды сохранён");
+    } catch (saveError) {
+      setPlanMessage(
+        saveError instanceof Error ? saveError.message : "Не удалось сохранить план команды",
+      );
+    } finally {
+      setPlanSaving(false);
+    }
+  };
+
   const teamStores = useMemo(() => {
     const stores = new Map(
       [...view.stores, ...consultantView.stores].map((item) => [
@@ -280,6 +360,12 @@ export function OnecTeam() {
   );
   const maxBranchRevenue = Math.max(
     ...view.branches.map((item) => item.revenue),
+    1,
+  );
+  const teamPlanActual = consultantView.totalRevenue;
+  const teamPlanPercent = teamPlan > 0 ? (teamPlanActual / teamPlan) * 100 : 0;
+  const maxConsultantRevenue = Math.max(
+    ...consultantView.rows.map((item) => item.revenue),
     1,
   );
 
@@ -346,26 +432,124 @@ export function OnecTeam() {
         </div>
         <div className="team-plan-metrics">
           <div>
-            <span>Продажи команды</span>
-            <strong>{money.format(view.totalRevenue)}</strong>
-            <small>по выбранному филиалу</small>
+            <span>Продажи продавцов</span>
+            <strong>{money.format(consultantView.totalRevenue)}</strong>
+            <small>только консультанты, без кассиров</small>
           </div>
           <div>
-            <span>Продано единиц</span>
-            <strong>{number.format(view.totalQuantity)}</strong>
-            <small>оборот регистра продаж</small>
+            <span>План команды</span>
+            <strong>{planLoading ? "…" : teamPlan ? money.format(teamPlan) : "Не задан"}</strong>
+            <small>{teamPlan ? `${number.format(teamPlanPercent)}% выполнено` : "задайте план ниже"}</small>
           </div>
           <div>
             <span>Продавцов</span>
-            <strong>{view.sellers}</strong>
-            <small>с продажами за период</small>
+            <strong>{consultantView.consultants}</strong>
+            <small>с личными продажами за период</small>
           </div>
           <div>
-            <span>Филиалов</span>
-            <strong>{view.branches.length}</strong>
-            <small>участвуют в продажах</small>
+            <span>Продано единиц</span>
+            <strong>{number.format(consultantView.totalQuantity)}</strong>
+            <small>по личным продажам продавцов</small>
           </div>
         </div>
+
+        <div className="team-plan-editor">
+          <div className="team-plan-editor-copy">
+            <span className="team-plan-kicker">План продаж команды</span>
+            <strong>
+              {storeKey === "all"
+                ? "Общий план команды"
+                : teamStores.find((item) => item.Ref_Key === storeKey)?.Description || "План филиала"}
+            </strong>
+            <small>План считается только по консультантам/продавцам, кассиры не участвуют.</small>
+          </div>
+          <label>
+            <span>Сумма плана, KGS</span>
+            <input
+              type="number"
+              min="0"
+              step="1000"
+              value={planInput}
+              onChange={(event) => setPlanInput(event.target.value)}
+              placeholder="Например, 1 500 000"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={saveTeamPlan}
+            disabled={planSaving || planLoading}
+          >
+            {planSaving ? "Сохраняем…" : "Сохранить план"}
+          </button>
+          {planMessage && <small className="team-plan-message">{planMessage}</small>}
+        </div>
+
+        <div className="team-plan-progress-block">
+          <div className="team-plan-progress-head">
+            <div>
+              <span>Выполнение командного плана</span>
+              <strong>{money.format(teamPlanActual)} / {teamPlan ? money.format(teamPlan) : "—"}</strong>
+            </div>
+            <b>{teamPlan ? `${number.format(teamPlanPercent)}%` : "План не задан"}</b>
+          </div>
+          <div className="team-plan-progress">
+            <i style={{ width: `${Math.min(teamPlanPercent, 100)}%` }} />
+          </div>
+        </div>
+      </section>
+
+      <section className="panel team-plan-sellers-panel">
+        <div className="panel-head">
+          <div>
+            <span className="team-plan-kicker">Выполнение плана</span>
+            <h2>План команды среди продавцов</h2>
+            <p>Доля каждого консультанта в командном плане и фактических продажах</p>
+          </div>
+          <strong className="team-plan-total-percent">
+            {teamPlan ? `${number.format(teamPlanPercent)}%` : "План не задан"}
+          </strong>
+        </div>
+
+        {consultantView.rows.length ? (
+          <div className="team-plan-seller-bars">
+            {consultantView.rows.slice(0, 20).map((item) => {
+              const planShare = teamPlan > 0 ? (item.revenue / teamPlan) * 100 : 0;
+              const salesShare = consultantView.totalRevenue > 0
+                ? (item.revenue / consultantView.totalRevenue) * 100
+                : 0;
+              return (
+                <div className="team-plan-seller-row" key={item.key}>
+                  <div className="team-plan-seller-head">
+                    <div>
+                      <strong>{item.consultant}</strong>
+                      <span>{item.store}</span>
+                    </div>
+                    <div>
+                      <b>{money.format(item.revenue)}</b>
+                      <small>
+                        {teamPlan
+                          ? `${number.format(planShare)}% от плана`
+                          : `${number.format(salesShare)}% продаж команды`}
+                      </small>
+                    </div>
+                  </div>
+                  <i>
+                    <b
+                      style={{
+                        width: `${Math.max(
+                          (item.revenue / maxConsultantRevenue) * 100,
+                          item.revenue ? 3 : 0,
+                        )}%`,
+                      }}
+                    />
+                  </i>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="onec-no-data">Нет личных продаж продавцов за период</p>
+        )}
       </section>
 
       <section className="panel consultant-analytics-panel">
@@ -421,7 +605,8 @@ export function OnecTeam() {
                   <th>Филиал</th>
                   <th>Выручка</th>
                   <th>Продано</th>
-                  <th>Доля</th>
+                  <th>Доля продаж</th>
+                  <th>% плана команды</th>
                   <th>Возвраты</th>
                 </tr>
               </thead>
@@ -440,6 +625,11 @@ export function OnecTeam() {
                     </td>
                     <td>{number.format(item.quantity)} ед.</td>
                     <td>{number.format(item.share)}%</td>
+                    <td>
+                      {teamPlan
+                        ? `${number.format((item.revenue / teamPlan) * 100)}%`
+                        : "—"}
+                    </td>
                     <td>{number.format(item.returnLines)} строк</td>
                   </tr>
                 ))}
