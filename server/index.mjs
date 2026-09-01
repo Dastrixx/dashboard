@@ -34,7 +34,10 @@ import {
   onecMetadata,
   onecTurnovers,
 } from "./onec.mjs";
-import { loadCheckAnalytics } from "./dashboard/checks.mjs";
+import {
+  loadCheckAnalytics,
+  loadCheckAnalyticsRange,
+} from "./dashboard/checks.mjs";
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -1532,13 +1535,20 @@ app.get("/api/dashboard/onec-check-analytics", async (request, response) => {
       ),
       10_000,
     );
+    const from = typeof request.query.from === "string" ? request.query.from : "";
+    const to = typeof request.query.to === "string" ? request.query.to : "";
+    const hasCustomRange = /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to);
     const startedAt = Date.now();
-    const analytics = await loadCheckAnalytics({ days, limit });
+    const analytics = hasCustomRange
+      ? await loadCheckAnalyticsRange({ from, to, limit })
+      : await loadCheckAnalytics({ days, limit });
 
     response.json({
       items: analytics,
       meta: {
-        days,
+        days: hasCustomRange ? undefined : days,
+        from: hasCustomRange ? from : undefined,
+        to: hasCustomRange ? to : undefined,
         loaded: analytics.loaded,
         latestDate: analytics.latestDate,
         absoluteLatestDate: analytics.absoluteLatestDate,
