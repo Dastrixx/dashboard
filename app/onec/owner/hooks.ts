@@ -8,6 +8,8 @@ import type {
   OnecCategoryReference,
   OnecProductReference,
   OnecRetailReport,
+  MarginAnalytics,
+  MarginAnalyticsResponse,
 } from "../sales/types";
 import type { Period } from "../types";
 import { buildOwnerOverview } from "./analytics";
@@ -44,13 +46,16 @@ export function useOwnerOverview(
   const [products, setProducts] = useState<OnecProductReference[]>([]);
   const [categories, setCategories] = useState<OnecCategoryReference[]>([]);
   const [checks, setChecks] = useState<CheckAnalytics | null>(null);
+  const [margin, setMargin] = useState<MarginAnalytics | null>(null);
   const [todayChecks, setTodayChecks] = useState<CheckAnalytics | null>(null);
   const [reportsLoading, setReportsLoading] = useState(true);
   const [referencesLoading, setReferencesLoading] = useState(true);
   const [checksLoading, setChecksLoading] = useState(true);
+  const [marginLoading, setMarginLoading] = useState(true);
   const [reportsError, setReportsError] = useState("");
   const [referencesError, setReferencesError] = useState("");
   const [checksError, setChecksError] = useState("");
+  const [marginError, setMarginError] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -112,6 +117,30 @@ export function useOwnerOverview(
       }
     }
 
+    async function loadMargin() {
+      try {
+        setMarginLoading(true);
+        setMarginError("");
+        const query = dateRange
+          ? `from=${dateRange.from}&to=${dateRange.to}`
+          : `days=${period}`;
+        const response = await fetch(
+          `${API_URL}/api/dashboard/onec-margin?${query}`,
+          { signal: controller.signal, credentials: "include" },
+        );
+        const payload = await readJson<MarginAnalyticsResponse>(response);
+        setMargin(payload.items || null);
+      } catch (error) {
+        if (isAbortError(error)) return;
+        setMargin(null);
+        setMarginError(
+          error instanceof Error ? error.message : "Не удалось загрузить маржу 1С",
+        );
+      } finally {
+        if (!controller.signal.aborted) setMarginLoading(false);
+      }
+    }
+
     async function loadChecks() {
       try {
         setChecksLoading(true);
@@ -154,6 +183,7 @@ export function useOwnerOverview(
     loadReports();
     loadReferences();
     loadChecks();
+    loadMargin();
     return () => controller.abort();
   }, [period, dateRange?.from, dateRange?.to]);
 
@@ -172,5 +202,8 @@ export function useOwnerOverview(
     reportsError,
     referencesError,
     checksError,
+    margin,
+    marginLoading,
+    marginError,
   };
 }
