@@ -1375,3 +1375,88 @@ body{overflow-x:hidden}
   .owner-date-range input{width:100%}
   .owner-category-section .owner-category-list{grid-template-columns:1fr}
 }
+
+
+/* Manager margin KPI */
+.product-kpis{grid-template-columns:repeat(5,minmax(0,1fr))}
+
+/* Owner margin dynamics */
+.owner-margin-dynamics{
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0 18px;
+}
+.owner-margin-dynamics>div{
+  padding:14px 16px;border:1px solid #dce8e2;border-radius:12px;background:#f8fbf9;
+}
+.owner-margin-dynamics span,.owner-margin-dynamics strong,.owner-margin-dynamics small{display:block}
+.owner-margin-dynamics span{color:var(--muted);font-size:8px}
+.owner-margin-dynamics strong{margin-top:7px;font-size:20px;color:var(--green2)}
+.owner-margin-dynamics small{margin-top:5px;color:var(--muted);font-size:8px}
+
+/* Team sales plan controlled by manager */
+.team-plan-editor{
+  display:grid;grid-template-columns:minmax(220px,1fr) minmax(190px,280px) auto;
+  align-items:end;gap:12px;margin-top:16px;padding:16px;
+  border:1px solid rgba(11,122,85,.13);border-radius:13px;background:rgba(255,255,255,.82);
+}
+.team-plan-editor-copy strong,.team-plan-editor-copy small{display:block}
+.team-plan-editor-copy strong{margin-top:5px;font-size:14px}
+.team-plan-editor-copy small{margin-top:5px;color:var(--muted);font-size:8px;line-height:1.45}
+.team-plan-editor label{display:flex;flex-direction:column;gap:5px}
+.team-plan-editor label>span{color:var(--muted);font-size:8px}
+.team-plan-editor input{
+  min-height:40px;padding:0 11px;border:1px solid var(--line);border-radius:9px;
+  background:#fff;color:var(--ink);font-size:11px;outline:0;
+}
+.team-plan-editor input:focus{border-color:#8fc4ad;box-shadow:0 0 0 3px rgba(11,122,85,.08)}
+.team-plan-editor>button{
+  min-height:40px;padding:0 14px;border:0;border-radius:9px;background:var(--green2);
+  color:#fff;font-size:9px;font-weight:800;white-space:nowrap;
+}
+.team-plan-editor>button:disabled{opacity:.5;cursor:not-allowed}
+.team-plan-message{grid-column:1/-1;color:var(--green2);font-size:8px}
+.team-plan-progress-block{
+  margin-top:12px;padding:15px 16px;border:1px solid rgba(11,122,85,.1);
+  border-radius:12px;background:rgba(255,255,255,.72);
+}
+.team-plan-progress-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
+.team-plan-progress-head span,.team-plan-progress-head strong{display:block}
+.team-plan-progress-head span{color:var(--muted);font-size:8px}
+.team-plan-progress-head strong{margin-top:5px;font-size:13px}
+.team-plan-progress-head>b{color:var(--green2);font-size:15px}
+.team-plan-sellers-panel{padding:24px}
+.team-plan-total-percent{color:var(--green2);font-size:20px}
+.team-plan-seller-bars{display:flex;flex-direction:column;gap:14px}
+.team-plan-seller-row{min-width:0}
+.team-plan-seller-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:7px}
+.team-plan-seller-head>div:first-child{min-width:0}
+.team-plan-seller-head strong,.team-plan-seller-head span,.team-plan-seller-head b,.team-plan-seller-head small{display:block}
+.team-plan-seller-head strong{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.team-plan-seller-head span{margin-top:3px;color:var(--muted);font-size:8px}
+.team-plan-seller-head>div:last-child{text-align:right}
+.team-plan-seller-head b{font-size:9px;color:var(--green2)}
+.team-plan-seller-head small{margin-top:3px;color:var(--muted);font-size:8px}
+.team-plan-seller-row>i{
+  display:block;height:8px;border-radius:999px;background:#edf2ef;overflow:hidden;
+}
+.team-plan-seller-row>i>b{
+  display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--green2),#2aab7c);
+}
+
+@media(max-width:1180px){
+  .product-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media(max-width:900px){
+  .team-plan-editor{grid-template-columns:1fr 1fr}
+  .team-plan-editor-copy{grid-column:1/-1}
+}
+@media(max-width:760px){
+  .product-kpis{grid-template-columns:1fr 1fr}
+  .owner-margin-dynamics{grid-template-columns:1fr}
+  .team-plan-editor{grid-template-columns:1fr}
+  .team-plan-editor-copy,.team-plan-message{grid-column:1}
+  .team-plan-seller-head{align-items:flex-start;flex-direction:column}
+  .team-plan-seller-head>div:last-child{text-align:left}
+}
+@media(max-width:480px){
+  .product-kpis{grid-template-columns:1fr}
+}
