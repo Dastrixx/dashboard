@@ -2,15 +2,26 @@
 
 import { DataState, dataFreshness } from "../shared";
 import type { Period } from "../types";
+import { periodLabel } from "./format";
 import { CategorySales } from "./categories";
 import { OwnerCheckSummary } from "./check-summary";
 import { RevenueComparison } from "./comparison";
 import { useOwnerOverview } from "./hooks";
+import type { OwnerDateRange } from "./types";
 import { ImportantInsights } from "./insights";
 import { OwnerKpis } from "./kpis";
 
-export function OnecOverview({ period }: { period: Period }) {
-  const state = useOwnerOverview(period);
+export function OnecOverview({
+  period,
+  dateRange,
+}: {
+  period: Period;
+  dateRange?: OwnerDateRange | null;
+}) {
+  const state = useOwnerOverview(period, dateRange);
+  const periodCaption = dateRange
+    ? `${dateRange.from} — ${dateRange.to}`
+    : periodLabel[period];
 
   if (state.reportsLoading || state.reportsError || !state.analytics) {
     return (
@@ -56,11 +67,14 @@ export function OnecOverview({ period }: { period: Period }) {
         checks={state.checks}
         loading={state.checksLoading}
         error={state.checksError}
-        period={period}
+        periodCaption={periodCaption}
       />
 
       <section className="owner-main-grid">
-        <RevenueComparison analytics={analytics} period={period} />
+        <RevenueComparison analytics={analytics} periodCaption={periodCaption} />
+      </section>
+
+      <section className="owner-category-section">
         <CategorySales
           categories={analytics.categories}
           loading={state.referencesLoading}
@@ -72,7 +86,7 @@ export function OnecOverview({ period }: { period: Period }) {
         analytics={analytics}
         checks={state.checks}
         checksError={state.checksError}
-        period={period}
+        periodCaption={periodCaption}
       />
     </div>
   );
