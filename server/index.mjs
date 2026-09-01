@@ -207,6 +207,40 @@ async function loadReportPages({ limit, days }) {
   }
 }
 
+
+async function loadReportPagesByRange({ limit, from, to }) {
+  const configuredPageSize = Number(process.env.ONEC_PAGE_SIZE || 25);
+  const pageSize = Math.min(Math.max(configuredPageSize, 1), 100);
+  const fromTimestamp = parseOnecDateTime(`${from}T00:00:00`);
+  const toTimestamp = parseOnecDateTime(`${to}T23:59:59`);
+
+  if (!Number.isFinite(fromTimestamp) || !Number.isFinite(toTimestamp) || fromTimestamp > toTimestamp) {
+    throw new Error("Некорректный диапазон дат");
+  }
+
+  const filter = [
+    "Posted eq true",
+    `Date ge datetime'${toOdataDateTime(fromTimestamp)}'`,
+    `Date le datetime'${toOdataDateTime(toTimestamp)}'`,
+  ].join(" and ");
+  const result = [];
+
+  while (result.length < limit) {
+    const currentPageSize = Math.min(pageSize, limit - result.length);
+    const page = await onecGet(RETAIL_REPORT_ENTITY, {
+      $top: currentPageSize,
+      $skip: result.length,
+      $select: RETAIL_REPORT_SELECT,
+      $filter: filter,
+      $orderby: "Date desc",
+    });
+    result.push(...page);
+    if (page.length < currentPageSize) break;
+  }
+
+  return result;
+}
+
 async function loadReportPagesCached({ limit, days }) {
   const key = `${limit}:${days}`;
   const now = Date.now();
@@ -1373,12 +1407,17 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
       Math.max(Number(request.query.days) || 60, 1),
       365,
     );
+    const from = typeof request.query.from === "string" ? request.query.from : "";
+    const to = typeof request.query.to === "string" ? request.query.to : "";
+    const hasCustomRange = /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to);
 
     const startedAt = Date.now();
-    const reportResult = await loadReportPagesCached({
-      limit: requestedTop + 1,
-      days,
-    });
+    const reportResult = hasCustomRange
+      ? { items: await loadReportPagesByRange({ limit: requestedTop + 1, from, to }), cache: "range" }
+      : await loadReportPagesCached({
+          limit: requestedTop + 1,
+          days,
+        });
     const truncated = reportResult.items.length > requestedTop;
     const items = reportResult.items.slice(0, requestedTop).map((report) => ({
       ...report,
@@ -1387,7 +1426,9 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
     const latestDate = items[0]?.Date || null;
     const commonMeta = {
       loaded: items.length,
-      days,
+      days: hasCustomRange ? undefined : days,
+      from: hasCustomRange ? from : undefined,
+      to: hasCustomRange ? to : undefined,
       latestDate,
       freshness: describeDataFreshness(latestDate),
       truncated,
