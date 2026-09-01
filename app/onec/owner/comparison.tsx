@@ -1,13 +1,12 @@
-import type { Period } from "../types";
-import { compactMoney, money, number, periodLabel } from "./format";
+import { compactMoney, money, number } from "./format";
 import type { OwnerOverviewAnalytics } from "./types";
 
 export function RevenueComparison({
   analytics,
-  period,
+  periodCaption,
 }: {
   analytics: OwnerOverviewAnalytics;
-  period: Period;
+  periodCaption: string;
 }) {
   const maximum = Math.max(
     ...analytics.comparison.flatMap((bucket) => [
@@ -23,7 +22,7 @@ export function RevenueComparison({
         <div>
           <span className="onec-source-kicker">Сравнительный анализ</span>
           <h2>Динамика выручки</h2>
-          <p>Текущие {periodLabel[period]} относительно предыдущих</p>
+          <p>Период {periodCaption} относительно предыдущего такой же длины</p>
         </div>
         <div className="owner-chart-legend" aria-label="Легенда графика">
           <span><i className="current" />Текущий</span>
