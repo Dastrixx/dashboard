@@ -259,6 +259,75 @@ async function loadChecks({ days, limit }) {
   };
 }
 
+async function loadChecksByRange({ fromTimestamp, toTimestamp, limit }) {
+  const pageSize = Math.min(
+    Math.max(Number(process.env.ONEC_CHECK_PAGE_SIZE || 100), 1),
+    100,
+  );
+  const filter = [
+    "Posted eq true",
+    `Date ge datetime'${toOdataDateTime(fromTimestamp)}'`,
+    `Date le datetime'${toOdataDateTime(toTimestamp)}'`,
+  ].join(" and ");
+  const result = [];
+
+  while (result.length < limit) {
+    const currentPageSize = Math.min(pageSize, limit - result.length);
+    const page = await onecGet(CHECK_ENTITY, {
+      $top: currentPageSize,
+      $skip: result.length,
+      $select: CHECK_SELECT,
+      $filter: filter,
+      $orderby: "Date desc",
+    });
+    result.push(...page);
+    if (page.length < currentPageSize) break;
+  }
+
+  return { checks: result, truncated: result.length >= limit };
+}
+
+export async function loadCheckAnalyticsRange({ from, to, limit }) {
+  const currentFrom = parseOnecDateTime(`${from}T00:00:00`);
+  const currentTo = parseOnecDateTime(`${to}T23:59:59`);
+
+  if (!Number.isFinite(currentFrom) || !Number.isFinite(currentTo) || currentFrom > currentTo) {
+    throw new Error("Некорректный диапазон дат чеков");
+  }
+
+  const duration = currentTo - currentFrom + 1;
+  const previousTo = currentFrom - 1;
+  const previousFrom = previousTo - duration + 1;
+  const [loaded, certificatePaymentKeys] = await Promise.all([
+    loadChecksByRange({ fromTimestamp: previousFrom, toTimestamp: currentTo, limit }),
+    loadCertificatePaymentKeys(),
+  ]);
+
+  const current = loaded.checks.filter((check) => {
+    const timestamp = parseOnecDateTime(check.Date);
+    return timestamp >= currentFrom && timestamp <= currentTo;
+  });
+  const previous = loaded.checks.filter((check) => {
+    const timestamp = parseOnecDateTime(check.Date);
+    return timestamp >= previousFrom && timestamp <= previousTo;
+  });
+  const days = Math.max(Math.round(duration / DAY_MS), 1);
+
+  return {
+    current: summarizeChecks(current, certificatePaymentKeys),
+    previous: summarizeChecks(previous, certificatePaymentKeys),
+    series: buildBuckets(current, currentFrom, currentTo + 1, days),
+    periodStart: new Date(currentFrom).toISOString(),
+    periodEnd: new Date(currentTo).toISOString(),
+    latestDate: current.length
+      ? new Date(Math.max(...current.map((check) => parseOnecDateTime(check.Date)))).toISOString()
+      : null,
+    loaded: loaded.checks.length,
+    truncated: loaded.truncated,
+    cache: "range",
+  };
+}
+
 export async function loadCheckAnalytics({ days, limit }) {
   const key = `${days}:${limit}`;
   const now = Date.now();
