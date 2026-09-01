@@ -45,7 +45,7 @@ export function OwnerKpis({
 
       <article className="owner-kpi-card">
         <div>
-          <span>Чеков сегодня</span>
+          <span>Чеков за последний день</span>
           <Trend
             value={
               checkCurrent && checkPrevious
