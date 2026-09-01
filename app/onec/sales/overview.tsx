@@ -1,6 +1,6 @@
 import { makeChartPoints } from "./analytics";
 import { compactNumber, money, number, PERIODS } from "./config";
-import type { AnalyticsPeriod, SalesAnalytics } from "./types";
+import type { AnalyticsPeriod, MarginAnalytics, SalesAnalytics } from "./types";
 import { dataFreshness } from "../shared";
 
 type SalesSummaryProps = {
@@ -10,6 +10,9 @@ type SalesSummaryProps = {
   referencesLoading: boolean;
   referenceError: string;
   truncated?: boolean;
+  margin: MarginAnalytics | null;
+  marginLoading: boolean;
+  marginError: string;
 };
 
 export function SalesSummary({
@@ -19,6 +22,9 @@ export function SalesSummary({
   referencesLoading,
   referenceError,
   truncated,
+  margin,
+  marginLoading,
+  marginError,
 }: SalesSummaryProps) {
   const freshness = dataFreshness(analytics.latestTimestamp);
 
@@ -105,6 +111,38 @@ export function SalesSummary({
           </div>
           <strong>{number.format(analytics.activeSku)}</strong>
           <p>были продажи за период</p>
+        </article>
+
+        <article className="kpi-card">
+          <div className="kpi-top">
+            <span>Маржа</span>
+            {margin?.previous && margin.previous.marginPercent > 0 && (
+              <b
+                className={
+                  margin.current.marginPercent >= margin.previous.marginPercent
+                    ? "trend"
+                    : "trend neutral"
+                }
+              >
+                {margin.current.marginPercent >= margin.previous.marginPercent ? "+" : ""}
+                {(margin.current.marginPercent - margin.previous.marginPercent).toFixed(1)} п.п.
+              </b>
+            )}
+          </div>
+          <strong>
+            {marginLoading
+              ? "…"
+              : margin
+                ? `${margin.current.marginPercent.toFixed(1)}%`
+                : "—"}
+          </strong>
+          <p>
+            {marginError
+              ? "себестоимость временно недоступна"
+              : margin
+                ? `валовая прибыль ${money.format(margin.current.profit)}`
+                : "по себестоимости из регистра продаж 1С"}
+          </p>
         </article>
       </section>
     </>
