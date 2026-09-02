@@ -5,6 +5,7 @@ import { buildRankingRows, downloadRankingCsv } from "./analytics";
 import { money, number, PERIODS } from "./config";
 import type {
   AnalyticsPeriod,
+  CustomDateRange,
   OnecCategoryReference,
   OnecProductReference,
   OnecRetailReport,
@@ -14,16 +15,25 @@ type Props = {
   reports: OnecRetailReport[];
   products: OnecProductReference[];
   categories: OnecCategoryReference[];
+  defaultPeriod?: AnalyticsPeriod;
+  defaultCustomRange?: CustomDateRange;
 };
 
-export function ProductRanking({ reports, products, categories }: Props) {
-  const [period, setPeriod] = useState<AnalyticsPeriod>("month");
+export function ProductRanking({
+  reports,
+  products,
+  categories,
+  defaultPeriod = "month",
+  defaultCustomRange = null,
+}: Props) {
+  const [period, setPeriod] = useState<AnalyticsPeriod>(defaultPeriod);
+  const [customRange] = useState<CustomDateRange>(defaultCustomRange);
   const [category, setCategory] = useState("");
   const [topLimit, setTopLimit] = useState(10);
   const [antiLimit, setAntiLimit] = useState(10);
   const rows = useMemo(
-    () => buildRankingRows(reports, products, categories, period),
-    [categories, period, products, reports],
+    () => buildRankingRows(reports, products, categories, period, customRange ?? undefined),
+    [categories, customRange, period, products, reports],
   );
   const availableCategories = useMemo(
     () =>

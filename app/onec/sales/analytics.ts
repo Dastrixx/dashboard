@@ -2,6 +2,7 @@ import { DAY_MS, PERIODS, shortDate } from "./config";
 import type {
   AnalyticsPeriod,
   ChartPoint,
+  CustomDateRange,
   OnecCategoryReference,
   OnecProductReference,
   OnecRetailReport,
@@ -115,7 +116,12 @@ function buildRevenueBuckets(
   duration: number,
   period: AnalyticsPeriod,
 ) {
-  const bucketCount = period === "day" ? 6 : period === "week" ? 7 : 30;
+  const durationDays = Math.round(duration / DAY_MS);
+  const bucketCount =
+    period === "day" ? 6
+    : period === "week" ? 7
+    : period === "custom" ? Math.max(2, Math.min(durationDays, 60))
+    : 30;
   const bucketSize = duration / bucketCount;
   const buckets: RevenueBucket[] = Array.from(
     { length: bucketCount },
@@ -147,6 +153,7 @@ export function buildSalesAnalytics(
   products: OnecProductReference[],
   categories: OnecCategoryReference[],
   period: AnalyticsPeriod,
+  customRange?: CustomDateRange,
 ): SalesAnalytics | null {
   const latestTimestamp = Math.max(
     ...reports.map((report) => new Date(report.Date).getTime()),
@@ -154,12 +161,28 @@ export function buildSalesAnalytics(
   );
   if (!latestTimestamp) return null;
 
-  const duration = PERIODS[period].days * DAY_MS;
-  const currentFrom = latestTimestamp - duration + 1;
+  let currentFrom: number;
+  let currentTo: number;
+  let duration: number;
+
+  if (period === "custom" && customRange) {
+    const fromDay = new Date(customRange.from);
+    fromDay.setHours(0, 0, 0, 0);
+    const toDay = new Date(customRange.to);
+    toDay.setHours(23, 59, 59, 999);
+    currentFrom = fromDay.getTime();
+    currentTo = Math.min(toDay.getTime(), latestTimestamp);
+    duration = Math.max(currentTo - currentFrom + 1, DAY_MS);
+  } else {
+    duration = PERIODS[period].days * DAY_MS;
+    currentFrom = latestTimestamp - duration + 1;
+    currentTo = latestTimestamp;
+  }
+
   const previousTo = currentFrom - 1;
   const previousFrom = previousTo - duration + 1;
   const currentReports = reports.filter((report) =>
-    inRange(report.Date, currentFrom, latestTimestamp),
+    inRange(report.Date, currentFrom, currentTo),
   );
   const previousReports = reports.filter((report) =>
     inRange(report.Date, previousFrom, previousTo),
@@ -226,7 +249,7 @@ export function buildSalesAnalytics(
     currentBuckets: buildRevenueBuckets(
       currentReports,
       currentFrom,
-      duration,
+      Math.max(currentTo - currentFrom + 1, duration),
       period,
     ),
     previousBuckets: buildRevenueBuckets(
@@ -244,6 +267,7 @@ export function buildRankingRows(
   products: OnecProductReference[],
   categories: OnecCategoryReference[],
   period: AnalyticsPeriod,
+  customRange?: CustomDateRange,
 ) {
   const latestTimestamp = Math.max(
     ...reports.map((report) => new Date(report.Date).getTime()),
@@ -251,9 +275,23 @@ export function buildRankingRows(
   );
   if (!latestTimestamp) return [];
 
-  const from = latestTimestamp - PERIODS[period].days * DAY_MS + 1;
+  let from: number;
+  let to: number;
+
+  if (period === "custom" && customRange) {
+    const fromDay = new Date(customRange.from);
+    fromDay.setHours(0, 0, 0, 0);
+    const toDay = new Date(customRange.to);
+    toDay.setHours(23, 59, 59, 999);
+    from = fromDay.getTime();
+    to = Math.min(toDay.getTime(), latestTimestamp);
+  } else {
+    from = latestTimestamp - PERIODS[period].days * DAY_MS + 1;
+    to = latestTimestamp;
+  }
+
   return buildProductRows(
-    reports.filter((report) => inRange(report.Date, from, latestTimestamp)),
+    reports.filter((report) => inRange(report.Date, from, to)),
     products,
     categories,
   );
@@ -285,6 +323,33 @@ export function summarizeAbc(rows: ProductRow[]) {
       share: groupRows.reduce((sum, row) => sum + row.share, 0),
     };
   });
+}
+
+export function downloadAbcCsv(filename: string, rows: ProductRow[]) {
+  const escape = (value: string | number) =>
+    `"${String(value).replaceAll('"', '""')}"`;
+  const csv = [
+    ["Артикул", "Товар", "Категория", "Выручка, сом", "Продано", "Доля, %", "ABC"],
+    ...rows.map((row) => [
+      row.article,
+      row.name,
+      row.category,
+      row.revenue.toFixed(0),
+      row.sold,
+      row.share.toFixed(2),
+      row.abc,
+    ]),
+  ]
+    .map((line) => line.map(escape).join(";"))
+    .join("\n");
+  const url = URL.createObjectURL(
+    new Blob(["﻿", csv], { type: "text/csv;charset=utf-8" }),
+  );
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 export function downloadRankingCsv(filename: string, rows: ProductRow[]) {

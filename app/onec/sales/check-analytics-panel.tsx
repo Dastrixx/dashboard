@@ -130,34 +130,42 @@ export function CheckAnalyticsPanel({
               <span>Над столбцом — чеки, снизу — средний чек</span>
             </div>
             {analytics.series.some((item) => item.checks > 0) ? (
-              <div
-                className="onec-check-chart"
-                style={{
-                  gridTemplateColumns: `repeat(${analytics.series.length}, minmax(34px, 1fr))`,
-                }}
-              >
-                {analytics.series.map((item, index) => (
-                  <div
-                    className="onec-check-column"
-                    key={`${item.label}-${index}`}
-                  >
-                    <b>{item.checks || "—"}</b>
-                    <i>
-                      <span
-                        style={{
-                          height: `${Math.max(
-                            (item.checks / chartMaximum) * 100,
-                            item.checks ? 5 : 0,
-                          )}%`,
-                        }}
-                      />
-                    </i>
-                    <small>{item.label}</small>
-                    <em>
-                      {item.checks ? money.format(item.averageCheck) : "—"}
-                    </em>
-                  </div>
-                ))}
+              <div className="onec-check-chart-outer">
+                {/* Y-ось: количество чеков */}
+                <div className="onec-check-y-axis" aria-hidden="true">
+                  <span>{chartMaximum}</span>
+                  <span>{Math.round(chartMaximum / 2)}</span>
+                  <span>0</span>
+                </div>
+                <div
+                  className="onec-check-chart"
+                  style={{
+                    gridTemplateColumns: `repeat(${analytics.series.length}, minmax(34px, 1fr))`,
+                  }}
+                >
+                  {analytics.series.map((item, index) => (
+                    <div
+                      className="onec-check-column"
+                      key={`${item.label}-${index}`}
+                    >
+                      <b>{item.checks || "—"}</b>
+                      <i>
+                        <span
+                          style={{
+                            height: `${Math.max(
+                              (item.checks / chartMaximum) * 100,
+                              item.checks ? 5 : 0,
+                            )}%`,
+                          }}
+                        />
+                      </i>
+                      <small>{item.label}</small>
+                      <em>
+                        {item.checks ? money.format(item.averageCheck) : "—"}
+                      </em>
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : (
               <p className="onec-no-data">

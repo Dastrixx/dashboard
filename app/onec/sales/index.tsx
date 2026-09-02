@@ -11,7 +11,7 @@ import {
   SalesSummary,
 } from "./overview";
 import { ProductRanking } from "./product-ranking";
-import type { AnalyticsPeriod } from "./types";
+import type { AnalyticsPeriod, CustomDateRange } from "./types";
 
 function LoadingState() {
   return (
@@ -55,8 +55,9 @@ function EmptyState() {
 
 export function OnecSales() {
   const [period, setPeriod] = useState<AnalyticsPeriod>("month");
+  const [customRange, setCustomRange] = useState<CustomDateRange>(null);
   const sales = useSalesData();
-  const checks = useCheckAnalytics(period);
+  const checks = useCheckAnalytics(period, customRange ?? undefined);
   const analytics = useMemo(
     () =>
       buildSalesAnalytics(
@@ -64,8 +65,9 @@ export function OnecSales() {
         sales.products,
         sales.categories,
         period,
+        customRange ?? undefined,
       ),
-    [period, sales.categories, sales.products, sales.reports],
+    [period, customRange, sales.categories, sales.products, sales.reports],
   );
 
   if (sales.loading) return <LoadingState />;
@@ -84,7 +86,12 @@ export function OnecSales() {
       <SalesSummary
         analytics={analytics}
         period={period}
-        onPeriodChange={setPeriod}
+        onPeriodChange={(p) => {
+          setPeriod(p);
+          if (p !== "custom") setCustomRange(null);
+        }}
+        customRange={customRange}
+        onCustomRangeChange={setCustomRange}
         referencesLoading={sales.referencesLoading}
         referenceError={sales.referenceError}
         truncated={sales.loadMeta?.truncated}
@@ -105,6 +112,8 @@ export function OnecSales() {
         reports={sales.reports}
         products={sales.products}
         categories={sales.categories}
+        defaultPeriod={period}
+        defaultCustomRange={customRange}
       />
 
       <AbcAnalysis

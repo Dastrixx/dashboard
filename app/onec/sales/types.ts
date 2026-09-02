@@ -1,4 +1,9 @@
-export type AnalyticsPeriod = "day" | "week" | "month";
+export type AnalyticsPeriod = "day" | "week" | "month" | "custom";
+
+export type CustomDateRange = {
+  from: string; // YYYY-MM-DD
+  to: string;   // YYYY-MM-DD
+} | null;
 
 export type OnecProductLine = {
   LineNumber: string;

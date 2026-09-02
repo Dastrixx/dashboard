@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { summarizeAbc } from "./analytics";
+import { downloadAbcCsv, summarizeAbc } from "./analytics";
 import { money, number, TABLE_PAGE_SIZE } from "./config";
 import type {
   AnalyticsPeriod,
@@ -87,6 +87,16 @@ export function AbcAnalysis({ rows, categories, period }: Props) {
               {visibleRows.length} позиций · по {TABLE_PAGE_SIZE} на странице
             </p>
           </div>
+          <button
+            type="button"
+            className="ranking-export"
+            disabled={!visibleRows.length}
+            onClick={() =>
+              downloadAbcCsv(`abc-analysis-${period}.csv`, visibleRows)
+            }
+          >
+            ↓ Выгрузить CSV
+          </button>
           <label className="select-control">
             <select
               value={category}
@@ -134,7 +144,17 @@ export function AbcAnalysis({ rows, categories, period }: Props) {
             </thead>
             <tbody>
               {tableRows.map((row) => (
-                <tr key={row.key}>
+                <tr
+                  key={row.key}
+                  style={{
+                    backgroundColor:
+                      row.abc === "A"
+                        ? "rgba(34,197,94,0.08)"
+                        : row.abc === "B"
+                          ? "rgba(249,115,22,0.08)"
+                          : "rgba(239,68,68,0.06)",
+                  }}
+                >
                   <td>
                     <code>{row.article}</code>
                   </td>

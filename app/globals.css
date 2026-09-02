@@ -1330,3 +1330,37 @@ body{overflow-x:hidden}
   .owner-chart-bars{height:170px}
   .owner-insight-list{grid-template-columns:1fr}
 }
+
+/* === Произвольный диапазон дат === */
+.custom-date-range{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 10px;background:var(--surface,#f5f7f6);border-radius:8px;border:1px solid var(--border,#e0e5e2)}
+.custom-date-range label{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted,#6b7a72)}
+.custom-date-range input[type="date"]{font-size:11px;padding:4px 7px;border:1px solid var(--border,#d8ddd9);border-radius:6px;background:var(--bg,#fff);color:var(--text,#1a1f1c);outline:none}
+.custom-date-range input[type="date"]:focus{border-color:var(--accent,#3b82f6)}
+.custom-range-apply{font-size:11px;padding:5px 12px;background:var(--accent,#3b82f6);color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;transition:opacity .15s}
+.custom-range-apply:disabled{opacity:.4;cursor:not-allowed}
+.custom-range-apply:hover:not(:disabled){opacity:.85}
+
+/* === Категории — drill-down === */
+.onec-category-item{margin-bottom:4px}
+.onec-category-row{display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:5px 0;border-radius:6px;user-select:none}
+.onec-category-row:hover{opacity:.8}
+.onec-category-row div{display:flex;align-items:baseline;gap:8px}
+.onec-category-row.open strong{color:var(--accent,#3b82f6)}
+.onec-category-arrow{font-size:10px;color:var(--muted,#6b7a72);margin-left:6px;flex-shrink:0}
+.onec-category-bar{display:block;height:5px;background:#e6ebe8;border-radius:4px;overflow:hidden;margin:2px 0 4px}
+.onec-category-bar b{display:block;height:100%;background:linear-gradient(90deg,var(--accent,#3b82f6),#60a5fa);border-radius:4px;transition:width .3s}
+.onec-category-detail{padding:8px 0 6px;overflow-x:auto}
+.onec-category-detail-table{width:100%;border-collapse:collapse;font-size:11px}
+.onec-category-detail-table th{text-align:left;padding:4px 8px;border-bottom:1px solid var(--border,#e0e5e2);color:var(--muted,#6b7a72);font-weight:600;white-space:nowrap}
+.onec-category-detail-table td{padding:5px 8px;border-bottom:1px solid var(--border-light,#f0f3f1)}
+.onec-category-detail-table td:first-child{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.onec-category-detail-table td:not(:first-child){white-space:nowrap;text-align:right}
+
+/* === График чеков — Y-ось === */
+.onec-check-chart-outer{display:flex;gap:0;align-items:stretch}
+.onec-check-y-axis{display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end;padding:20px 6px 24px 0;font-size:9px;color:var(--muted,#6b7a72);min-width:32px;flex-shrink:0;border-right:1px solid var(--border,#e0e5e2)}
+.onec-check-chart-outer .onec-check-chart{flex:1;min-width:0}
+
+/* === График выручки — подписи точек === */
+.onec-revenue-point-group .onec-revenue-point-label{pointer-events:none;font-weight:600}
+.onec-revenue-point-group:hover .onec-revenue-point{r:5}

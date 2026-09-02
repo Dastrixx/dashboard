@@ -11,6 +11,7 @@ export const PERIODS: Record<
   day: { label: "День", days: 1, caption: "за день" },
   week: { label: "Неделя", days: 7, caption: "за неделю" },
   month: { label: "Месяц", days: 30, caption: "за 30 дней" },
+  custom: { label: "Период", days: 0, caption: "за выбранный период" },
 };
 
 export const money = new Intl.NumberFormat("ru-RU", {

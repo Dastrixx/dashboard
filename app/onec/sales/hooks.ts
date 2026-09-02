@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { API_URL, PERIODS } from "./config";
+import { API_URL, DAY_MS, PERIODS } from "./config";
 import type {
   AnalyticsPeriod,
   CheckAnalytics,
   CheckAnalyticsResponse,
+  CustomDateRange,
   OnecCategoryReference,
   OnecProductReference,
   OnecRetailReport,
@@ -128,7 +129,7 @@ export function useSalesData() {
   };
 }
 
-export function useCheckAnalytics(period: AnalyticsPeriod) {
+export function useCheckAnalytics(period: AnalyticsPeriod, customRange?: CustomDateRange) {
   const [data, setData] = useState<CheckAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -140,8 +141,19 @@ export function useCheckAnalytics(period: AnalyticsPeriod) {
       try {
         setLoading(true);
         setError("");
+        const days =
+          period === "custom" && customRange
+            ? Math.max(
+                1,
+                Math.ceil(
+                  (new Date(customRange.to).getTime() -
+                    new Date(customRange.from).getTime()) /
+                    DAY_MS,
+                ) + 1,
+              )
+            : PERIODS[period].days;
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-check-analytics?days=${PERIODS[period].days}`,
+          `${API_URL}/api/dashboard/onec-check-analytics?days=${days}`,
           { signal: controller.signal, credentials: "include" },
         );
         const payload = (await response.json()) as CheckAnalyticsResponse;
@@ -170,7 +182,7 @@ export function useCheckAnalytics(period: AnalyticsPeriod) {
 
     load();
     return () => controller.abort();
-  }, [period]);
+  }, [period, customRange]);
 
   return { data, loading, error };
 }

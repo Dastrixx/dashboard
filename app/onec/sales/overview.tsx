@@ -1,33 +1,67 @@
+import { useState } from "react";
 import { makeChartPoints } from "./analytics";
 import { compactNumber, money, number, PERIODS } from "./config";
-import type { AnalyticsPeriod, SalesAnalytics } from "./types";
+import type {
+  AnalyticsPeriod,
+  CustomDateRange,
+  SalesAnalytics,
+} from "./types";
 import { dataFreshness } from "../shared";
 
 type SalesSummaryProps = {
   analytics: SalesAnalytics;
   period: AnalyticsPeriod;
   onPeriodChange: (period: AnalyticsPeriod) => void;
+  customRange: CustomDateRange;
+  onCustomRangeChange: (range: CustomDateRange) => void;
   referencesLoading: boolean;
   referenceError: string;
   truncated?: boolean;
 };
 
+// Сегодняшняя дата и 30 дней назад для дефолтов датапикера
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+function thirtyDaysAgoStr() {
+  const d = new Date();
+  d.setDate(d.getDate() - 30);
+  return d.toISOString().slice(0, 10);
+}
+
 export function SalesSummary({
   analytics,
   period,
   onPeriodChange,
+  customRange,
+  onCustomRangeChange,
   referencesLoading,
   referenceError,
   truncated,
 }: SalesSummaryProps) {
   const freshness = dataFreshness(analytics.latestTimestamp);
+  const [localFrom, setLocalFrom] = useState(
+    customRange?.from ?? thirtyDaysAgoStr(),
+  );
+  const [localTo, setLocalTo] = useState(customRange?.to ?? todayStr());
+
+  const periodCaption =
+    period === "custom" && customRange
+      ? `${customRange.from} — ${customRange.to}`
+      : PERIODS[period].label;
+
+  function applyCustomRange() {
+    if (localFrom && localTo && localFrom <= localTo) {
+      onCustomRangeChange({ from: localFrom, to: localTo });
+    }
+  }
 
   return (
     <>
       <section className="analytics-filter-bar">
         <div className="filter-copy">
           <span>Период анализа</span>
-          <strong>{PERIODS[period].label}</strong>
+          <strong>{periodCaption}</strong>
         </div>
         <div className="period-switch" role="group" aria-label="Период анализа">
           {(Object.keys(PERIODS) as AnalyticsPeriod[]).map((key) => (
@@ -40,6 +74,38 @@ export function SalesSummary({
             </button>
           ))}
         </div>
+
+        {period === "custom" && (
+          <div className="custom-date-range">
+            <label>
+              <span>С</span>
+              <input
+                type="date"
+                value={localFrom}
+                max={localTo}
+                onChange={(e) => setLocalFrom(e.target.value)}
+              />
+            </label>
+            <label>
+              <span>По</span>
+              <input
+                type="date"
+                value={localTo}
+                min={localFrom}
+                max={todayStr()}
+                onChange={(e) => setLocalTo(e.target.value)}
+              />
+            </label>
+            <button
+              className="custom-range-apply"
+              onClick={applyCustomRange}
+              disabled={!localFrom || !localTo || localFrom > localTo}
+            >
+              Применить
+            </button>
+          </div>
+        )}
+
         <span className="onec-period-note">
           {referencesLoading
             ? "Аналитика готова · загружаем названия товаров…"
@@ -118,6 +184,8 @@ export function RevenueAnalysis({
   analytics: SalesAnalytics;
   period: AnalyticsPeriod;
 }) {
+  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+
   const maximum = Math.max(
     ...analytics.currentBuckets.map((item) => item.value),
     ...analytics.previousBuckets.map((item) => item.value),
@@ -128,6 +196,15 @@ export function RevenueAnalysis({
   const chartWidth = 760;
   const chartHeight = 270;
   const chartPadding = 18;
+
+  // Шаг подписей X-оси: не больше 8 меток
+  const labelStep = Math.max(1, Math.ceil(currentPoints.length / 8));
+
+  // Топ-3 товара в категории для drill-down
+  const topProductsInCategory = (categoryLabel: string) =>
+    analytics.rows
+      .filter((row) => row.category === categoryLabel && row.revenue > 0)
+      .slice(0, 5);
 
   return (
     <section className="charts-grid onec-real-analysis-grid">
@@ -164,7 +241,9 @@ export function RevenueAnalysis({
             viewBox={`0 0 ${chartWidth} ${chartHeight}`}
             role="img"
             aria-label="Динамика выручки текущего и предыдущего периода"
+            style={{ overflow: "visible" }}
           >
+            {/* Горизонтальные линии сетки */}
             {[18, 96, 174, 252].map((y) => (
               <line
                 key={y}
@@ -175,6 +254,23 @@ export function RevenueAnalysis({
                 y2={y}
               />
             ))}
+
+            {/* Подписи X-оси — реальные даты из бакетов */}
+            {currentPoints.map((point, i) =>
+              i % labelStep === 0 ? (
+                <text
+                  key={`xl-${i}`}
+                  x={point.x}
+                  y={chartHeight + 14}
+                  textAnchor="middle"
+                  fontSize="10"
+                  fill="var(--text-secondary, #888)"
+                >
+                  {point.label}
+                </text>
+              ) : null,
+            )}
+
             <polyline
               className="onec-revenue-line previous"
               points={previousPoints
@@ -187,49 +283,110 @@ export function RevenueAnalysis({
                 .map((point) => `${point.x},${point.y}`)
                 .join(" ")}
             />
-            {currentPoints.map((point) => (
-              <circle
-                key={point.label}
-                className="onec-revenue-point"
-                cx={point.x}
-                cy={point.y}
-                r="3"
-              >
+
+            {/* Точки текущего периода с подписями сумм */}
+            {currentPoints.map((point, i) => (
+              <g key={point.label} className="onec-revenue-point-group">
+                <circle
+                  className="onec-revenue-point"
+                  cx={point.x}
+                  cy={point.y}
+                  r="4"
+                />
+                {(point.value > 0 && i % labelStep === 0) && (
+                  <text
+                    x={point.x}
+                    y={point.y - 9}
+                    textAnchor="middle"
+                    fontSize="9"
+                    className="onec-revenue-point-label"
+                    fill="var(--accent, #3b82f6)"
+                  >
+                    {compactNumber.format(point.value)}
+                  </text>
+                )}
                 <title>
                   {point.label}: {money.format(point.value)}
                 </title>
-              </circle>
+              </g>
             ))}
           </svg>
-          <div className="onec-chart-x-axis" aria-hidden="true">
-            <span>Начало</span>
-            <span>Середина</span>
-            <span>Сегодня</span>
-          </div>
         </div>
       </article>
 
+      {/* Продажи по категориям с раскрытием */}
       <article className="panel onec-category-panel">
         <div className="panel-head">
           <div>
             <h2>Продажи по категориям</h2>
-            <p>Структура выручки {PERIODS[period].caption}</p>
+            <p>Структура выручки {PERIODS[period].caption} · нажми категорию для детализации</p>
           </div>
         </div>
         <div className="onec-category-list">
-          {analytics.categoryRows.map((item) => (
-            <div key={item.label}>
-              <div>
-                <strong>{item.label}</strong>
-                <span>
-                  {item.share.toFixed(1)}% · {money.format(item.value)}
-                </span>
+          {analytics.categoryRows.map((item) => {
+            const isOpen = expandedCategory === item.label;
+            const products = isOpen ? topProductsInCategory(item.label) : [];
+            return (
+              <div key={item.label} className="onec-category-item">
+                <div
+                  className={`onec-category-row${isOpen ? " open" : ""}`}
+                  onClick={() =>
+                    setExpandedCategory(isOpen ? null : item.label)
+                  }
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) =>
+                    e.key === "Enter" &&
+                    setExpandedCategory(isOpen ? null : item.label)
+                  }
+                >
+                  <div>
+                    <strong>{item.label}</strong>
+                    <span>
+                      {item.share.toFixed(1)}% · {money.format(item.value)}
+                    </span>
+                  </div>
+                  <span className="onec-category-arrow">{isOpen ? "▲" : "▼"}</span>
+                </div>
+                <i className="onec-category-bar">
+                  <b style={{ width: `${item.share}%` }} />
+                </i>
+                {isOpen && (
+                  <div className="onec-category-detail">
+                    {products.length > 0 ? (
+                      <table className="onec-category-detail-table">
+                        <thead>
+                          <tr>
+                            <th>Товар</th>
+                            <th>Выручка</th>
+                            <th>Продано</th>
+                            <th>Доля</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {products.map((row) => (
+                            <tr key={row.key}>
+                              <td>
+                                <span className={`abc-badge ${row.abc.toLowerCase()}`}>
+                                  {row.abc}
+                                </span>{" "}
+                                {row.name}
+                              </td>
+                              <td>{money.format(row.revenue)}</td>
+                              <td>{number.format(row.sold)} ед.</td>
+                              <td>{row.share.toFixed(1)}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <p className="onec-no-data">Нет позиций в этой категории</p>
+                    )}
+                  </div>
+                )}
               </div>
-              <i>
-                <b style={{ width: `${item.share}%` }} />
-              </i>
-            </div>
-          ))}
+            );
+          })}
           {!analytics.categoryRows.length && (
             <p className="onec-no-data">Нет категорий за выбранный период</p>
           )}
