@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { makeChartPoints } from "./analytics";
 import { compactNumber, money, number, PERIODS } from "./config";
 import type {
@@ -185,6 +185,8 @@ export function RevenueAnalysis({
   period: AnalyticsPeriod;
 }) {
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
 
   const maximum = Math.max(
     ...analytics.currentBuckets.map((item) => item.value),
@@ -197,10 +199,12 @@ export function RevenueAnalysis({
   const chartHeight = 270;
   const chartPadding = 18;
 
-  // Шаг подписей X-оси: не больше 8 меток
-  const labelStep = Math.max(1, Math.ceil(currentPoints.length / 8));
+  // Шаг X-оси подписей дат: не больше 8 меток (чтобы даты не слипались)
+  const xLabelStep = Math.max(1, Math.ceil(currentPoints.length / 8));
+  // Подписи значений: вращаем при большом количестве точек
+  const rotateTip = currentPoints.length > 14;
 
-  // Топ-3 товара в категории для drill-down
+  // Топ-5 товаров в категории для drill-down
   const topProductsInCategory = (categoryLabel: string) =>
     analytics.rows
       .filter((row) => row.category === categoryLabel && row.revenue > 0)
@@ -238,10 +242,12 @@ export function RevenueAnalysis({
             <span>0</span>
           </div>
           <svg
-            viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+            ref={svgRef}
+            viewBox={`0 0 ${chartWidth} ${chartHeight + 30}`}
             role="img"
             aria-label="Динамика выручки текущего и предыдущего периода"
             style={{ overflow: "visible" }}
+            onMouseLeave={() => setHoveredIdx(null)}
           >
             {/* Горизонтальные линии сетки */}
             {[18, 96, 174, 252].map((y) => (
@@ -255,9 +261,9 @@ export function RevenueAnalysis({
               />
             ))}
 
-            {/* Подписи X-оси — реальные даты из бакетов */}
+            {/* Подписи дат X-оси — каждые N точек */}
             {currentPoints.map((point, i) =>
-              i % labelStep === 0 ? (
+              i % xLabelStep === 0 ? (
                 <text
                   key={`xl-${i}`}
                   x={point.x}
@@ -274,42 +280,103 @@ export function RevenueAnalysis({
             <polyline
               className="onec-revenue-line previous"
               points={previousPoints
-                .map((point) => `${point.x},${point.y}`)
+                .map((p) => `${p.x},${p.y}`)
                 .join(" ")}
             />
             <polyline
               className="onec-revenue-line current"
               points={currentPoints
-                .map((point) => `${point.x},${point.y}`)
+                .map((p) => `${p.x},${p.y}`)
                 .join(" ")}
             />
 
-            {/* Точки текущего периода с подписями сумм */}
-            {currentPoints.map((point, i) => (
-              <g key={point.label} className="onec-revenue-point-group">
-                <circle
-                  className="onec-revenue-point"
-                  cx={point.x}
-                  cy={point.y}
-                  r="4"
-                />
-                {(point.value > 0 && i % labelStep === 0) && (
+            {/* Точки с подписями суммы — ВСЕ точки */}
+            {currentPoints.map((point, i) => {
+              const isHovered = hoveredIdx === i;
+              const labelAnchor = rotateTip ? "end" : "middle";
+              const labelX = point.x + (rotateTip ? 4 : 0);
+              const labelY = point.y - (rotateTip ? 6 : 11);
+              const rotate = rotateTip
+                ? `rotate(-45 ${labelX} ${labelY})`
+                : undefined;
+
+              return (
+                <g
+                  key={`pt-${i}`}
+                  style={{ cursor: "default" }}
+                  onMouseEnter={() => setHoveredIdx(i)}
+                >
+                  {/* Зона захвата hover шире самой точки */}
+                  <circle
+                    cx={point.x}
+                    cy={point.y}
+                    r="10"
+                    fill="transparent"
+                  />
+                  <circle
+                    className="onec-revenue-point"
+                    cx={point.x}
+                    cy={point.y}
+                    r={isHovered ? 5 : 3.5}
+                    style={{ transition: "r 0.1s" }}
+                  />
+                  {/* Подпись суммы у каждой точки */}
+                  {point.value > 0 && (
+                    <text
+                      x={labelX}
+                      y={labelY}
+                      textAnchor={labelAnchor}
+                      fontSize="8"
+                      fontWeight={isHovered ? "700" : "500"}
+                      fill={isHovered ? "var(--accent, #3b82f6)" : "var(--text-secondary, #888)"}
+                      transform={rotate}
+                      style={{ pointerEvents: "none" }}
+                    >
+                      {compactNumber.format(point.value)}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+
+            {/* Hover-подсказка с полной суммой */}
+            {hoveredIdx !== null && currentPoints[hoveredIdx] && (() => {
+              const pt = currentPoints[hoveredIdx];
+              const tooltipW = 148;
+              const tooltipH = 40;
+              const tx = Math.max(
+                chartPadding,
+                Math.min(pt.x - tooltipW / 2, chartWidth - chartPadding - tooltipW),
+              );
+              const ty = Math.max(4, pt.y - tooltipH - 12);
+              return (
+                <g style={{ pointerEvents: "none" }}>
+                  <rect
+                    x={tx} y={ty}
+                    width={tooltipW} height={tooltipH}
+                    rx="7"
+                    fill="rgba(15,23,42,0.82)"
+                  />
                   <text
-                    x={point.x}
-                    y={point.y - 9}
+                    x={tx + tooltipW / 2} y={ty + 14}
                     textAnchor="middle"
-                    fontSize="9"
-                    className="onec-revenue-point-label"
-                    fill="var(--accent, #3b82f6)"
+                    fontSize="10"
+                    fill="rgba(255,255,255,0.7)"
                   >
-                    {compactNumber.format(point.value)}
+                    {pt.label}
                   </text>
-                )}
-                <title>
-                  {point.label}: {money.format(point.value)}
-                </title>
-              </g>
-            ))}
+                  <text
+                    x={tx + tooltipW / 2} y={ty + 30}
+                    textAnchor="middle"
+                    fontSize="12"
+                    fontWeight="700"
+                    fill="#7dd3fc"
+                  >
+                    {money.format(pt.value)}
+                  </text>
+                </g>
+              );
+            })()}
           </svg>
         </div>
       </article>
