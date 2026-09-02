@@ -1364,3 +1364,8 @@ body{overflow-x:hidden}
 /* === График выручки — подписи точек === */
 .onec-revenue-point-group .onec-revenue-point-label{pointer-events:none;font-weight:600}
 .onec-revenue-point-group:hover .onec-revenue-point{r:5}
+
+/* === Подкатегории в «Продажах по категориям» === */
+.onec-sub-share-bar{display:inline-flex;align-items:center;gap:6px;width:100%}
+.onec-sub-share-bar b{display:inline-block;height:5px;min-width:2px;background:linear-gradient(90deg,var(--accent,#3b82f6),#60a5fa);border-radius:3px;transition:width .3s}
+.onec-sub-share-bar em{font-style:normal;font-size:10px;white-space:nowrap;color:var(--muted,#6b7a72)}

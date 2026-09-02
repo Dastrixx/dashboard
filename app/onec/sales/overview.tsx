@@ -204,11 +204,31 @@ export function RevenueAnalysis({
   // Подписи значений: вращаем при большом количестве точек
   const rotateTip = currentPoints.length > 14;
 
-  // Топ-5 товаров в категории для drill-down
-  const topProductsInCategory = (categoryLabel: string) =>
-    analytics.rows
-      .filter((row) => row.category === categoryLabel && row.revenue > 0)
-      .slice(0, 5);
+  // Подкатегории (ВидНоменклатуры) внутри категории
+  const subcategoriesInCategory = (categoryLabel: string) => {
+    const rows = analytics.rows.filter(
+      (row) => row.category === categoryLabel && row.revenue > 0,
+    );
+    const totalCatRevenue = rows.reduce((s, r) => s + r.revenue, 0) || 1;
+    const subMap = new Map<string, { revenue: number; sold: number; skuCount: number }>();
+    rows.forEach((r) => {
+      const sub = r.subcategory || "Без подкатегории";
+      const cur = subMap.get(sub) ?? { revenue: 0, sold: 0, skuCount: 0 };
+      cur.revenue += r.revenue;
+      cur.sold += r.sold;
+      cur.skuCount += 1;
+      subMap.set(sub, cur);
+    });
+    return [...subMap.entries()]
+      .map(([name, data]) => ({
+        name,
+        revenue: data.revenue,
+        sold: data.sold,
+        skuCount: data.skuCount,
+        share: (data.revenue / totalCatRevenue) * 100,
+      }))
+      .sort((a, b) => b.revenue - a.revenue);
+  };
 
   return (
     <section className="charts-grid onec-real-analysis-grid">
@@ -392,7 +412,6 @@ export function RevenueAnalysis({
         <div className="onec-category-list">
           {analytics.categoryRows.map((item) => {
             const isOpen = expandedCategory === item.label;
-            const products = isOpen ? topProductsInCategory(item.label) : [];
             return (
               <div key={item.label} className="onec-category-item">
                 <div
@@ -418,39 +437,44 @@ export function RevenueAnalysis({
                 <i className="onec-category-bar">
                   <b style={{ width: `${item.share}%` }} />
                 </i>
-                {isOpen && (
-                  <div className="onec-category-detail">
-                    {products.length > 0 ? (
-                      <table className="onec-category-detail-table">
-                        <thead>
-                          <tr>
-                            <th>Товар</th>
-                            <th>Выручка</th>
-                            <th>Продано</th>
-                            <th>Доля</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {products.map((row) => (
-                            <tr key={row.key}>
-                              <td>
-                                <span className={`abc-badge ${row.abc.toLowerCase()}`}>
-                                  {row.abc}
-                                </span>{" "}
-                                {row.name}
-                              </td>
-                              <td>{money.format(row.revenue)}</td>
-                              <td>{number.format(row.sold)} ед.</td>
-                              <td>{row.share.toFixed(1)}%</td>
+                {isOpen && (() => {
+                  const subs = subcategoriesInCategory(item.label);
+                  return (
+                    <div className="onec-category-detail">
+                      {subs.length > 0 ? (
+                        <table className="onec-category-detail-table">
+                          <thead>
+                            <tr>
+                              <th>Подкатегория</th>
+                              <th>Выручка</th>
+                              <th>Продано</th>
+                              <th>SKU</th>
+                              <th>Доля</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    ) : (
-                      <p className="onec-no-data">Нет позиций в этой категории</p>
-                    )}
-                  </div>
-                )}
+                          </thead>
+                          <tbody>
+                            {subs.map((sub) => (
+                              <tr key={sub.name}>
+                                <td><strong>{sub.name}</strong></td>
+                                <td>{money.format(sub.revenue)}</td>
+                                <td>{number.format(sub.sold)} ед.</td>
+                                <td>{sub.skuCount}</td>
+                                <td>
+                                  <span className="onec-sub-share-bar">
+                                    <b style={{ width: `${sub.share}%` }} />
+                                    <em>{sub.share.toFixed(1)}%</em>
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <p className="onec-no-data">Нет подкатегорий</p>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}

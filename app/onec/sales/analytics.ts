@@ -91,6 +91,7 @@ export function buildProductRows(
           product?.BusinessCategory ||
           categoryByKey.get(product?.BusinessCategory_Key || "") ||
           "Не классифицировано",
+        subcategory: product?.ВидНоменклатуры || "Без подкатегории",
         revenue: value.revenue,
         sold: value.sold,
         share: 0,

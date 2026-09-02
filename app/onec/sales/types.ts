@@ -123,6 +123,7 @@ export type ProductRow = {
   article: string;
   name: string;
   category: string;
+  subcategory: string;
   revenue: number;
   sold: number;
   share: number;
