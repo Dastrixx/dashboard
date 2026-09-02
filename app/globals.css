@@ -1150,6 +1150,7 @@ body{overflow-x:hidden}
 .team-leader-panel>p{margin:6px 0 22px;color:#b8d3c8;font-size:10px}
 .team-leader-panel>b{font-size:20px}.team-leader-panel>small{margin-top:6px;color:#b8d3c8;font-size:9px}
 .onec-team-table-panel{padding:0;overflow:hidden}
+.team-actual-revenue{display:block;color:var(--muted);font-size:9px;margin-top:2px}
 .onec-team-table{min-width:1040px}
 .onec-team-table td:nth-child(2) strong{font-size:10px}
 .team-rank-place{display:grid;width:28px;height:28px;place-items:center;border-radius:50%;background:#edf5f1;color:var(--green2);font-size:9px;font-weight:850}
