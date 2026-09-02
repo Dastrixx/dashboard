@@ -6,7 +6,9 @@ import type { MarginAnalyticsResponse } from "./sales/types";
 import type { SellerPayload } from "./types";
 
 type Period = 1 | 7 | 30;
-const periods: Array<[Period, string]> = [[1, "День"], [7, "Неделя"], [30, "Месяц"]];
+type SalesChannel = "all" | "online" | "offline";
+const periods: Array<[Period, string]> = [[1, "Сегодня"], [7, "Неделя"], [30, "Месяц"]];
+const channels: Array<[SalesChannel, string]> = [["all", "Все"], ["online", "Онлайн"], ["offline", "Офлайн"]];
 
 export function OnecTeam() {
   const [period, setPeriod] = useState<Period>(30);
@@ -14,6 +16,7 @@ export function OnecTeam() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [storeKey, setStoreKey] = useState("all");
+  const [channel, setChannel] = useState<SalesChannel>("all");
   const [selectedKey, setSelectedKey] = useState("");
   const [plan, setPlan] = useState(0);
   const [planInput, setPlanInput] = useState("");
@@ -29,7 +32,7 @@ export function OnecTeam() {
       try {
         setPlanLoading(true);
         setPlanMessage("");
-        const response = await fetch(`${API_URL}/api/dashboard/team-plan?storeKey=${encodeURIComponent(storeKey)}&period=${period}`, {
+        const response = await fetch(`${API_URL}/api/dashboard/team-plan?storeKey=${encodeURIComponent(storeKey)}&period=${period}&channel=${channel}`, {
           signal: controller.signal, credentials: "include", cache: "no-store",
         });
         const data = (await response.json()) as { item?: { amount?: number }; message?: string };
@@ -46,7 +49,7 @@ export function OnecTeam() {
       }
     })();
     return () => controller.abort();
-  }, [period, storeKey]);
+  }, [channel, period, storeKey]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -56,8 +59,8 @@ export function OnecTeam() {
         setError("");
         setMarginError("");
         const [sellersResponse, marginResponse] = await Promise.all([
-          fetch(`${API_URL}/api/dashboard/onec-consultants?days=${period}`, { signal: controller.signal, credentials: "include", cache: "no-store" }),
-          fetch(`${API_URL}/api/dashboard/onec-margin?days=${period}&storeKey=${encodeURIComponent(storeKey)}`, { signal: controller.signal, credentials: "include", cache: "no-store" }),
+          fetch(`${API_URL}/api/dashboard/onec-consultants?days=${period}&channel=${channel}`, { signal: controller.signal, credentials: "include", cache: "no-store" }),
+          fetch(`${API_URL}/api/dashboard/onec-margin?days=${period}&storeKey=${encodeURIComponent(storeKey)}&channel=${channel}`, { signal: controller.signal, credentials: "include", cache: "no-store" }),
         ]);
         const [sellersData, marginData] = (await Promise.all([sellersResponse.json(), marginResponse.json()])) as [SellerPayload, MarginAnalyticsResponse];
         if (!sellersResponse.ok) throw new Error(sellersData.message || `Ошибка HTTP ${sellersResponse.status}`);
@@ -76,7 +79,7 @@ export function OnecTeam() {
       }
     })();
     return () => controller.abort();
-  }, [period, storeKey]);
+  }, [channel, period, storeKey]);
 
   const view = useMemo(() => {
     const people = new Map((payload.references?.sellers || []).map((item) => [item.Ref_Key, item]));
@@ -131,7 +134,7 @@ export function OnecTeam() {
     try {
       setPlanSaving(true); setPlanMessage("");
       const response = await fetch(`${API_URL}/api/dashboard/team-plan`, {
-        method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ storeKey, period, amount }),
+        method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ storeKey, period, channel, amount }),
       });
       const data = (await response.json()) as { item?: { amount?: number }; message?: string };
       if (!response.ok) throw new Error(data.message || `Ошибка HTTP ${response.status}`);
@@ -143,7 +146,7 @@ export function OnecTeam() {
   };
 
   if (loading || error) return <DataState loading={loading} error={error} empty={false} />;
-  if (!(payload.items || []).length) {
+  if (channel === "all" && !(payload.items || []).length) {
     const diagnostics = payload.meta?.diagnostics;
     return <MissingSource title="Продажи продавцов" description="В чеках 1С не удалось определить консультанта" source={`Проверено чеков: ${diagnostics?.scannedChecks || 0}; строк с консультантом: ${diagnostics?.checkLinesWithConsultant || 0}.`} />;
   }
@@ -153,12 +156,13 @@ export function OnecTeam() {
       <div><span className="team-plan-kicker">Команда продаж</span><h2>Продавцы</h2><p>Рейтинг консультантов, динамика продаж и выполнение плана команды</p></div>
       <div className="team-filter-groups">
         <label className="team-store-select"><span>Филиал</span><select value={storeKey} onChange={(event) => setStoreKey(event.target.value)}><option value="all">Все филиалы</option>{view.stores.map((item) => <option key={item.Ref_Key} value={item.Ref_Key}>{item.Description || item.Code || "Филиал без названия"}</option>)}</select></label>
-        <div className="team-segment">{periods.map(([value, label]) => <button className={period === value ? "active" : ""} key={value} onClick={() => setPeriod(value)} type="button">{label}</button>)}</div>
+        <div className="team-segment" role="group" aria-label="Период плана команды">{periods.map(([value, label]) => <button className={period === value ? "active" : ""} key={value} onClick={() => setPeriod(value)} type="button">{label}</button>)}</div>
+        <div className="team-segment channel-team" role="group" aria-label="Канал продаж">{channels.map(([value, label]) => <button className={channel === value ? "active" : ""} key={value} onClick={() => setChannel(value)} type="button">{label}</button>)}</div>
       </div>
     </section>
 
     <section className="team-kpi-grid">
-      <Kpi label="Продажи команды" value={money.format(view.revenue)} note={`${number.format(view.quantity)} проданных единиц`} />
+      <Kpi label="Продажи команды" value={money.format(view.revenue)} note={`${number.format(view.quantity)} проданных единиц · ${channelLabel(channel)}`} />
       <Kpi label="Чеков команды" value={view.checks ? number.format(view.checks) : "—"} note="чеки с указанным консультантом" />
       <Kpi label="Средний чек команды" value={view.checks ? money.format(view.averageCheck) : "—"} note="продажи / количество чеков" />
       <article className="kpi-card"><div className="kpi-top"><span>Выполнение плана</span></div><strong>{plan ? `${number.format(planPercent)}%` : "Не задан"}</strong><div className="progress"><i style={{ width: `${Math.min(planPercent, 100)}%` }} /></div></article>
@@ -168,11 +172,11 @@ export function OnecTeam() {
     <section className="team-dashboard-grid">
       <article className="panel team-ranking-panel">
         <div className="panel-head"><div><h2>Рейтинг продавцов</h2><p>Только консультанты, без кассиров</p></div></div>
-        <div className="team-ranking-list">{view.rows.map((item) => <button className={`team-rank-button ${selected?.key === item.key ? "active" : ""}`} key={item.key} onClick={() => setSelectedKey(item.key)} type="button"><span className="team-rank-place">{item.rank}</span><span className="team-rank-person"><strong>{item.name}</strong><small>{item.store}</small></span><span className="team-rank-result"><strong>{money.format(item.revenue)}</strong><small>{plan ? `${number.format(item.revenue / plan * 100)}% плана` : `${number.format(item.share)}% команды`}</small></span></button>)}</div>
+        <div className="team-ranking-list">{view.rows.length ? view.rows.map((item) => <button className={`team-rank-button ${selected?.key === item.key ? "active" : ""}`} key={item.key} onClick={() => setSelectedKey(item.key)} type="button"><span className="team-rank-place">{item.rank}</span><span className="team-rank-person"><strong>{item.name}</strong><small>{item.store}</small></span><span className="team-rank-result"><strong>{money.format(item.revenue)}</strong><small>{plan ? `${number.format(item.revenue / plan * 100)}% плана` : `${number.format(item.share)}% команды`}</small></span></button>) : <div className="team-channel-empty">За выбранный период продаж в канале «{channelLabel(channel)}» нет.</div>}</div>
       </article>
 
       <article className="panel seller-detail-panel">
-        <div className="seller-detail-head"><div><span className="team-plan-kicker">Аналитика продавца</span><h2>{selected?.name}</h2><p>{selected?.store}</p></div><label className="seller-picker"><span>Выбрать продавца</span><select value={selected?.key || ""} onChange={(event) => setSelectedKey(event.target.value)}>{view.rows.map((item) => <option key={item.key} value={item.key}>{item.name}</option>)}</select></label></div>
+        <div className="seller-detail-head"><div><span className="team-plan-kicker">Аналитика продавца</span><h2>{selected?.name || "Нет продаж"}</h2><p>{selected?.store || channelLabel(channel)}</p></div><label className="seller-picker"><span>Выбрать продавца</span><select disabled={!view.rows.length} value={selected?.key || ""} onChange={(event) => setSelectedKey(event.target.value)}>{view.rows.map((item) => <option key={item.key} value={item.key}>{item.name}</option>)}</select></label></div>
         <div className="seller-mini-kpis"><Mini label="Выручка" value={money.format(selected?.revenue || 0)} /><Mini label="Средний чек" value={selected?.checks ? money.format(selected.revenue / selected.checks) : "—"} /><Mini label="Скидки" value={money.format(selected?.discounts || 0)} /><Mini label="Место" value={`#${selected?.rank || "—"}`} /></div>
         <div className="seller-chart-head"><div><h3>Динамика продаж</h3><p>Продажи выбранного продавца за выбранный период</p></div><span className="legend-dot">Фактические продажи</span></div>
         {selected && Object.keys(selected.daily).length ? <div className="seller-sales-chart"><svg aria-label="Динамика продаж продавца" role="img" viewBox="0 0 720 220">{[30, 70, 110, 150, 190].map((y) => <line className="gridline" key={y} x1="10" x2="710" y1={y} y2={y} />)}<defs><linearGradient id="sellerArea" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#0b7a55" stopOpacity=".24" /><stop offset="100%" stopColor="#0b7a55" stopOpacity="0" /></linearGradient></defs><path d={chart.area} fill="url(#sellerArea)" /><polyline fill="none" points={chart.line} stroke="#0b7a55" strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" />{chart.points.map((point) => <g key={point.date}><circle cx={point.x} cy={point.y} fill="#fff" r="4" stroke="#0b7a55" strokeWidth="2"><title>{`${formatChartDate(point.date)} — ${money.format(point.value)}`}</title></circle><text className="seller-chart-label" textAnchor="middle" x={point.x} y="211">{formatChartDate(point.date)}</text></g>)}</svg></div> : <div className="seller-chart-empty">График появится, когда в данных 1С заполнен продавец товарной строки.</div>}
@@ -180,7 +184,7 @@ export function OnecTeam() {
     </section>
 
     <section className="panel team-plan-panel">
-      <div className="team-plan-panel-head"><div><span className="team-plan-kicker">План продаж команды</span><h2>{storeKey === "all" ? "Общий план команды" : view.stores.find((item) => item.Ref_Key === storeKey)?.Description || "План филиала"}</h2><p>Факт складывается только из личных продаж консультантов.</p></div><div className="team-plan-editor compact"><label><span>Сумма плана, KGS</span><input min="0" onChange={(event) => setPlanInput(event.target.value)} placeholder="1 500 000" step="1000" type="number" value={planInput} /></label><button disabled={planSaving || planLoading} onClick={savePlan} type="button">{planSaving ? "Сохраняем…" : "Сохранить"}</button></div></div>
+      <div className="team-plan-panel-head"><div><span className="team-plan-kicker">План продаж команды · {channelLabel(channel)}</span><h2>{storeKey === "all" ? "Общий план команды" : view.stores.find((item) => item.Ref_Key === storeKey)?.Description || "План филиала"}</h2><p>Факт складывается только из личных продаж консультантов выбранного канала.</p></div><div className="team-plan-editor compact"><label><span>Сумма плана, KGS</span><input min="0" onChange={(event) => setPlanInput(event.target.value)} placeholder="1 500 000" step="1000" type="number" value={planInput} /></label><button disabled={planSaving || planLoading} onClick={savePlan} type="button">{planSaving ? "Сохраняем…" : "Сохранить"}</button></div></div>
       {planMessage && <p className="team-plan-message">{planMessage}</p>}
       <div className="team-plan-summary-grid"><Mini label="План" value={plan ? money.format(plan) : "Не задан"} /><Mini label="Факт" value={money.format(view.revenue)} /><Mini label="Выполнение" value={plan ? `${number.format(planPercent)}%` : "—"} /><Mini label="Осталось" value={plan ? money.format(Math.max(plan - view.revenue, 0)) : "—"} /></div>
       <div className="team-plan-progress large"><i style={{ width: `${Math.min(planPercent, 100)}%` }} /></div>
@@ -202,4 +206,8 @@ function Mini({ label, value }: { label: string; value: string }) {
 function formatChartDate(value: string) {
   const [, month = "", day = ""] = value.split("-");
   return `${day}.${month}`;
+}
+
+function channelLabel(channel: SalesChannel) {
+  return channels.find(([value]) => value === channel)?.[1] || "Все";
 }

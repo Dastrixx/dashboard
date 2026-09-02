@@ -129,6 +129,7 @@ export type SellerPayload = {
   };
   meta?: {
     days?: number;
+    channel?: "all" | "online" | "offline";
     loaded?: number;
     latestDate?: string | null;
     periodStart?: string | null;
