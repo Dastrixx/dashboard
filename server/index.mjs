@@ -580,7 +580,15 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     let latestDate = null;
     let source = "Document_ЧекККМ.Товары.Продавец_Key";
 
-    const addLine = ({ storeKey, line, sign, documentSellerKey, origin }) => {
+    const addLine = ({
+      storeKey,
+      line,
+      sign,
+      documentSellerKey,
+      origin,
+      documentKey,
+      documentDate,
+    }) => {
       if (sign > 0) salesLines += 1;
       else returnLines += 1;
 
@@ -603,14 +611,33 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
         СтоимостьБезСкидокTurnover: 0,
         СтрокПродаж: 0,
         СтрокВозвратов: 0,
+        СуммаСкидок: 0,
+        ПочасовыеПродажи: {},
+        _checkKeys: new Set(),
       };
       const quantity = Number(line.Количество || 0);
       const amount = Number(line.Сумма || 0);
       const fullPrice = Number(line.Цена || 0) * quantity;
+      const discount =
+        Number(line.СуммаАвтоматическойСкидки || 0) +
+        Number(line.СуммаРучнойСкидки || 0) +
+        Number(line.СуммаСкидкиОплатыБонусом || 0);
 
       current.КоличествоTurnover += sign * quantity;
       current.СтоимостьTurnover += sign * amount;
       current.СтоимостьБезСкидокTurnover += sign * Math.max(fullPrice, amount);
+      current.СуммаСкидок += sign * Math.max(discount, fullPrice - amount, 0);
+      if (origin === "check" && sign > 0 && documentKey) {
+        current._checkKeys.add(documentKey);
+      }
+      if (origin === "check" && documentDate) {
+        const hourMatch = String(documentDate).match(/T(\d{2}):/);
+        const hour = hourMatch ? Number(hourMatch[1]) : Number.NaN;
+        if (Number.isInteger(hour) && hour >= 0 && hour <= 23) {
+          current.ПочасовыеПродажи[hour] =
+            Number(current.ПочасовыеПродажи[hour] || 0) + sign * amount;
+        }
+      }
       if (sign > 0) current.СтрокПродаж += 1;
       else current.СтрокВозвратов += 1;
       grouped.set(key, current);
@@ -675,6 +702,8 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
             sign,
             documentSellerKey: check.Продавец_Key,
             origin: "check",
+            documentKey: check.Ref_Key,
+            documentDate: check.Date,
           });
         });
       });
@@ -714,7 +743,11 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       });
     }
 
-    const items = [...grouped.values()].sort(
+    const items = [...grouped.values()].map(({ _checkKeys, ...item }) => ({
+      ...item,
+      Чеков: _checkKeys.size,
+      ИдентификаторыЧеков: [..._checkKeys],
+    })).sort(
       (left, right) => right.СтоимостьTurnover - left.СтоимостьTurnover,
     );
     const consultants = await loadReferencesByKeysBatched(
@@ -1253,22 +1286,26 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
   }
 });
 
-async function loadMarginPeriod(startDate, endDate) {
+async function loadMarginPeriod(startDate, endDate, storeKey = "all") {
   const rows = await onecTurnovers("AccumulationRegister_Продажи", {
     startPeriod: startDate,
     endPeriod: endDate,
-    dimensions: "",
-    top: 10,
+    dimensions: storeKey === "all" ? "" : "Магазин",
+    top: storeKey === "all" ? 10 : 500,
     select: [
+      ...(storeKey === "all" ? [] : ["Магазин_Key"]),
       "СтоимостьTurnover",
       "ор_СебестоимостьTurnover",
     ].join(","),
   });
-  const revenue = rows.reduce(
+  const scopedRows = storeKey === "all"
+    ? rows
+    : rows.filter((item) => item.Магазин_Key === storeKey);
+  const revenue = scopedRows.reduce(
     (sum, item) => sum + Number(item.СтоимостьTurnover || 0),
     0,
   );
-  const cost = rows.reduce(
+  const cost = scopedRows.reduce(
     (sum, item) => sum + Number(item.ор_СебестоимостьTurnover || 0),
     0,
   );
@@ -1289,6 +1326,9 @@ app.get("/api/dashboard/onec-margin", async (request, response) => {
     const days = [1, 7, 30, 90].includes(Number(request.query.days))
       ? Number(request.query.days)
       : 30;
+    const storeKey = typeof request.query.storeKey === "string"
+      ? request.query.storeKey
+      : "all";
 
     let currentFrom;
     let currentTo;
@@ -1325,8 +1365,8 @@ app.get("/api/dashboard/onec-margin", async (request, response) => {
     const previousFrom = new Date(previousTo.getTime() - duration);
 
     const [current, previous] = await Promise.all([
-      loadMarginPeriod(currentFrom, currentTo),
-      loadMarginPeriod(previousFrom, previousTo),
+      loadMarginPeriod(currentFrom, currentTo, storeKey),
+      loadMarginPeriod(previousFrom, previousTo, storeKey),
     ]);
 
     response.json({
@@ -1335,6 +1375,7 @@ app.get("/api/dashboard/onec-margin", async (request, response) => {
         source: "AccumulationRegister_Продажи/Turnovers",
         revenueField: "СтоимостьTurnover",
         costField: "ор_СебестоимостьTurnover",
+        storeKey,
         periodStart: currentFrom.toISOString(),
         periodEnd: currentTo.toISOString(),
       },

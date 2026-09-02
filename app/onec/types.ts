@@ -108,6 +108,10 @@ export type SellerTurnover = {
   СтоимостьБезСкидокTurnover?: number;
   СтрокПродаж?: number;
   СтрокВозвратов?: number;
+  Чеков?: number;
+  ИдентификаторыЧеков?: string[];
+  СуммаСкидок?: number;
+  ПочасовыеПродажи?: Record<string, number>;
 };
 
 export type SellerReference = {
