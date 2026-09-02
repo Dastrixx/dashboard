@@ -518,6 +518,7 @@ body{overflow-x:hidden}
 .team-segment{display:flex;gap:3px;padding:4px;border:1px solid #d6e4dd;border-radius:11px;background:rgba(255,255,255,.76)}
 .team-segment button{min-height:32px;padding:0 12px;border:0;border-radius:8px;background:transparent;color:#65736c;font-size:9px;font-weight:700;white-space:nowrap}
 .team-segment button.active{background:var(--green2);color:#fff;box-shadow:0 4px 12px rgba(11,122,85,.18)}
+.team-segment.channel-team{background:#f3f7f5}
 .team-plan-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:22px}
 .team-plan-metrics>div{min-width:0;padding:15px 16px;border:1px solid rgba(11,122,85,.11);border-radius:12px;background:rgba(255,255,255,.8)}
 .team-plan-metrics span,.team-plan-metrics strong,.team-plan-metrics small{display:block}
@@ -1475,6 +1476,7 @@ body{overflow-x:hidden}
 .team-ranking-panel{padding:20px 12px 12px;max-height:520px;overflow:hidden}
 .team-ranking-panel>.panel-head{padding-inline:8px}
 .team-ranking-list{height:430px;overflow:auto;padding-right:3px}
+.team-channel-empty{display:grid;min-height:180px;place-items:center;padding:20px;color:var(--muted);font-size:9px;text-align:center}
 .team-rank-button{width:100%;display:grid;grid-template-columns:27px minmax(0,1fr) auto;align-items:center;gap:10px;padding:12px 8px;border:0;border-top:1px solid var(--line);border-radius:8px;background:#fff;text-align:left;color:var(--ink)}
 .team-rank-button:hover{background:#f6faf8}.team-rank-button.active{background:#edf7f2;box-shadow:inset 3px 0 var(--green2)}
 .team-rank-person,.team-rank-result{min-width:0}.team-rank-person strong,.team-rank-person small,.team-rank-result strong,.team-rank-result small{display:block}
