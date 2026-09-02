@@ -1,3 +1,4 @@
+sed: -e expression #1, char 7: missing command
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -91,7 +92,7 @@ export function OnecTeam() {
         store: stores.get(branchKey)?.Description || (branchKey === ZERO_GUID ? "Филиал не указан" : "Филиал не найден"),
         revenue: Number(item.СтоимостьTurnover || 0), quantity: Number(item.КоличествоTurnover || 0),
         checks: Number(item.Чеков || 0), checkKeys: item.ИдентификаторыЧеков || [], discounts: Math.max(Number(item.СуммаСкидок || 0), 0),
-        returns: Number(item.СтрокВозвратов || 0), hourly: item.ПочасовыеПродажи || {},
+        returns: Number(item.СтрокВозвратов || 0), daily: item.ПродажиПоДатам || {},
       };
     }).filter((item) => storeKey === "all" || item.storeKey === storeKey).sort((a, b) => b.revenue - a.revenue);
     const revenue = rows.reduce((sum, item) => sum + item.revenue, 0);
@@ -109,13 +110,15 @@ export function OnecTeam() {
   const planPercent = plan ? view.revenue / plan * 100 : 0;
   const maxRevenue = Math.max(...view.rows.map((item) => item.revenue), 1);
   const chart = useMemo(() => {
-    const active = Object.keys(selected?.hourly || {}).map(Number).filter(Number.isInteger);
-    const start = Math.min(active.length ? Math.min(...active) : 9, 9);
-    const end = Math.max(active.length ? Math.max(...active) : 21, 21);
-    const hours = Array.from({ length: end - start + 1 }, (_, index) => start + index);
-    const values = hours.map((hour) => Math.max(Number(selected?.hourly[hour] || 0), 0));
+    const dates = Object.keys(selected?.daily || {}).sort();
+    const values = dates.map((date) => Math.max(Number(selected?.daily[date] || 0), 0));
     const max = Math.max(...values, 1);
-    const points = values.map((value, index) => ({ hour: hours[index], x: hours.length === 1 ? 360 : index / (hours.length - 1) * 700 + 10, y: 190 - value / max * 160 }));
+    const points = values.map((value, index) => ({
+      date: dates[index],
+      value,
+      x: dates.length === 1 ? 360 : index / (dates.length - 1) * 700 + 10,
+      y: 190 - value / max * 160,
+    }));
     return {
       points,
       line: points.map((point) => `${point.x},${point.y}`).join(" "),
@@ -148,7 +151,7 @@ export function OnecTeam() {
 
   return <div className="page-stack onec-team-workspace">
     <section className="team-dashboard-head">
-      <div><span className="team-plan-kicker">Команда продаж</span><h2>Продавцы</h2><p>Рейтинг консультантов, почасовая динамика и выполнение плана команды</p></div>
+      <div><span className="team-plan-kicker">Команда продаж</span><h2>Продавцы</h2><p>Рейтинг консультантов, динамика продаж и выполнение плана команды</p></div>
       <div className="team-filter-groups">
         <label className="team-store-select"><span>Филиал</span><select value={storeKey} onChange={(event) => setStoreKey(event.target.value)}><option value="all">Все филиалы</option>{view.stores.map((item) => <option key={item.Ref_Key} value={item.Ref_Key}>{item.Description || item.Code || "Филиал без названия"}</option>)}</select></label>
         <div className="team-segment">{periods.map(([value, label]) => <button className={period === value ? "active" : ""} key={value} onClick={() => setPeriod(value)} type="button">{label}</button>)}</div>
@@ -172,8 +175,8 @@ export function OnecTeam() {
       <article className="panel seller-detail-panel">
         <div className="seller-detail-head"><div><span className="team-plan-kicker">Аналитика продавца</span><h2>{selected?.name}</h2><p>{selected?.store}</p></div><label className="seller-picker"><span>Выбрать продавца</span><select value={selected?.key || ""} onChange={(event) => setSelectedKey(event.target.value)}>{view.rows.map((item) => <option key={item.key} value={item.key}>{item.name}</option>)}</select></label></div>
         <div className="seller-mini-kpis"><Mini label="Выручка" value={money.format(selected?.revenue || 0)} /><Mini label="Средний чек" value={selected?.checks ? money.format(selected.revenue / selected.checks) : "—"} /><Mini label="Скидки" value={money.format(selected?.discounts || 0)} /><Mini label="Место" value={`#${selected?.rank || "—"}`} /></div>
-        <div className="seller-chart-head"><div><h3>Продажи по часам</h3><p>Сумма товарных строк в чеках выбранного продавца</p></div><span className="legend-dot">Фактические продажи</span></div>
-        {selected && Object.keys(selected.hourly).length ? <div className="seller-hour-chart"><svg aria-label="Продажи продавца по часам" role="img" viewBox="0 0 720 220">{[30, 70, 110, 150, 190].map((y) => <line className="gridline" key={y} x1="10" x2="710" y1={y} y2={y} />)}<defs><linearGradient id="sellerArea" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#0b7a55" stopOpacity=".24" /><stop offset="100%" stopColor="#0b7a55" stopOpacity="0" /></linearGradient></defs><path d={chart.area} fill="url(#sellerArea)" /><polyline fill="none" points={chart.line} stroke="#0b7a55" strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" />{chart.points.map((point) => <g key={point.hour}><circle cx={point.x} cy={point.y} fill="#fff" r="4" stroke="#0b7a55" strokeWidth="2" /><text className="seller-chart-label" textAnchor="middle" x={point.x} y="211">{String(point.hour).padStart(2, "0")}:00</text></g>)}</svg></div> : <div className="seller-chart-empty">Почасовая детализация появится, когда в чеках 1С заполнен продавец товарной строки.</div>}
+        <div className="seller-chart-head"><div><h3>Динамика продаж</h3><p>Продажи выбранного продавца за выбранный период</p></div><span className="legend-dot">Фактические продажи</span></div>
+        {selected && Object.keys(selected.daily).length ? <div className="seller-sales-chart"><svg aria-label="Динамика продаж продавца" role="img" viewBox="0 0 720 220">{[30, 70, 110, 150, 190].map((y) => <line className="gridline" key={y} x1="10" x2="710" y1={y} y2={y} />)}<defs><linearGradient id="sellerArea" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#0b7a55" stopOpacity=".24" /><stop offset="100%" stopColor="#0b7a55" stopOpacity="0" /></linearGradient></defs><path d={chart.area} fill="url(#sellerArea)" /><polyline fill="none" points={chart.line} stroke="#0b7a55" strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" />{chart.points.map((point) => <g key={point.date}><circle cx={point.x} cy={point.y} fill="#fff" r="4" stroke="#0b7a55" strokeWidth="2"><title>{`${formatChartDate(point.date)} — ${money.format(point.value)}`}</title></circle><text className="seller-chart-label" textAnchor="middle" x={point.x} y="211">{formatChartDate(point.date)}</text></g>)}</svg></div> : <div className="seller-chart-empty">График появится, когда в данных 1С заполнен продавец товарной строки.</div>}
       </article>
     </section>
 
@@ -195,4 +198,9 @@ function Kpi({ label, value, note }: { label: string; value: string; note: strin
 
 function Mini({ label, value }: { label: string; value: string }) {
   return <div><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function formatChartDate(value: string) {
+  const [, month = "", day = ""] = value.split("-");
+  return `${day}.${month}`;
 }
