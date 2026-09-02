@@ -1,3 +1,4 @@
+sed: -e expression #1, char 7: missing command
 import cors from "cors";
 import express from "express";
 import {
@@ -612,7 +613,7 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
         СтрокПродаж: 0,
         СтрокВозвратов: 0,
         СуммаСкидок: 0,
-        ПочасовыеПродажи: {},
+        ПродажиПоДатам: {},
         _checkKeys: new Set(),
       };
       const quantity = Number(line.Количество || 0);
@@ -630,12 +631,12 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       if (origin === "check" && sign > 0 && documentKey) {
         current._checkKeys.add(documentKey);
       }
-      if (origin === "check" && documentDate) {
-        const hourMatch = String(documentDate).match(/T(\d{2}):/);
-        const hour = hourMatch ? Number(hourMatch[1]) : Number.NaN;
-        if (Number.isInteger(hour) && hour >= 0 && hour <= 23) {
-          current.ПочасовыеПродажи[hour] =
-            Number(current.ПочасовыеПродажи[hour] || 0) + sign * amount;
+      if (documentDate) {
+        const dateMatch = String(documentDate).match(/^(\d{4}-\d{2}-\d{2})/);
+        const date = dateMatch?.[1];
+        if (date) {
+          current.ПродажиПоДатам[date] =
+            Number(current.ПродажиПоДатам[date] || 0) + sign * amount;
         }
       }
       if (sign > 0) current.СтрокПродаж += 1;
@@ -729,6 +730,7 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
             sign: 1,
             documentSellerKey: null,
             origin: "retail-report",
+            documentDate: report.Date,
           }),
         );
         (report.ВозвращенныеТовары || []).forEach((line) =>
@@ -738,6 +740,7 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
             sign: -1,
             documentSellerKey: null,
             origin: "retail-report",
+            documentDate: report.Date,
           }),
         );
       });
