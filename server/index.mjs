@@ -19,6 +19,7 @@ import {
 import {
   describeDataFreshness,
   enrichProductsWithBusinessCategories,
+  enrichProductsWithGroups,
   filterByPeriod,
   normalizeOnecDateTime,
   parseOnecDateTime,
@@ -136,6 +137,7 @@ app.get("/api/onec/metadata", async (_request, response) => {
 const referenceCache = new Map();
 const reportCache = new Map();
 let productKindsCache = null;
+let productGroupsCache = null;
 
 async function loadReportPages({ limit, days }) {
   const configuredPageSize = Number(process.env.ONEC_PAGE_SIZE || 25);
@@ -406,6 +408,31 @@ async function loadProductKindsCatalog() {
   } catch (error) {
     productKindsCache = null;
     throw error;
+  }
+}
+
+async function loadProductGroupsCatalog() {
+  const now = Date.now();
+  if (productGroupsCache?.items && productGroupsCache.expiresAt > now) {
+    return productGroupsCache.items;
+  }
+  if (productGroupsCache?.promise) {
+    return productGroupsCache.promise;
+  }
+  const promise = onecGet("Catalog_ТоварныеГруппы", {
+    $top: 500,
+    $select: ["Ref_Key", "Description", "Parent_Key", "IsFolder"].join(","),
+  });
+  productGroupsCache = { promise, expiresAt: now + 600_000 };
+  try {
+    const items = await promise;
+    productGroupsCache = { items, expiresAt: Date.now() + 600_000 };
+    return items;
+  } catch (error) {
+    productGroupsCache = null;
+    // Справочник может быть недоступен — возвращаем пустой список
+    console.warn("Не удалось загрузить Catalog_ТоварныеГруппы:", error instanceof Error ? error.message : error);
+    return [];
   }
 }
 
@@ -1421,7 +1448,7 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
       ),
     );
 
-    const [rawProducts, warehouses, productKinds] = await Promise.all([
+    const [rawProducts, warehouses, productKinds, productGroups] = await Promise.all([
       loadReferencesByKeys(
         "Catalog_Номенклатура",
         productKeys,
@@ -1432,6 +1459,7 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
           "НаименованиеПолное",
           "Артикул",
           "ВидНоменклатуры_Key",
+          "ТоварнаяГруппа_Key",
         ].join(","),
       ),
       loadReferencesByKeys(
@@ -1446,11 +1474,10 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
         ].join(","),
       ),
       loadProductKindsCatalog(),
+      loadProductGroupsCatalog(),
     ]);
-    const products = enrichProductsWithBusinessCategories(
-      rawProducts,
-      productKinds,
-    );
+    const enrichedProducts = enrichProductsWithBusinessCategories(rawProducts, productKinds);
+    const products = enrichProductsWithGroups(enrichedProducts, productKinds, productGroups);
     const categories = publicBusinessCategories();
 
     response.json({
@@ -1460,6 +1487,7 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
         warehouses,
         categories,
         productKinds,
+        productGroups,
       },
       meta: {
         ...commonMeta,

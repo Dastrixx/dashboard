@@ -169,6 +169,30 @@ export function enrichProductsWithBusinessCategories(products, productKinds) {
   });
 }
 
+/**
+ * Обогащает товары названием товарной группы (подкатегория).
+ * Сначала ищет группу напрямую по ТоварнаяГруппа_Key у товара,
+ * затем — через ВидНоменклатуры → ТоварнаяГруппа_Key.
+ */
+export function enrichProductsWithGroups(products, productKinds, productGroups) {
+  const kindByKey = new Map(productKinds.map((k) => [k.Ref_Key, k]));
+  const groupByKey = new Map(productGroups.map((g) => [g.Ref_Key, g]));
+
+  return products.map((product) => {
+    // Прямая ссылка с карточки товара
+    const directGroup = groupByKey.get(product.ТоварнаяГруппа_Key);
+    // Через вид номенклатуры
+    const kind = kindByKey.get(product.ВидНоменклатуры_Key);
+    const kindGroup = kind ? groupByKey.get(kind.ТоварнаяГруппа_Key) : null;
+
+    const group = directGroup || kindGroup;
+    return {
+      ...product,
+      ТоварнаяГруппа: group?.Description || null,
+    };
+  });
+}
+
 export function publicBusinessCategories() {
   return BUSINESS_CATEGORIES.map(({ Ref_Key, Description }) => ({
     Ref_Key,

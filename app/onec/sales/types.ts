@@ -37,7 +37,9 @@ export type OnecProductReference = {
   НаименованиеПолное: string;
   Артикул: string;
   ВидНоменклатуры_Key: string;
+  ТоварнаяГруппа_Key?: string | null;
   ВидНоменклатуры?: string | null;
+  ТоварнаяГруппа?: string | null;
   BusinessCategory_Key?: string | null;
   BusinessCategory?: string | null;
 };
