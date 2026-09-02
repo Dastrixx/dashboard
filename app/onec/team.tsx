@@ -14,7 +14,6 @@ import type { SellerPayload } from "./types";
 export function OnecTeam() {
   const [period, setPeriod] = useState<1 | 7 | 30>(30);
   const [payload, setPayload] = useState<SellerPayload>({});
-  const [consultantPayload, setConsultantPayload] = useState<SellerPayload>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [storeKey, setStoreKey] = useState("all");
@@ -28,34 +27,19 @@ export function OnecTeam() {
       try {
         setLoading(true);
         setError("");
-        const [sellerResponse, consultantResponse] = await Promise.all([
-          fetch(`${API_URL}/api/dashboard/onec-sellers?days=${period}`, {
-            signal: controller.signal,
-            credentials: "include",
-          }),
-          fetch(`${API_URL}/api/dashboard/onec-consultants?days=${period}`, {
+        const response = await fetch(
+          `${API_URL}/api/dashboard/onec-consultants?days=${period}`,
+          {
             signal: controller.signal,
             cache: "no-store",
             credentials: "include",
-          }),
-        ]);
-        const [sellerData, consultantData] = (await Promise.all([
-          sellerResponse.json(),
-          consultantResponse.json(),
-        ])) as [SellerPayload, SellerPayload];
-        if (!sellerResponse.ok) {
-          throw new Error(
-            sellerData.message || `Ошибка HTTP ${sellerResponse.status}`,
-          );
+          },
+        );
+        const data = (await response.json()) as SellerPayload;
+        if (!response.ok) {
+          throw new Error(data.message || `Ошибка HTTP ${response.status}`);
         }
-        if (!consultantResponse.ok) {
-          throw new Error(
-            consultantData.message ||
-              `Ошибка HTTP ${consultantResponse.status}`,
-          );
-        }
-        setPayload(sellerData);
-        setConsultantPayload(consultantData);
+        setPayload(data);
       } catch (loadError) {
         if (
           loadError instanceof DOMException &&
@@ -77,68 +61,55 @@ export function OnecTeam() {
   }, [period]);
 
   const view = useMemo(() => {
-    const sellerReferences = new Map(
+    const references = new Map(
       (payload.references?.sellers || []).map((item) => [item.Ref_Key, item]),
     );
     const stores = new Map(
       (payload.references?.stores || []).map((item) => [item.Ref_Key, item]),
     );
-    const grouped = new Map<
-      string,
-      {
-        key: string;
-        sellerKey: string;
-        seller: string;
-        storeKey: string;
-        store: string;
-        revenue: number;
-        revenueWithoutDiscount: number;
-        quantity: number;
-      }
-    >();
-
-    (payload.items || []).forEach((item) => {
-      const seller = sellerReferences.get(item.Продавец_Key);
-      const resolvedStoreKey =
-        item.Магазин_Key && item.Магазин_Key !== ZERO_GUID
-          ? item.Магазин_Key
-          : seller?.Магазин_Key || ZERO_GUID;
-      const key = `${item.Продавец_Key}:${resolvedStoreKey}`;
-      const current = grouped.get(key) || {
-        key,
-        sellerKey: item.Продавец_Key,
-        seller:
-          seller?.Description || `Продавец ${item.Продавец_Key.slice(0, 8)}`,
-        storeKey: resolvedStoreKey,
-        store:
-          stores.get(resolvedStoreKey)?.Description ||
-          (resolvedStoreKey === ZERO_GUID
-            ? "Филиал не указан"
-            : "Филиал не найден"),
-        revenue: 0,
-        revenueWithoutDiscount: 0,
-        quantity: 0,
-      };
-      current.revenue += Number(item.СтоимостьTurnover || 0);
-      current.revenueWithoutDiscount += Number(
-        item.СтоимостьБезСкидокTurnover || 0,
-      );
-      current.quantity += Number(item.КоличествоTurnover || 0);
-      grouped.set(key, current);
-    });
-
-    const allRows = [...grouped.values()].sort(
-      (left, right) => right.revenue - left.revenue,
-    );
     const query = search.trim().toLowerCase();
+
+    // Строим строки из строк чека (реальные продавцы, не кассиры)
+    const allRows = (payload.items || [])
+      .map((item) => {
+        const seller = references.get(item.Продавец_Key);
+        const resolvedStoreKey =
+          item.Магазин_Key && item.Магазин_Key !== ZERO_GUID
+            ? item.Магазин_Key
+            : seller?.Магазин_Key || ZERO_GUID;
+        return {
+          key: `${item.Продавец_Key}:${resolvedStoreKey}`,
+          sellerKey: item.Продавец_Key,
+          seller:
+            seller?.Description ||
+            `Продавец ${item.Продавец_Key.slice(0, 8)}`,
+          storeKey: resolvedStoreKey,
+          store:
+            stores.get(resolvedStoreKey)?.Description ||
+            (resolvedStoreKey === ZERO_GUID
+              ? "Филиал не указан"
+              : "Филиал не найден"),
+          revenue: Number(item.СтоимостьTurnover || 0),
+          revenueWithoutDiscount: Number(
+            item.СтоимостьБезСкидокTurnover || 0,
+          ),
+          quantity: Number(item.КоличествоTurnover || 0),
+          returnLines: Number(item.СтрокВозвратов || 0),
+          salesLines: Number(item.СтрокПродаж || 0),
+        };
+      })
+      .sort((left, right) => right.revenue - left.revenue);
+
     const rows = allRows.filter(
       (item) =>
         (storeKey === "all" || item.storeKey === storeKey) &&
         (!query ||
           `${item.seller} ${item.store}`.toLowerCase().includes(query)),
     );
+
     const totalRevenue = rows.reduce((sum, item) => sum + item.revenue, 0);
     const totalQuantity = rows.reduce((sum, item) => sum + item.quantity, 0);
+
     const branchMap = new Map<
       string,
       { key: string; name: string; revenue: number }
@@ -175,80 +146,6 @@ export function OnecTeam() {
     };
   }, [payload, storeKey, search]);
 
-  const consultantView = useMemo(() => {
-    const references = new Map(
-      (consultantPayload.references?.sellers || []).map((item) => [
-        item.Ref_Key,
-        item,
-      ]),
-    );
-    const stores = new Map(
-      (consultantPayload.references?.stores || []).map((item) => [
-        item.Ref_Key,
-        item,
-      ]),
-    );
-    const query = search.trim().toLowerCase();
-    const rows = (consultantPayload.items || [])
-      .map((item) => {
-        const consultant = references.get(item.Продавец_Key);
-        const resolvedStoreKey =
-          item.Магазин_Key && item.Магазин_Key !== ZERO_GUID
-            ? item.Магазин_Key
-            : consultant?.Магазин_Key || ZERO_GUID;
-
-        return {
-          key: `${item.Продавец_Key}:${resolvedStoreKey}`,
-          consultantKey: item.Продавец_Key,
-          consultant:
-            consultant?.Description ||
-            `Консультант ${item.Продавец_Key.slice(0, 8)}`,
-          storeKey: resolvedStoreKey,
-          store:
-            stores.get(resolvedStoreKey)?.Description ||
-            (resolvedStoreKey === ZERO_GUID
-              ? "Филиал не указан"
-              : "Филиал не найден"),
-          revenue: Number(item.СтоимостьTurnover || 0),
-          quantity: Number(item.КоличествоTurnover || 0),
-          salesLines: Number(item.СтрокПродаж || 0),
-          returnLines: Number(item.СтрокВозвратов || 0),
-        };
-      })
-      .filter(
-        (item) =>
-          (storeKey === "all" || item.storeKey === storeKey) &&
-          (!query ||
-            `${item.consultant} ${item.store}`.toLowerCase().includes(query)),
-      )
-      .sort((left, right) => right.revenue - left.revenue);
-    const totalRevenue = rows.reduce((sum, item) => sum + item.revenue, 0);
-
-    return {
-      rows: rows.map((item, index) => ({
-        ...item,
-        rank: index + 1,
-        share: totalRevenue ? (item.revenue / totalRevenue) * 100 : 0,
-      })),
-      stores: [...stores.values()],
-      totalRevenue,
-      totalQuantity: rows.reduce((sum, item) => sum + item.quantity, 0),
-      consultants: new Set(rows.map((item) => item.consultantKey)).size,
-    };
-  }, [consultantPayload, storeKey, search]);
-
-  const teamStores = useMemo(() => {
-    const stores = new Map(
-      [...view.stores, ...consultantView.stores].map((item) => [
-        item.Ref_Key,
-        item,
-      ]),
-    );
-    return [...stores.values()].sort((left, right) =>
-      (left.Description || "").localeCompare(right.Description || "", "ru"),
-    );
-  }, [view.stores, consultantView.stores]);
-
   if (loading || error) {
     return (
       <div className="page-stack">
@@ -257,16 +154,13 @@ export function OnecTeam() {
     );
   }
 
-  if (
-    !(payload.items || []).length &&
-    !(consultantPayload.items || []).length
-  ) {
+  if (!(payload.items || []).length) {
     const diagnostics = payload.meta?.diagnostics;
     return (
       <MissingSource
         title="Продажи продавцов по филиалам"
-        description="В документах 1С не удалось определить сотрудника продажи"
-        source={`Проверены: регистр продаж — ${diagnostics?.turnoverRows || 0} строк (${diagnostics?.turnoverRowsWithSeller || 0} с продавцом), личные продажи — ${diagnostics?.scannedPremiumRows || 0}, чеки ККМ — ${diagnostics?.scannedChecks || 0} (${diagnostics?.checksWithAssignedEmployee || 0} с сотрудником), кассовые смены — ${diagnostics?.scannedCashShifts || 0}, реализации — ${diagnostics?.scannedRealizations || 0}. Для чека сотрудник определяется по продавцу строки, продавцу чека, кассиру смены или ответственному пользователю.`}
+        description="В документах 1С не удалось определить продавца в строках чека"
+        source={`Проверено чеков: ${diagnostics?.scannedChecks || 0}, товарных строк: ${diagnostics?.checkLines || 0}, строк с продавцом: ${diagnostics?.checkLinesWithConsultant || 0}. Продавец определяется из поля Товары.Продавец_Key каждой строки чека ККМ.`}
       />
     );
   }
@@ -291,19 +185,19 @@ export function OnecTeam() {
             <span className="team-plan-kicker">Фактические данные 1С</span>
             <h2>Продажи продавцов по филиалам</h2>
             <p>
-              {payload.meta?.source || "Данные 1С"} · последние данные{" "}
+              {payload.meta?.source ||
+                "Продавец из строк чека ККМ (Товары.Продавец_Key)"}{" "}
+              · последние данные{" "}
               {payload.meta?.latestDate
                 ? new Date(payload.meta.latestDate).toLocaleString("ru-RU")
                 : "без даты"}
               {payload.meta?.periodStart && payload.meta?.periodEnd ? (
                 <>
-                  <br />Период: {new Date(payload.meta.periodStart).toLocaleString("ru-RU")} — {new Date(payload.meta.periodEnd).toLocaleString("ru-RU")}
-                </>
-              ) : null}
-              {payload.meta?.analysisAnchorAdjusted &&
-              payload.meta?.absoluteLatestDate ? (
-                <>
-                  <br />Последний одиночный документ: {new Date(payload.meta.absoluteLatestDate).toLocaleString("ru-RU")}; для аналитики взят последний период регулярных продаж
+                  <br />
+                  Период:{" "}
+                  {new Date(payload.meta.periodStart).toLocaleString("ru-RU")}{" "}
+                  —{" "}
+                  {new Date(payload.meta.periodEnd).toLocaleString("ru-RU")}
                 </>
               ) : null}
             </p>
@@ -317,23 +211,25 @@ export function OnecTeam() {
               }}
             >
               <option value="all">Все филиалы</option>
-              {teamStores.map((item) => (
+              {view.stores.map((item) => (
                 <option key={item.Ref_Key} value={item.Ref_Key}>
                   {item.Description || item.Code || "Филиал без названия"}
                 </option>
               ))}
             </select>
             <div className="team-segment period-team">
-              {[
-                [1, "День"],
-                [7, "Неделя"],
-                [30, "Месяц"],
-              ].map(([value, label]) => (
+              {(
+                [
+                  [1, "День"],
+                  [7, "Неделя"],
+                  [30, "Месяц"],
+                ] as const
+              ).map(([value, label]) => (
                 <button
                   className={period === value ? "active" : ""}
                   key={value}
                   onClick={() => {
-                    setPeriod(value as 1 | 7 | 30);
+                    setPeriod(value);
                     setPage(1);
                   }}
                   type="button"
@@ -353,7 +249,7 @@ export function OnecTeam() {
           <div>
             <span>Продано единиц</span>
             <strong>{number.format(view.totalQuantity)}</strong>
-            <small>оборот регистра продаж</small>
+            <small>из строк чеков</small>
           </div>
           <div>
             <span>Продавцов</span>
@@ -366,104 +262,6 @@ export function OnecTeam() {
             <small>участвуют в продажах</small>
           </div>
         </div>
-      </section>
-
-      <section className="panel consultant-analytics-panel">
-        <div className="panel-head consultant-panel-head">
-          <div>
-            <span className="team-plan-kicker">Консультанты 1С</span>
-            <h2>Личные продажи консультантов</h2>
-            <p>
-              {consultantPayload.meta?.source ||
-                "Продавец в товарной строке розничного отчёта"}
-              {consultantPayload.meta?.scope === "all" ? (
-                <>
-                  <br />Периодические фильтры временно отключены — показана вся
-                  доступная история 1С
-                </>
-              ) : null}
-              {consultantPayload.meta?.periodStart &&
-              consultantPayload.meta?.periodEnd ? (
-                <>
-                  <br />Период: {new Date(consultantPayload.meta.periodStart).toLocaleString("ru-RU")} — {new Date(consultantPayload.meta.periodEnd).toLocaleString("ru-RU")}
-                </>
-              ) : null}
-              {consultantPayload.meta?.analysisAnchorAdjusted &&
-              consultantPayload.meta?.absoluteLatestDate ? (
-                <>
-                  <br />Последний одиночный документ: {new Date(consultantPayload.meta.absoluteLatestDate).toLocaleString("ru-RU")}; он не сдвигает весь период анализа
-                </>
-              ) : null}
-            </p>
-          </div>
-          <div className="consultant-kpis">
-            <div>
-              <span>Консультантов</span>
-              <strong>{consultantView.consultants}</strong>
-            </div>
-            <div>
-              <span>Выручка</span>
-              <strong>{money.format(consultantView.totalRevenue)}</strong>
-            </div>
-            <div>
-              <span>Продано</span>
-              <strong>{number.format(consultantView.totalQuantity)} ед.</strong>
-            </div>
-          </div>
-        </div>
-        {consultantView.rows.length ? (
-          <div className="onec-table-wrap">
-            <table className="onec-table consultant-table">
-              <thead>
-                <tr>
-                  <th>Место</th>
-                  <th>Консультант</th>
-                  <th>Филиал</th>
-                  <th>Выручка</th>
-                  <th>Продано</th>
-                  <th>Доля</th>
-                  <th>Возвраты</th>
-                </tr>
-              </thead>
-              <tbody>
-                {consultantView.rows.slice(0, 20).map((item) => (
-                  <tr key={item.key}>
-                    <td>
-                      <span className="team-rank-place">{item.rank}</span>
-                    </td>
-                    <td>
-                      <strong>{item.consultant}</strong>
-                    </td>
-                    <td>{item.store}</td>
-                    <td>
-                      <strong>{money.format(item.revenue)}</strong>
-                    </td>
-                    <td>{number.format(item.quantity)} ед.</td>
-                    <td>{number.format(item.share)}%</td>
-                    <td>{number.format(item.returnLines)} строк</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="consultant-empty-state">
-            <strong>В товарных строках консультант пока не заполнен</strong>
-            <p>
-              Проверено чеков:{" "}
-              {consultantPayload.meta?.diagnostics?.scannedChecks || 0},
-              товарных строк чеков:{" "}
-              {consultantPayload.meta?.diagnostics?.checkLines || 0}, строк
-              чеков с консультантом:{" "}
-              {consultantPayload.meta?.diagnostics?.checkLinesWithConsultant ||
-                0}
-              . Проверено розничных отчётов:{" "}
-              {consultantPayload.meta?.diagnostics?.reports || 0}, всего строк с
-              консультантом:{" "}
-              {consultantPayload.meta?.diagnostics?.linesWithConsultant || 0}.
-            </p>
-          </div>
-        )}
       </section>
 
       <section className="team-branch-grid">
@@ -507,7 +305,7 @@ export function OnecTeam() {
         <div className="stock-toolbar">
           <div>
             <h2>Рейтинг продавцов</h2>
-            <p>Кто и в каком филиале сделал продажи</p>
+            <p>Кто и в каком филиале сделал продажи (из строк чека)</p>
           </div>
           <label className="search onec-stock-search">
             <span aria-hidden>⌕</span>
