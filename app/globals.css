@@ -1,3 +1,4 @@
+sed: -e expression #1, char 7: missing command
 @import "tailwindcss";
 
 :root{--green:#174d3b;--green2:#2f8262;--ink:#17231e;--muted:#738079;--line:#e1e8e3;--bg:#f2f5f2;--amber:#d59835}
@@ -1489,7 +1490,7 @@ body{overflow-x:hidden}
 .seller-mini-kpis span,.team-plan-summary-grid span{color:var(--muted);font-size:8px}.seller-mini-kpis strong,.team-plan-summary-grid strong{margin-top:6px;font-size:12px}
 .seller-chart-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
 .seller-chart-head h3{margin:0;font-size:14px}.seller-chart-head p{margin:5px 0 0;color:var(--muted);font-size:8px}
-.seller-hour-chart{width:100%;height:245px;margin-top:8px;overflow:hidden}.seller-hour-chart svg{display:block;width:100%;height:100%;overflow:visible}
+.seller-sales-chart{width:100%;height:245px;margin-top:8px;overflow:hidden}.seller-sales-chart svg{display:block;width:100%;height:100%;overflow:visible}
 .seller-chart-label{fill:#8d9993;font-size:7px}.seller-chart-empty{height:220px;display:grid;place-items:center;margin-top:10px;padding:20px;border:1px dashed #d5dfda;border-radius:11px;background:#fafcfa;color:var(--muted);font-size:9px;text-align:center}
 .team-plan-panel{padding:24px 26px}
 .team-plan-panel-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px}
@@ -1514,7 +1515,7 @@ body{overflow-x:hidden}
 }
 @media(max-width:760px){
   .team-kpi-grid{grid-template-columns:1fr 1fr}.team-dashboard-head .team-filter-groups{width:100%}.team-store-select{width:100%}.team-store-select select{width:100%}
-  .seller-detail-panel{padding:18px 15px}.seller-detail-head{flex-direction:column}.seller-mini-kpis,.team-plan-summary-grid{grid-template-columns:1fr 1fr}.seller-chart-head{flex-direction:column}.seller-hour-chart{height:210px;overflow-x:auto}.seller-hour-chart svg{min-width:650px}
+  .seller-detail-panel{padding:18px 15px}.seller-detail-head{flex-direction:column}.seller-mini-kpis,.team-plan-summary-grid{grid-template-columns:1fr 1fr}.seller-chart-head{flex-direction:column}.seller-sales-chart{height:210px;overflow-x:auto}.seller-sales-chart svg{min-width:650px}
   .team-plan-panel{padding:20px 16px}.team-contribution-row{grid-template-columns:minmax(110px,.8fr) minmax(90px,1.2fr);gap:10px}.team-contribution-row>div:last-child{grid-column:2;text-align:left;margin-top:-8px}
 }
 @media(max-width:480px){
