@@ -111,7 +111,7 @@ export type SellerTurnover = {
   Чеков?: number;
   ИдентификаторыЧеков?: string[];
   СуммаСкидок?: number;
-  ПочасовыеПродажи?: Record<string, number>;
+  ПродажиПоДатам?: Record<string, number>;
 };
 
 export type SellerReference = {
