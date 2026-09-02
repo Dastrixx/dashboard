@@ -56,12 +56,37 @@ export class AuthStore {
       CREATE TABLE IF NOT EXISTS team_sales_plans (
         store_key TEXT NOT NULL,
         period_days INTEGER NOT NULL CHECK (period_days IN (1, 7, 30)),
+        channel TEXT NOT NULL DEFAULT 'all' CHECK (channel IN ('all', 'online', 'offline')),
         amount REAL NOT NULL CHECK (amount >= 0),
         updated_by TEXT,
         updated_at INTEGER NOT NULL,
-        PRIMARY KEY (store_key, period_days)
+        PRIMARY KEY (store_key, period_days, channel)
       );
     `);
+
+    const planColumns = this.db
+      .prepare("PRAGMA table_info(team_sales_plans)")
+      .all();
+    if (!planColumns.some((column) => column.name === "channel")) {
+      this.db.exec(`
+        ALTER TABLE team_sales_plans RENAME TO team_sales_plans_legacy;
+        CREATE TABLE team_sales_plans (
+          store_key TEXT NOT NULL,
+          period_days INTEGER NOT NULL CHECK (period_days IN (1, 7, 30)),
+          channel TEXT NOT NULL DEFAULT 'all' CHECK (channel IN ('all', 'online', 'offline')),
+          amount REAL NOT NULL CHECK (amount >= 0),
+          updated_by TEXT,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (store_key, period_days, channel)
+        );
+        INSERT INTO team_sales_plans (
+          store_key, period_days, channel, amount, updated_by, updated_at
+        )
+        SELECT store_key, period_days, 'all', amount, updated_by, updated_at
+        FROM team_sales_plans_legacy;
+        DROP TABLE team_sales_plans_legacy;
+      `);
+    }
   }
 
   close() {
@@ -211,31 +236,35 @@ export class AuthStore {
       .run(hashToken(token));
   }
 
-  getTeamSalesPlan(storeKey, periodDays) {
+  getTeamSalesPlan(storeKey, periodDays, channel = "all") {
+    const normalizedChannel = normalizeSalesChannel(channel);
     const row = this.db.prepare(`
       SELECT
         store_key AS storeKey,
         period_days AS periodDays,
+        channel,
         amount,
         updated_by AS updatedBy,
         updated_at AS updatedAt
       FROM team_sales_plans
-      WHERE store_key = ? AND period_days = ?
-    `).get(String(storeKey || "all"), Number(periodDays));
+      WHERE store_key = ? AND period_days = ? AND channel = ?
+    `).get(String(storeKey || "all"), Number(periodDays), normalizedChannel);
 
     return row || {
       storeKey: String(storeKey || "all"),
       periodDays: Number(periodDays),
+      channel: normalizedChannel,
       amount: 0,
       updatedBy: null,
       updatedAt: null,
     };
   }
 
-  setTeamSalesPlan({ storeKey, periodDays, amount, updatedBy }) {
+  setTeamSalesPlan({ storeKey, periodDays, channel = "all", amount, updatedBy }) {
     const normalizedStoreKey = String(storeKey || "all");
     const normalizedPeriod = Number(periodDays);
     const normalizedAmount = Number(amount);
+    const normalizedChannel = normalizeSalesChannel(channel);
     if (![1, 7, 30].includes(normalizedPeriod)) {
       throw new Error("Период плана должен быть 1, 7 или 30 дней");
     }
@@ -246,9 +275,9 @@ export class AuthStore {
     const updatedAt = Date.now();
     this.db.prepare(`
       INSERT INTO team_sales_plans (
-        store_key, period_days, amount, updated_by, updated_at
-      ) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(store_key, period_days)
+        store_key, period_days, channel, amount, updated_by, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(store_key, period_days, channel)
       DO UPDATE SET
         amount = excluded.amount,
         updated_by = excluded.updated_by,
@@ -256,12 +285,13 @@ export class AuthStore {
     `).run(
       normalizedStoreKey,
       normalizedPeriod,
+      normalizedChannel,
       normalizedAmount,
       updatedBy || null,
       updatedAt,
     );
 
-    return this.getTeamSalesPlan(normalizedStoreKey, normalizedPeriod);
+    return this.getTeamSalesPlan(normalizedStoreKey, normalizedPeriod, normalizedChannel);
   }
 
   cleanupExpiredSessions(now = Date.now()) {
@@ -284,6 +314,14 @@ function validateRole(role) {
   if (!VALID_ROLES.has(role)) {
     throw new Error("Роль должна быть owner или manager");
   }
+}
+
+function normalizeSalesChannel(channel) {
+  const value = String(channel || "all").toLowerCase();
+  if (!["all", "online", "offline"].includes(value)) {
+    throw new Error("Канал продаж должен быть all, online или offline");
+  }
+  return value;
 }
 
 function publicUser(row) {
