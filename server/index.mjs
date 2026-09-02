@@ -1,4 +1,3 @@
-sed: -e expression #1, char 7: missing command
 import cors from "cors";
 import express from "express";
 import {
