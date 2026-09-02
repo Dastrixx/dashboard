@@ -8,10 +8,16 @@ import type {
   OnecCategoryReference,
   OnecProductReference,
   OnecRetailReport,
+  MarginAnalytics,
+  MarginAnalyticsResponse,
 } from "../sales/types";
 import type { Period } from "../types";
 import { buildOwnerOverview } from "./analytics";
-import type { OwnerOverviewState, OwnerReportsResponse } from "./types";
+import type {
+  OwnerDateRange,
+  OwnerOverviewState,
+  OwnerReportsResponse,
+} from "./types";
 
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
@@ -25,18 +31,31 @@ async function readJson<T>(response: Response): Promise<T> {
   return payload;
 }
 
-export function useOwnerOverview(period: Period): OwnerOverviewState {
+function previousRangeStart(range: OwnerDateRange) {
+  const from = new Date(`${range.from}T00:00:00`).getTime();
+  const to = new Date(`${range.to}T23:59:59.999`).getTime();
+  const duration = to - from + 1;
+  return new Date(from - duration).toISOString().slice(0, 10);
+}
+
+export function useOwnerOverview(
+  period: Period,
+  dateRange?: OwnerDateRange | null,
+): OwnerOverviewState {
   const [reports, setReports] = useState<OnecRetailReport[]>([]);
   const [products, setProducts] = useState<OnecProductReference[]>([]);
   const [categories, setCategories] = useState<OnecCategoryReference[]>([]);
   const [checks, setChecks] = useState<CheckAnalytics | null>(null);
+  const [margin, setMargin] = useState<MarginAnalytics | null>(null);
   const [todayChecks, setTodayChecks] = useState<CheckAnalytics | null>(null);
   const [reportsLoading, setReportsLoading] = useState(true);
   const [referencesLoading, setReferencesLoading] = useState(true);
   const [checksLoading, setChecksLoading] = useState(true);
+  const [marginLoading, setMarginLoading] = useState(true);
   const [reportsError, setReportsError] = useState("");
   const [referencesError, setReferencesError] = useState("");
   const [checksError, setChecksError] = useState("");
+  const [marginError, setMarginError] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -45,8 +64,11 @@ export function useOwnerOverview(period: Period): OwnerOverviewState {
       try {
         setReportsLoading(true);
         setReportsError("");
+        const reportQuery = dateRange
+          ? `from=${previousRangeStart(dateRange)}&to=${dateRange.to}`
+          : `days=${period * 2}`;
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-reports?top=500&days=${period * 2}&references=false`,
+          `${API_URL}/api/dashboard/onec-reports?top=500&${reportQuery}&references=false`,
           { signal: controller.signal, credentials: "include" },
         );
         const payload = await readJson<OwnerReportsResponse>(response);
@@ -65,8 +87,11 @@ export function useOwnerOverview(period: Period): OwnerOverviewState {
       try {
         setReferencesLoading(true);
         setReferencesError("");
+        const reportQuery = dateRange
+          ? `from=${previousRangeStart(dateRange)}&to=${dateRange.to}`
+          : `days=${period * 2}`;
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-reports?top=500&days=${period * 2}`,
+          `${API_URL}/api/dashboard/onec-reports?top=500&${reportQuery}`,
           { signal: controller.signal, credentials: "include" },
         );
         const payload = await readJson<OwnerReportsResponse>(response);
@@ -92,19 +117,50 @@ export function useOwnerOverview(period: Period): OwnerOverviewState {
       }
     }
 
+    async function loadMargin() {
+      try {
+        setMarginLoading(true);
+        setMarginError("");
+        const query = dateRange
+          ? `from=${dateRange.from}&to=${dateRange.to}`
+          : `days=${period}`;
+        const response = await fetch(
+          `${API_URL}/api/dashboard/onec-margin?${query}`,
+          { signal: controller.signal, credentials: "include" },
+        );
+        const payload = await readJson<MarginAnalyticsResponse>(response);
+        setMargin(payload.items || null);
+      } catch (error) {
+        if (isAbortError(error)) return;
+        setMargin(null);
+        setMarginError(
+          error instanceof Error ? error.message : "Не удалось загрузить маржу 1С",
+        );
+      } finally {
+        if (!controller.signal.aborted) setMarginLoading(false);
+      }
+    }
+
     async function loadChecks() {
       try {
         setChecksLoading(true);
         setChecksError("");
         const [periodResponse, todayResponse] = await Promise.all([
           fetch(
-            `${API_URL}/api/dashboard/onec-check-analytics?days=${period}`,
+            dateRange
+              ? `${API_URL}/api/dashboard/onec-check-analytics?from=${dateRange.from}&to=${dateRange.to}`
+              : `${API_URL}/api/dashboard/onec-check-analytics?days=${period}`,
             { signal: controller.signal, credentials: "include" },
           ),
-          fetch(`${API_URL}/api/dashboard/onec-check-analytics?days=1`, {
-            signal: controller.signal,
-            credentials: "include",
-          }),
+          fetch(
+            dateRange
+              ? `${API_URL}/api/dashboard/onec-check-analytics?from=${dateRange.to}&to=${dateRange.to}`
+              : `${API_URL}/api/dashboard/onec-check-analytics?days=1`,
+            {
+              signal: controller.signal,
+              credentials: "include",
+            },
+          ),
         ]);
         const [periodPayload, todayPayload] = await Promise.all([
           readJson<CheckAnalyticsResponse>(periodResponse),
@@ -127,12 +183,13 @@ export function useOwnerOverview(period: Period): OwnerOverviewState {
     loadReports();
     loadReferences();
     loadChecks();
+    loadMargin();
     return () => controller.abort();
-  }, [period]);
+  }, [period, dateRange?.from, dateRange?.to]);
 
   const analytics = useMemo(
-    () => buildOwnerOverview(reports, products, categories, period),
-    [reports, products, categories, period],
+    () => buildOwnerOverview(reports, products, categories, period, dateRange),
+    [reports, products, categories, period, dateRange],
   );
 
   return {
@@ -145,5 +202,8 @@ export function useOwnerOverview(period: Period): OwnerOverviewState {
     reportsError,
     referencesError,
     checksError,
+    margin,
+    marginLoading,
+    marginError,
   };
 }

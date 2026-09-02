@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { AbcAnalysis } from "./abc-analysis";
 import { buildSalesAnalytics } from "./analytics";
 import { CheckAnalyticsPanel } from "./check-analytics-panel";
-import { useCheckAnalytics, useSalesData } from "./hooks";
+import { useCheckAnalytics, useMarginAnalytics, useSalesData } from "./hooks";
 import {
   ReferenceSkeleton,
   RevenueAnalysis,
@@ -57,6 +57,7 @@ export function OnecSales() {
   const [period, setPeriod] = useState<AnalyticsPeriod>("month");
   const sales = useSalesData();
   const checks = useCheckAnalytics(period);
+  const margin = useMarginAnalytics(period);
   const analytics = useMemo(
     () =>
       buildSalesAnalytics(
@@ -88,6 +89,9 @@ export function OnecSales() {
         referencesLoading={sales.referencesLoading}
         referenceError={sales.referenceError}
         truncated={sales.loadMeta?.truncated}
+        margin={margin.data}
+        marginLoading={margin.loading}
+        marginError={margin.error}
       />
 
       <CheckAnalyticsPanel

@@ -35,6 +35,7 @@ import {
   type Section,
 } from "./dashboard-routes";
 type Period = 7 | 30 | 90;
+type OwnerDateRange = { from: string; to: string };
 
 function Icon({ name }: { name: string }) {
   const icons: Record<string, typeof Home> = {
@@ -85,6 +86,22 @@ export function Dashboard({
   const [session, setSession] = useState<AuthUser | null>(initialUser);
   const [menuOpen, setMenuOpen] = useState(false);
   const [period, setPeriod] = useState<Period>(30);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [ownerDateRange, setOwnerDateRange] = useState<OwnerDateRange | null>(null);
+
+  const canApplyOwnerRange =
+    Boolean(dateFrom && dateTo) && dateFrom <= dateTo;
+
+  const applyOwnerRange = () => {
+    if (!canApplyOwnerRange) return;
+    setOwnerDateRange({ from: dateFrom, to: dateTo });
+  };
+
+  const useOwnerPreset = (value: Period) => {
+    setPeriod(value);
+    setOwnerDateRange(null);
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -241,21 +258,52 @@ export function Dashboard({
                 <span>{titles[activeSection][1]}</span>
               </div>
               {role === "owner" && (
-                <div className="period">
-                  {([7, 30, 90] as Period[]).map((value) => (
+                <div className="owner-period-controls">
+                  <div className="period">
+                    {([7, 30, 90] as Period[]).map((value) => (
+                      <button
+                        key={value}
+                        onClick={() => useOwnerPreset(value)}
+                        className={!ownerDateRange && period === value ? "active" : ""}
+                      >
+                        {value} дней
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="owner-date-range">
+                    <label>
+                      <span>От</span>
+                      <input
+                        type="date"
+                        value={dateFrom}
+                        onChange={(event) => setDateFrom(event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      <span>До</span>
+                      <input
+                        type="date"
+                        value={dateTo}
+                        min={dateFrom || undefined}
+                        onChange={(event) => setDateTo(event.target.value)}
+                      />
+                    </label>
                     <button
-                      key={value}
-                      onClick={() => setPeriod(value)}
-                      className={period === value ? "active" : ""}
+                      className={ownerDateRange ? "active" : ""}
+                      disabled={!canApplyOwnerRange}
+                      onClick={applyOwnerRange}
                     >
-                      {value} дней
+                      Применить
                     </button>
-                  ))}
+                  </div>
                 </div>
               )}
             </div>
 
-            {role === "owner" && <OnecOverview period={period} />}
+            {role === "owner" && (
+              <OnecOverview period={period} dateRange={ownerDateRange} />
+            )}
             {role === "manager" && activeSection === "products" && <OnecSales />}
             {role === "manager" && activeSection === "stock" && <OnecStock />}
             {role === "manager" && activeSection === "team" && <OnecTeam />}

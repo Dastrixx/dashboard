@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { AuthStore } from "../server/auth/store.mjs";
 import { hashPassword, verifyPassword } from "../server/auth/passwords.mjs";
@@ -42,6 +43,76 @@ test("сессия создаётся, возвращает пользовате
 
     store.revokeSession(session.token);
     assert.equal(store.getSession(session.token), null);
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("планы команды хранятся отдельно для всех, онлайн и офлайн продаж", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dashboard-team-plan-"));
+  const store = new AuthStore({
+    databasePath: join(directory, "auth.sqlite"),
+    idleTimeoutMs: 60_000,
+    absoluteTimeoutMs: 120_000,
+  });
+
+  try {
+    store.setTeamSalesPlan({
+      storeKey: "all",
+      periodDays: 30,
+      channel: "all",
+      amount: 3_000_000,
+    });
+    store.setTeamSalesPlan({
+      storeKey: "all",
+      periodDays: 30,
+      channel: "online",
+      amount: 1_200_000,
+    });
+    store.setTeamSalesPlan({
+      storeKey: "all",
+      periodDays: 30,
+      channel: "offline",
+      amount: 1_800_000,
+    });
+
+    assert.equal(store.getTeamSalesPlan("all", 30, "all").amount, 3_000_000);
+    assert.equal(store.getTeamSalesPlan("all", 30, "online").amount, 1_200_000);
+    assert.equal(store.getTeamSalesPlan("all", 30, "offline").amount, 1_800_000);
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("старый общий план сохраняется при добавлении каналов продаж", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dashboard-plan-migration-"));
+  const databasePath = join(directory, "auth.sqlite");
+  const legacy = new DatabaseSync(databasePath);
+  legacy.exec(`
+    CREATE TABLE team_sales_plans (
+      store_key TEXT NOT NULL,
+      period_days INTEGER NOT NULL,
+      amount REAL NOT NULL,
+      updated_by TEXT,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (store_key, period_days)
+    );
+    INSERT INTO team_sales_plans VALUES ('all', 30, 2500000, NULL, 1);
+  `);
+  legacy.close();
+
+  const store = new AuthStore({
+    databasePath,
+    idleTimeoutMs: 60_000,
+    absoluteTimeoutMs: 120_000,
+  });
+
+  try {
+    assert.equal(store.getTeamSalesPlan("all", 30, "all").amount, 2_500_000);
+    assert.equal(store.getTeamSalesPlan("all", 30, "online").amount, 0);
+    assert.equal(store.getTeamSalesPlan("all", 30, "offline").amount, 0);
   } finally {
     store.close();
     await rm(directory, { recursive: true, force: true });

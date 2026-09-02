@@ -12,6 +12,8 @@ import type {
   OnecSalesResponse,
   OnecWarehouseReference,
   SalesLoadMeta,
+  MarginAnalytics,
+  MarginAnalyticsResponse,
 } from "./types";
 
 function isAbortError(error: unknown) {
@@ -162,6 +164,48 @@ export function useCheckAnalytics(period: AnalyticsPeriod) {
           loadError instanceof Error
             ? loadError.message
             : "Не удалось загрузить аналитику чеков",
+        );
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }
+
+    load();
+    return () => controller.abort();
+  }, [period]);
+
+  return { data, loading, error };
+}
+
+
+export function useMarginAnalytics(period: AnalyticsPeriod) {
+  const [data, setData] = useState<MarginAnalytics | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function load() {
+      try {
+        setLoading(true);
+        setError("");
+        const response = await fetch(
+          `${API_URL}/api/dashboard/onec-margin?days=${PERIODS[period].days}`,
+          { signal: controller.signal, credentials: "include" },
+        );
+        const payload = (await response.json()) as MarginAnalyticsResponse;
+        if (!response.ok) {
+          throw new Error(payload.message || `Ошибка HTTP ${response.status}`);
+        }
+        setData(payload.items || null);
+      } catch (loadError) {
+        if (isAbortError(loadError)) return;
+        setData(null);
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Не удалось загрузить маржу",
         );
       } finally {
         if (!controller.signal.aborted) setLoading(false);

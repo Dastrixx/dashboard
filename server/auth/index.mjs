@@ -121,6 +121,7 @@ export function authorizeDashboardApi(request, response, next) {
     "/api/dashboard/onec-reports",
     "/api/dashboard/onec-check-analytics",
     "/api/dashboard/onec-product-categories",
+    "/api/dashboard/onec-margin",
   ]);
   const pathname = request.originalUrl.split("?", 1)[0];
   if (request.method === "GET" && ownerGetRoutes.has(pathname)) {

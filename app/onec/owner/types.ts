@@ -4,6 +4,7 @@ import type {
   OnecProductReference,
   OnecRetailReport,
   RevenueBucket,
+  MarginAnalytics,
 } from "../sales/types";
 
 export type OwnerReportsResponse = {
@@ -18,6 +19,11 @@ export type OwnerReportsResponse = {
     durationMs?: number;
   };
   message?: string;
+};
+
+export type OwnerDateRange = {
+  from: string;
+  to: string;
 };
 
 export type OwnerCategory = {
@@ -64,4 +70,7 @@ export type OwnerOverviewState = {
   reportsError: string;
   referencesError: string;
   checksError: string;
+  margin: MarginAnalytics | null;
+  marginLoading: boolean;
+  marginError: string;
 };

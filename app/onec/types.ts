@@ -108,6 +108,10 @@ export type SellerTurnover = {
   СтоимостьБезСкидокTurnover?: number;
   СтрокПродаж?: number;
   СтрокВозвратов?: number;
+  Чеков?: number;
+  ИдентификаторыЧеков?: string[];
+  СуммаСкидок?: number;
+  ПродажиПоДатам?: Record<string, number>;
 };
 
 export type SellerReference = {
@@ -125,6 +129,7 @@ export type SellerPayload = {
   };
   meta?: {
     days?: number;
+    channel?: "all" | "online" | "offline";
     loaded?: number;
     latestDate?: string | null;
     periodStart?: string | null;

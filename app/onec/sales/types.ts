@@ -80,6 +80,7 @@ export type OnecSalesResponse = {
 export type CheckSummary = {
   checks: number;
   revenue: number;
+  netRevenue: number;
   averageCheck: number;
   returns: number;
   returnsAmount: number;
@@ -155,4 +156,22 @@ export type SalesAnalytics = {
 export type ChartPoint = RevenueBucket & {
   x: number;
   y: number;
+};
+
+
+export type MarginSummary = {
+  revenue: number;
+  cost: number;
+  profit: number;
+  marginPercent: number;
+};
+
+export type MarginAnalytics = {
+  current: MarginSummary;
+  previous: MarginSummary;
+};
+
+export type MarginAnalyticsResponse = {
+  items?: MarginAnalytics;
+  message?: string;
 };

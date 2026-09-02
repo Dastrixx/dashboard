@@ -40,12 +40,21 @@ export function CheckAnalyticsPanel({
           ),
         },
         {
-          label: "Выручка по чекам",
+          label: "Продажи по чекам",
           value: money.format(analytics.current.revenue),
-          note: "без чеков возврата",
+          note: "сумма чеков продаж, без вычета возвратов",
           change: percentageChange(
             analytics.current.revenue,
             analytics.previous.revenue,
+          ),
+        },
+        {
+          label: "Чистые продажи",
+          value: money.format(analytics.current.netRevenue),
+          note: "продажи по чекам минус возвраты",
+          change: percentageChange(
+            analytics.current.netRevenue,
+            analytics.previous.netRevenue,
           ),
         },
         {
@@ -57,7 +66,7 @@ export function CheckAnalyticsPanel({
         {
           label: "Скидки",
           value: money.format(analytics.current.discounts),
-          note: `${analytics.current.discountShare.toFixed(1)}% от суммы до скидок · ${money.format(analytics.current.grossRevenue)}`,
+          note: `${analytics.current.discountShare.toFixed(1)}% · сумма товаров до скидок ${money.format(analytics.current.grossRevenue)}`,
           change: percentageChange(
             analytics.current.discounts,
             analytics.previous.discounts,

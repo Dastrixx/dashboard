@@ -19,6 +19,28 @@ export function inRange(value: string, from: number, to: number) {
   return timestamp >= from && timestamp <= to;
 }
 
+function startOfCalendarDay(timestamp: number) {
+  const date = new Date(timestamp);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function periodBounds(latestTimestamp: number, days: number) {
+  const latestDayStart = startOfCalendarDay(latestTimestamp);
+  const currentFrom = latestDayStart - (days - 1) * DAY_MS;
+  const currentTo = latestDayStart + DAY_MS - 1;
+  const previousTo = currentFrom - 1;
+  const previousFrom = currentFrom - days * DAY_MS;
+
+  return {
+    currentFrom,
+    currentTo,
+    previousFrom,
+    previousTo,
+    duration: days * DAY_MS,
+  };
+}
+
 function grossRevenue(reports: OnecRetailReport[]) {
   return reports.reduce(
     (sum, report) => sum + Number(report.СуммаДокумента || 0),
@@ -154,12 +176,15 @@ export function buildSalesAnalytics(
   );
   if (!latestTimestamp) return null;
 
-  const duration = PERIODS[period].days * DAY_MS;
-  const currentFrom = latestTimestamp - duration + 1;
-  const previousTo = currentFrom - 1;
-  const previousFrom = previousTo - duration + 1;
+  const {
+    currentFrom,
+    currentTo,
+    previousFrom,
+    previousTo,
+    duration,
+  } = periodBounds(latestTimestamp, PERIODS[period].days);
   const currentReports = reports.filter((report) =>
-    inRange(report.Date, currentFrom, latestTimestamp),
+    inRange(report.Date, currentFrom, currentTo),
   );
   const previousReports = reports.filter((report) =>
     inRange(report.Date, previousFrom, previousTo),
@@ -251,9 +276,12 @@ export function buildRankingRows(
   );
   if (!latestTimestamp) return [];
 
-  const from = latestTimestamp - PERIODS[period].days * DAY_MS + 1;
+  const { currentFrom, currentTo } = periodBounds(
+    latestTimestamp,
+    PERIODS[period].days,
+  );
   return buildProductRows(
-    reports.filter((report) => inRange(report.Date, from, latestTimestamp)),
+    reports.filter((report) => inRange(report.Date, currentFrom, currentTo)),
     products,
     categories,
   );

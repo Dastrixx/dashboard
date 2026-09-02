@@ -34,10 +34,22 @@ import {
   onecMetadata,
   onecTurnovers,
 } from "./onec.mjs";
-import { loadCheckAnalytics } from "./dashboard/checks.mjs";
+import {
+  loadCheckAnalytics,
+  loadCheckAnalyticsRange,
+} from "./dashboard/checks.mjs";
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
+
+function salesChannel(value) {
+  const channel = String(value || "all").toLowerCase();
+  return ["online", "offline"].includes(channel) ? channel : "all";
+}
+
+function channelByCustomerOrder(orderKey) {
+  return orderKey && orderKey !== EMPTY_GUID ? "online" : "offline";
+}
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
@@ -80,6 +92,36 @@ app.use(
 app.get("/api/dashboard", (_request, response) => {
   response.json(dashboardData);
 });
+app.get("/api/dashboard/team-plan", (request, response) => {
+  const period = [1, 7, 30].includes(Number(request.query.period))
+    ? Number(request.query.period)
+    : 30;
+  const storeKey = String(request.query.storeKey || "all");
+  const channel = salesChannel(request.query.channel);
+  response.json({ item: authStore.getTeamSalesPlan(storeKey, period, channel) });
+});
+
+app.put("/api/dashboard/team-plan", (request, response) => {
+  if (request.auth.user.role !== "manager") {
+    return response.status(403).json({ message: "Только руководитель может менять план команды" });
+  }
+
+  try {
+    const item = authStore.setTeamSalesPlan({
+      storeKey: request.body?.storeKey || "all",
+      periodDays: request.body?.period,
+      channel: salesChannel(request.body?.channel),
+      amount: request.body?.amount,
+      updatedBy: request.auth.user.id,
+    });
+    return response.json({ item });
+  } catch (error) {
+    return response.status(400).json({
+      message: error instanceof Error ? error.message : "Не удалось сохранить план",
+    });
+  }
+});
+
 
 app.get("/api/products", (request, response) => {
   const query = String(request.query.search || "")
@@ -205,6 +247,40 @@ async function loadReportPages({ limit, days }) {
       endDate,
     );
   }
+}
+
+
+async function loadReportPagesByRange({ limit, from, to }) {
+  const configuredPageSize = Number(process.env.ONEC_PAGE_SIZE || 25);
+  const pageSize = Math.min(Math.max(configuredPageSize, 1), 100);
+  const fromTimestamp = parseOnecDateTime(`${from}T00:00:00`);
+  const toTimestamp = parseOnecDateTime(`${to}T23:59:59`);
+
+  if (!Number.isFinite(fromTimestamp) || !Number.isFinite(toTimestamp) || fromTimestamp > toTimestamp) {
+    throw new Error("Некорректный диапазон дат");
+  }
+
+  const filter = [
+    "Posted eq true",
+    `Date ge datetime'${toOdataDateTime(fromTimestamp)}'`,
+    `Date le datetime'${toOdataDateTime(toTimestamp)}'`,
+  ].join(" and ");
+  const result = [];
+
+  while (result.length < limit) {
+    const currentPageSize = Math.min(pageSize, limit - result.length);
+    const page = await onecGet(RETAIL_REPORT_ENTITY, {
+      $top: currentPageSize,
+      $skip: result.length,
+      $select: RETAIL_REPORT_SELECT,
+      $filter: filter,
+      $orderby: "Date desc",
+    });
+    result.push(...page);
+    if (page.length < currentPageSize) break;
+  }
+
+  return result;
 }
 
 async function loadReportPagesCached({ limit, days }) {
@@ -503,6 +579,7 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     const days = [1, 7, 30].includes(Number(request.query.days))
       ? Number(request.query.days)
       : 30;
+    const channel = salesChannel(request.query.channel);
     const grouped = new Map();
     let salesLines = 0;
     let returnLines = 0;
@@ -515,7 +592,22 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     let latestDate = null;
     let source = "Document_ЧекККМ.Товары.Продавец_Key";
 
-    const addLine = ({ storeKey, line, sign, documentSellerKey, origin }) => {
+    const addLine = ({
+      storeKey,
+      line,
+      sign,
+      documentSellerKey,
+      origin,
+      documentKey,
+      documentDate,
+      orderKey,
+    }) => {
+      const lineOrderKey =
+        line.ЗаказПокупателя_Key && line.ЗаказПокупателя_Key !== EMPTY_GUID
+          ? line.ЗаказПокупателя_Key
+          : orderKey;
+      const lineChannel = channelByCustomerOrder(lineOrderKey);
+      if (channel !== "all" && channel !== lineChannel) return;
       if (sign > 0) salesLines += 1;
       else returnLines += 1;
 
@@ -538,14 +630,33 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
         СтоимостьБезСкидокTurnover: 0,
         СтрокПродаж: 0,
         СтрокВозвратов: 0,
+        СуммаСкидок: 0,
+        ПродажиПоДатам: {},
+        _checkKeys: new Set(),
       };
       const quantity = Number(line.Количество || 0);
       const amount = Number(line.Сумма || 0);
       const fullPrice = Number(line.Цена || 0) * quantity;
+      const discount =
+        Number(line.СуммаАвтоматическойСкидки || 0) +
+        Number(line.СуммаРучнойСкидки || 0) +
+        Number(line.СуммаСкидкиОплатыБонусом || 0);
 
       current.КоличествоTurnover += sign * quantity;
       current.СтоимостьTurnover += sign * amount;
       current.СтоимостьБезСкидокTurnover += sign * Math.max(fullPrice, amount);
+      current.СуммаСкидок += sign * Math.max(discount, fullPrice - amount, 0);
+      if (origin === "check" && sign > 0 && documentKey) {
+        current._checkKeys.add(documentKey);
+      }
+      if (documentDate) {
+        const dateMatch = String(documentDate).match(/^(\d{4}-\d{2}-\d{2})/);
+        const date = dateMatch?.[1];
+        if (date) {
+          current.ПродажиПоДатам[date] =
+            Number(current.ПродажиПоДатам[date] || 0) + sign * amount;
+        }
+      }
       if (sign > 0) current.СтрокПродаж += 1;
       else current.СтрокВозвратов += 1;
       grouped.set(key, current);
@@ -572,6 +683,7 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
           "ВидОперации",
           "Магазин_Key",
           "Продавец_Key",
+          "ЗаказПокупателя_Key",
           "Товары",
         ].join(","),
         $orderby: "Date desc",
@@ -610,6 +722,9 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
             sign,
             documentSellerKey: check.Продавец_Key,
             origin: "check",
+            documentKey: check.Ref_Key,
+            documentDate: check.Date,
+            orderKey: check.ЗаказПокупателя_Key,
           });
         });
       });
@@ -635,6 +750,8 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
             sign: 1,
             documentSellerKey: null,
             origin: "retail-report",
+            documentDate: report.Date,
+            orderKey: line.ЗаказПокупателя_Key,
           }),
         );
         (report.ВозвращенныеТовары || []).forEach((line) =>
@@ -644,12 +761,18 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
             sign: -1,
             documentSellerKey: null,
             origin: "retail-report",
+            documentDate: report.Date,
+            orderKey: line.ЗаказПокупателя_Key,
           }),
         );
       });
     }
 
-    const items = [...grouped.values()].sort(
+    const items = [...grouped.values()].map(({ _checkKeys, ...item }) => ({
+      ...item,
+      Чеков: _checkKeys.size,
+      ИдентификаторыЧеков: [..._checkKeys],
+    })).sort(
       (left, right) => right.СтоимостьTurnover - left.СтоимостьTurnover,
     );
     const consultants = await loadReferencesByKeysBatched(
@@ -671,6 +794,7 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       references: { sellers: consultants, stores },
       meta: {
         days,
+        channel,
         loaded: items.length,
         latestDate: latestDate ? normalizeOnecDateTime(latestDate) : null,
         freshness: describeDataFreshness(latestDate),
@@ -1188,6 +1312,126 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
   }
 });
 
+async function loadMarginPeriod(
+  startDate,
+  endDate,
+  storeKey = "all",
+  channel = "all",
+) {
+  const dimensions = [
+    ...(storeKey === "all" ? [] : ["Магазин"]),
+    ...(channel === "all" ? [] : ["ЗаказПокупателя"]),
+  ];
+  const rows = await onecTurnovers("AccumulationRegister_Продажи", {
+    startPeriod: startDate,
+    endPeriod: endDate,
+    dimensions: dimensions.join(","),
+    top: dimensions.length ? 10_000 : 10,
+    select: [
+      ...(storeKey === "all" ? [] : ["Магазин_Key"]),
+      ...(channel === "all" ? [] : ["ЗаказПокупателя_Key"]),
+      "СтоимостьTurnover",
+      "ор_СебестоимостьTurnover",
+    ].join(","),
+  });
+  const scopedRows = rows.filter((item) => {
+    const matchesStore = storeKey === "all" || item.Магазин_Key === storeKey;
+    const matchesChannel = channel === "all" ||
+      channelByCustomerOrder(item.ЗаказПокупателя_Key) === channel;
+    return matchesStore && matchesChannel;
+  });
+  const revenue = scopedRows.reduce(
+    (sum, item) => sum + Number(item.СтоимостьTurnover || 0),
+    0,
+  );
+  const cost = scopedRows.reduce(
+    (sum, item) => sum + Number(item.ор_СебестоимостьTurnover || 0),
+    0,
+  );
+  const profit = revenue - cost;
+  return {
+    revenue,
+    cost,
+    profit,
+    marginPercent: revenue > 0 ? (profit / revenue) * 100 : 0,
+  };
+}
+
+app.get("/api/dashboard/onec-margin", async (request, response) => {
+  try {
+    const from = typeof request.query.from === "string" ? request.query.from : "";
+    const to = typeof request.query.to === "string" ? request.query.to : "";
+    const hasCustomRange = /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to);
+    const days = [1, 7, 30, 90].includes(Number(request.query.days))
+      ? Number(request.query.days)
+      : 30;
+    const storeKey = typeof request.query.storeKey === "string"
+      ? request.query.storeKey
+      : "all";
+    const channel = salesChannel(request.query.channel);
+
+    let currentFrom;
+    let currentTo;
+
+    if (hasCustomRange) {
+      currentFrom = new Date(parseOnecDateTime(`${from}T00:00:00`));
+      currentTo = new Date(parseOnecDateTime(`${to}T23:59:59`) + 1000);
+    } else {
+      const latest = await onecGet("AccumulationRegister_Продажи_RecordType", {
+        $top: 20,
+        $select: "Period",
+        $filter: "Active eq true",
+        $orderby: "Period desc",
+      });
+      if (!latest.length) {
+        return response.json({
+          items: {
+            current: { revenue: 0, cost: 0, profit: 0, marginPercent: 0 },
+            previous: { revenue: 0, cost: 0, profit: 0, marginPercent: 0 },
+          },
+          meta: { source: "AccumulationRegister_Продажи/Turnovers" },
+        });
+      }
+      const activity = resolveActivityAnchor(latest, "Period");
+      const anchor = activity.anchorDate;
+      const dayStart = new Date(anchor);
+      dayStart.setHours(0, 0, 0, 0);
+      currentFrom = new Date(dayStart.getTime() - (days - 1) * 86_400_000);
+      currentTo = new Date(dayStart.getTime() + 86_400_000);
+    }
+
+    const duration = currentTo.getTime() - currentFrom.getTime();
+    const previousTo = new Date(currentFrom.getTime());
+    const previousFrom = new Date(previousTo.getTime() - duration);
+
+    const [current, previous] = await Promise.all([
+      loadMarginPeriod(currentFrom, currentTo, storeKey, channel),
+      loadMarginPeriod(previousFrom, previousTo, storeKey, channel),
+    ]);
+
+    response.json({
+      items: { current, previous },
+      meta: {
+        source: "AccumulationRegister_Продажи/Turnovers",
+        revenueField: "СтоимостьTurnover",
+        costField: "ор_СебестоимостьTurnover",
+        storeKey,
+        channel,
+        periodStart: currentFrom.toISOString(),
+        periodEnd: currentTo.toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error("Ошибка расчёта маржи 1С:", error);
+    response.status(502).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : "Не удалось получить маржу из 1С",
+    });
+  }
+});
+
 app.get("/api/dashboard/onec-stock", async (request, response) => {
   try {
     const top = Math.min(
@@ -1373,12 +1617,17 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
       Math.max(Number(request.query.days) || 60, 1),
       365,
     );
+    const from = typeof request.query.from === "string" ? request.query.from : "";
+    const to = typeof request.query.to === "string" ? request.query.to : "";
+    const hasCustomRange = /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to);
 
     const startedAt = Date.now();
-    const reportResult = await loadReportPagesCached({
-      limit: requestedTop + 1,
-      days,
-    });
+    const reportResult = hasCustomRange
+      ? { items: await loadReportPagesByRange({ limit: requestedTop + 1, from, to }), cache: "range" }
+      : await loadReportPagesCached({
+          limit: requestedTop + 1,
+          days,
+        });
     const truncated = reportResult.items.length > requestedTop;
     const items = reportResult.items.slice(0, requestedTop).map((report) => ({
       ...report,
@@ -1387,7 +1636,9 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
     const latestDate = items[0]?.Date || null;
     const commonMeta = {
       loaded: items.length,
-      days,
+      days: hasCustomRange ? undefined : days,
+      from: hasCustomRange ? from : undefined,
+      to: hasCustomRange ? to : undefined,
       latestDate,
       freshness: describeDataFreshness(latestDate),
       truncated,
@@ -1491,13 +1742,20 @@ app.get("/api/dashboard/onec-check-analytics", async (request, response) => {
       ),
       10_000,
     );
+    const from = typeof request.query.from === "string" ? request.query.from : "";
+    const to = typeof request.query.to === "string" ? request.query.to : "";
+    const hasCustomRange = /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to);
     const startedAt = Date.now();
-    const analytics = await loadCheckAnalytics({ days, limit });
+    const analytics = hasCustomRange
+      ? await loadCheckAnalyticsRange({ from, to, limit })
+      : await loadCheckAnalytics({ days, limit });
 
     response.json({
       items: analytics,
       meta: {
-        days,
+        days: hasCustomRange ? undefined : days,
+        from: hasCustomRange ? from : undefined,
+        to: hasCustomRange ? to : undefined,
         loaded: analytics.loaded,
         latestDate: analytics.latestDate,
         absoluteLatestDate: analytics.absoluteLatestDate,

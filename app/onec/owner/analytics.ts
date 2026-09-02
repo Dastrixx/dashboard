@@ -50,13 +50,29 @@ function inRange(report: OnecRetailReport, from: number, to: number) {
   return timestamp >= from && timestamp <= to;
 }
 
+function startOfCalendarDay(timestamp: number) {
+  const date = new Date(timestamp);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function periodBounds(latestTimestamp: number, days: Period) {
+  const latestDayStart = startOfCalendarDay(latestTimestamp);
+  const currentFrom = latestDayStart - (days - 1) * DAY_MS;
+  const currentTo = latestDayStart + DAY_MS - 1;
+  const previousTo = currentFrom - 1;
+  const previousFrom = currentFrom - days * DAY_MS;
+
+  return { currentFrom, currentTo, previousFrom, previousTo };
+}
+
 function buildComparison(
   current: OnecRetailReport[],
   previous: OnecRetailReport[],
   currentFrom: number,
   previousFrom: number,
   latestTimestamp: number,
-  days: Period,
+  days: number,
 ): OwnerComparisonBucket[] {
   const bucketCount = days === 7 ? 7 : 15;
   const duration = days * DAY_MS;
@@ -134,23 +150,47 @@ export function buildOwnerOverview(
   products: OnecProductReference[],
   categories: OnecCategoryReference[],
   days: Period,
+  dateRange?: { from: string; to: string } | null,
 ): OwnerOverviewAnalytics | null {
   const reports = sourceReports.filter((report) => report.Posted);
-  const latestTimestamp = Math.max(
+  const absoluteLatestTimestamp = Math.max(
     ...reports.map((report) => new Date(report.Date).getTime()),
     0,
   );
-  if (!latestTimestamp) return null;
+  if (!absoluteLatestTimestamp) return null;
 
-  const duration = days * DAY_MS;
-  const currentFrom = latestTimestamp - duration + 1;
-  const previousTo = currentFrom - 1;
-  const previousFrom = previousTo - duration + 1;
+  const customFrom = dateRange
+    ? new Date(`${dateRange.from}T00:00:00`).getTime()
+    : null;
+  const customTo = dateRange
+    ? new Date(`${dateRange.to}T23:59:59.999`).getTime()
+    : null;
+  const customDuration =
+    customFrom !== null && customTo !== null ? customTo - customFrom + 1 : 0;
+  const bounds =
+    customFrom !== null &&
+    customTo !== null &&
+    Number.isFinite(customFrom) &&
+    Number.isFinite(customTo) &&
+    customFrom <= customTo
+      ? {
+          currentFrom: customFrom,
+          currentTo: customTo,
+          previousFrom: customFrom - customDuration,
+          previousTo: customFrom - 1,
+        }
+      : periodBounds(absoluteLatestTimestamp, days);
+  const { currentFrom, currentTo, previousFrom, previousTo } = bounds;
   const current = reports.filter((report) =>
-    inRange(report, currentFrom, latestTimestamp),
+    inRange(report, currentFrom, currentTo),
   );
   const previous = reports.filter((report) =>
     inRange(report, previousFrom, previousTo),
+  );
+  if (!current.length) return null;
+
+  const latestTimestamp = Math.max(
+    ...current.map((report) => new Date(report.Date).getTime()),
   );
 
   const activityDates = [...new Set(reports.map((report) => report.Date.slice(0, 10)))]
@@ -195,7 +235,7 @@ export function buildOwnerOverview(
       currentFrom,
       previousFrom,
       latestTimestamp,
-      days,
+      Math.max(Math.round((currentTo - currentFrom + 1) / DAY_MS), 1),
     ),
     categories: buildCategories(current, products, categories),
   };

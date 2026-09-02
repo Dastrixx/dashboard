@@ -1,7 +1,6 @@
 import { BadgePercent, CircleAlert, Gift, TrendingDown, TrendingUp } from "lucide-react";
 import type { CheckAnalytics } from "../sales/types";
-import type { Period } from "../types";
-import { money, periodLabel } from "./format";
+import { money } from "./format";
 import type { OwnerOverviewAnalytics } from "./types";
 
 type Insight = {
@@ -15,12 +14,12 @@ export function ImportantInsights({
   analytics,
   checks,
   checksError,
-  period,
+  periodCaption,
 }: {
   analytics: OwnerOverviewAnalytics;
   checks: CheckAnalytics | null;
   checksError: string;
-  period: Period;
+  periodCaption: string;
 }) {
   const insights: Insight[] = [];
   const growth = analytics.period.revenueGrowth;
@@ -39,7 +38,7 @@ export function ImportantInsights({
     insights.push({
       tone: "good",
       title: `Лидер — ${leader.label}`,
-      description: `${leader.share.toFixed(1)}% выручки, ${money.format(leader.revenue)} за ${periodLabel[period]}.`,
+      description: `${leader.share.toFixed(1)}% выручки, ${money.format(leader.revenue)} за ${periodCaption}.`,
       icon: TrendingUp,
     });
   }
