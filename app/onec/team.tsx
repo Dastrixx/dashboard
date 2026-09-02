@@ -98,8 +98,8 @@ export function OnecTeam() {
           salesLines: Number(item.СтрокПродаж || 0),
         };
       })
-      // Сортируем по сумме без скидок — она главная
-      .sort((left, right) => right.revenueWithoutDiscount - left.revenueWithoutDiscount);
+      // Сортируем по фактической выручке (со скидками) — главная цифра
+      .sort((left, right) => right.revenue - left.revenue);
 
     const rows = allRows.filter(
       (item) =>
@@ -108,16 +108,14 @@ export function OnecTeam() {
           `${item.seller} ${item.store}`.toLowerCase().includes(query)),
     );
 
-    // Основная выручка — без скидок; фактическая — со скидками
-    const totalRevenue = rows.reduce(
+    // Основная выручка — фактически полученная (со скидками)
+    const totalRevenue = rows.reduce((sum, item) => sum + item.revenue, 0);
+    // До скидок — справочно
+    const totalGrossRevenue = rows.reduce(
       (sum, item) => sum + item.revenueWithoutDiscount,
       0,
     );
-    const totalActualRevenue = rows.reduce(
-      (sum, item) => sum + item.revenue,
-      0,
-    );
-    const totalDiscount = Math.max(totalRevenue - totalActualRevenue, 0);
+    const totalDiscount = Math.max(totalGrossRevenue - totalRevenue, 0);
     const totalQuantity = rows.reduce((sum, item) => sum + item.quantity, 0);
 
     const branchMap = new Map<
@@ -130,8 +128,7 @@ export function OnecTeam() {
         name: item.store,
         revenue: 0,
       };
-      // В диаграмме по филиалам тоже без скидок
-      branch.revenue += item.revenueWithoutDiscount;
+      branch.revenue += item.revenue;
       branchMap.set(item.storeKey, branch);
     });
 
@@ -139,8 +136,8 @@ export function OnecTeam() {
       rows: rows.map((item, index) => ({
         ...item,
         rank: index + 1,
-        // Доля — от суммы без скидок
-        share: totalRevenue ? (item.revenueWithoutDiscount / totalRevenue) * 100 : 0,
+        // Доля — от фактической выручки
+        share: totalRevenue ? (item.revenue / totalRevenue) * 100 : 0,
         discount: Math.max(item.revenueWithoutDiscount - item.revenue, 0),
       })),
       stores: [...stores.values()].sort((left, right) =>
@@ -150,7 +147,7 @@ export function OnecTeam() {
         (left, right) => right.revenue - left.revenue,
       ),
       totalRevenue,
-      totalActualRevenue,
+      totalGrossRevenue,
       totalDiscount,
       totalQuantity,
       sellers: new Set(rows.map((item) => item.sellerKey)).size,
@@ -253,16 +250,18 @@ export function OnecTeam() {
         </div>
         <div className="team-plan-metrics">
           <div>
-            <span>Продажи без скидок</span>
+            <span>Выручка (факт)</span>
             <strong>{money.format(view.totalRevenue)}</strong>
-            <small>факт: {money.format(view.totalActualRevenue)}</small>
+            <small>
+              до скидок: {money.format(view.totalGrossRevenue)}
+            </small>
           </div>
           <div>
             <span>Скидки</span>
             <strong>{money.format(view.totalDiscount)}</strong>
             <small>
-              {view.totalRevenue > 0
-                ? `${number.format((view.totalDiscount / view.totalRevenue) * 100)}% от суммы`
+              {view.totalGrossRevenue > 0
+                ? `${number.format((view.totalDiscount / view.totalGrossRevenue) * 100)}% от объёма`
                 : "—"}
             </small>
           </div>
@@ -309,9 +308,9 @@ export function OnecTeam() {
           <span className="team-plan-kicker">Лидер периода</span>
           <strong>{view.rows[0]?.seller || "Нет данных"}</strong>
           <p>{view.rows[0]?.store || "Филиал не указан"}</p>
-          <b>{money.format(view.rows[0]?.revenueWithoutDiscount || 0)}</b>
+          <b>{money.format(view.rows[0]?.revenue || 0)}</b>
           <small>
-            факт: {money.format(view.rows[0]?.revenue || 0)} ·{" "}
+            до скидок: {money.format(view.rows[0]?.revenueWithoutDiscount || 0)} ·{" "}
             {number.format(view.rows[0]?.quantity || 0)} ед.
           </small>
         </article>
@@ -343,7 +342,7 @@ export function OnecTeam() {
                 <th>Место</th>
                 <th>Продавец</th>
                 <th>Филиал</th>
-                <th>Продажи (без скидок)</th>
+                <th>Продажи (факт)</th>
                 <th>Продано</th>
                 <th>Доля команды</th>
               </tr>
@@ -359,11 +358,11 @@ export function OnecTeam() {
                   </td>
                   <td>{item.store}</td>
                   <td>
-                    {/* Главная цифра — без скидок */}
-                    <strong>{money.format(item.revenueWithoutDiscount)}</strong>
+                    {/* Главная цифра — фактически полученное (со скидкой) */}
+                    <strong>{money.format(item.revenue)}</strong>
                     {item.discount > 0 && (
                       <span className="team-actual-revenue">
-                        факт: {money.format(item.revenue)}
+                        до скидки: {money.format(item.revenueWithoutDiscount)}
                       </span>
                     )}
                   </td>
