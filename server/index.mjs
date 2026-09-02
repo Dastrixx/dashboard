@@ -42,6 +42,15 @@ import {
 const app = express();
 const port = Number(process.env.PORT || 4000);
 
+function salesChannel(value) {
+  const channel = String(value || "all").toLowerCase();
+  return ["online", "offline"].includes(channel) ? channel : "all";
+}
+
+function channelByCustomerOrder(orderKey) {
+  return orderKey && orderKey !== EMPTY_GUID ? "online" : "offline";
+}
+
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use((_, response, next) => {
@@ -88,7 +97,8 @@ app.get("/api/dashboard/team-plan", (request, response) => {
     ? Number(request.query.period)
     : 30;
   const storeKey = String(request.query.storeKey || "all");
-  response.json({ item: authStore.getTeamSalesPlan(storeKey, period) });
+  const channel = salesChannel(request.query.channel);
+  response.json({ item: authStore.getTeamSalesPlan(storeKey, period, channel) });
 });
 
 app.put("/api/dashboard/team-plan", (request, response) => {
@@ -100,6 +110,7 @@ app.put("/api/dashboard/team-plan", (request, response) => {
     const item = authStore.setTeamSalesPlan({
       storeKey: request.body?.storeKey || "all",
       periodDays: request.body?.period,
+      channel: salesChannel(request.body?.channel),
       amount: request.body?.amount,
       updatedBy: request.auth.user.id,
     });
@@ -568,6 +579,7 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     const days = [1, 7, 30].includes(Number(request.query.days))
       ? Number(request.query.days)
       : 30;
+    const channel = salesChannel(request.query.channel);
     const grouped = new Map();
     let salesLines = 0;
     let returnLines = 0;
@@ -588,7 +600,14 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       origin,
       documentKey,
       documentDate,
+      orderKey,
     }) => {
+      const lineOrderKey =
+        line.ЗаказПокупателя_Key && line.ЗаказПокупателя_Key !== EMPTY_GUID
+          ? line.ЗаказПокупателя_Key
+          : orderKey;
+      const lineChannel = channelByCustomerOrder(lineOrderKey);
+      if (channel !== "all" && channel !== lineChannel) return;
       if (sign > 0) salesLines += 1;
       else returnLines += 1;
 
@@ -664,6 +683,7 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
           "ВидОперации",
           "Магазин_Key",
           "Продавец_Key",
+          "ЗаказПокупателя_Key",
           "Товары",
         ].join(","),
         $orderby: "Date desc",
@@ -704,6 +724,7 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
             origin: "check",
             documentKey: check.Ref_Key,
             documentDate: check.Date,
+            orderKey: check.ЗаказПокупателя_Key,
           });
         });
       });
@@ -730,6 +751,7 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
             documentSellerKey: null,
             origin: "retail-report",
             documentDate: report.Date,
+            orderKey: line.ЗаказПокупателя_Key,
           }),
         );
         (report.ВозвращенныеТовары || []).forEach((line) =>
@@ -740,6 +762,7 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
             documentSellerKey: null,
             origin: "retail-report",
             documentDate: report.Date,
+            orderKey: line.ЗаказПокупателя_Key,
           }),
         );
       });
@@ -771,6 +794,7 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       references: { sellers: consultants, stores },
       meta: {
         days,
+        channel,
         loaded: items.length,
         latestDate: latestDate ? normalizeOnecDateTime(latestDate) : null,
         freshness: describeDataFreshness(latestDate),
@@ -1288,21 +1312,34 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
   }
 });
 
-async function loadMarginPeriod(startDate, endDate, storeKey = "all") {
+async function loadMarginPeriod(
+  startDate,
+  endDate,
+  storeKey = "all",
+  channel = "all",
+) {
+  const dimensions = [
+    ...(storeKey === "all" ? [] : ["Магазин"]),
+    ...(channel === "all" ? [] : ["ЗаказПокупателя"]),
+  ];
   const rows = await onecTurnovers("AccumulationRegister_Продажи", {
     startPeriod: startDate,
     endPeriod: endDate,
-    dimensions: storeKey === "all" ? "" : "Магазин",
-    top: storeKey === "all" ? 10 : 500,
+    dimensions: dimensions.join(","),
+    top: dimensions.length ? 10_000 : 10,
     select: [
       ...(storeKey === "all" ? [] : ["Магазин_Key"]),
+      ...(channel === "all" ? [] : ["ЗаказПокупателя_Key"]),
       "СтоимостьTurnover",
       "ор_СебестоимостьTurnover",
     ].join(","),
   });
-  const scopedRows = storeKey === "all"
-    ? rows
-    : rows.filter((item) => item.Магазин_Key === storeKey);
+  const scopedRows = rows.filter((item) => {
+    const matchesStore = storeKey === "all" || item.Магазин_Key === storeKey;
+    const matchesChannel = channel === "all" ||
+      channelByCustomerOrder(item.ЗаказПокупателя_Key) === channel;
+    return matchesStore && matchesChannel;
+  });
   const revenue = scopedRows.reduce(
     (sum, item) => sum + Number(item.СтоимостьTurnover || 0),
     0,
@@ -1331,6 +1368,7 @@ app.get("/api/dashboard/onec-margin", async (request, response) => {
     const storeKey = typeof request.query.storeKey === "string"
       ? request.query.storeKey
       : "all";
+    const channel = salesChannel(request.query.channel);
 
     let currentFrom;
     let currentTo;
@@ -1367,8 +1405,8 @@ app.get("/api/dashboard/onec-margin", async (request, response) => {
     const previousFrom = new Date(previousTo.getTime() - duration);
 
     const [current, previous] = await Promise.all([
-      loadMarginPeriod(currentFrom, currentTo, storeKey),
-      loadMarginPeriod(previousFrom, previousTo, storeKey),
+      loadMarginPeriod(currentFrom, currentTo, storeKey, channel),
+      loadMarginPeriod(previousFrom, previousTo, storeKey, channel),
     ]);
 
     response.json({
@@ -1378,6 +1416,7 @@ app.get("/api/dashboard/onec-margin", async (request, response) => {
         revenueField: "СтоимостьTurnover",
         costField: "ор_СебестоимостьTurnover",
         storeKey,
+        channel,
         periodStart: currentFrom.toISOString(),
         periodEnd: currentTo.toISOString(),
       },
