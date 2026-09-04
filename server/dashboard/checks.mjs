@@ -12,13 +12,24 @@ const CHECK_SELECT = [
   "Ref_Key",
   "Number",
   "Date",
+  "DeletionMark",
   "Posted",
+  "СтатусЧекаККМ",
   "ВидОперации",
   "СуммаДокумента",
   "Товары",
   "Оплата",
   "ПогашениеПодарочныхСертификатов",
 ].join(",");
+
+const COMPLETED_CHECK_FILTER = [
+  "DeletionMark eq false",
+  "and (",
+  "Posted eq true",
+  "or СтатусЧекаККМ eq 'Пробитый'",
+  "or СтатусЧекаККМ eq 'Архивный'",
+  ")",
+].join(" ");
 
 const checkAnalyticsCache = new Map();
 let paymentKindsCache = null;
@@ -205,7 +216,7 @@ async function loadChecks({ days, limit }) {
   const latest = await onecGet(CHECK_ENTITY, {
     $top: 20,
     $select: "Date",
-    $filter: "Posted eq true",
+    $filter: COMPLETED_CHECK_FILTER,
     $orderby: "Date desc",
   });
 
@@ -221,7 +232,7 @@ async function loadChecks({ days, limit }) {
     100,
   );
   const dateFilter = [
-    "Posted eq true",
+    COMPLETED_CHECK_FILTER,
     `Date ge datetime'${toOdataDateTime(fromTimestamp)}'`,
   ].join(" and ");
 
@@ -255,7 +266,7 @@ async function loadChecks({ days, limit }) {
       "1С не приняла период аналитики чеков, используем локальный фильтр:",
       error instanceof Error ? error.message : error,
     );
-    loaded = await load("Posted eq true");
+    loaded = await load(COMPLETED_CHECK_FILTER);
   }
 
   return {
@@ -271,7 +282,7 @@ async function loadChecksByRange({ fromTimestamp, toTimestamp, limit }) {
     100,
   );
   const filter = [
-    "Posted eq true",
+    COMPLETED_CHECK_FILTER,
     `Date ge datetime'${toOdataDateTime(fromTimestamp)}'`,
     `Date le datetime'${toOdataDateTime(toTimestamp)}'`,
   ].join(" and ");
