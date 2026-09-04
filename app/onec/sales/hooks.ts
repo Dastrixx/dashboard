@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { API_URL, PERIODS } from "./config";
+import { loadCheckAnalytics } from "./check-api";
 import type {
   AnalyticsPeriod,
   CheckAnalytics,
-  CheckAnalyticsResponse,
   OnecCategoryReference,
   OnecProductReference,
   OnecRetailReport,
@@ -190,28 +190,18 @@ export function useCheckAnalytics(period: AnalyticsPeriod) {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const controller = new AbortController();
+    let active = true;
 
     async function load() {
       try {
         setLoading(true);
         setError("");
-        const response = await fetch(
-          `${API_URL}/api/dashboard/onec-check-analytics?days=${PERIODS[period].days}`,
-          { signal: controller.signal, credentials: "include" },
+        const analytics = await loadCheckAnalytics(
+          `days=${PERIODS[period].days}`,
         );
-        const payload = (await response.json()) as CheckAnalyticsResponse;
-
-        if (!response.ok) {
-          throw new Error(payload.message || `Ошибка HTTP ${response.status}`);
-        }
-        if (!payload.items) {
-          throw new Error("1С вернула пустой ответ по чекам");
-        }
-
-        setData(payload.items);
+        if (active) setData(analytics);
       } catch (loadError) {
-        if (isAbortError(loadError)) return;
+        if (!active) return;
 
         setData(null);
         setError(
@@ -220,12 +210,14 @@ export function useCheckAnalytics(period: AnalyticsPeriod) {
             : "Не удалось загрузить аналитику чеков",
         );
       } finally {
-        if (!controller.signal.aborted) setLoading(false);
+        if (active) setLoading(false);
       }
     }
 
     load();
-    return () => controller.abort();
+    return () => {
+      active = false;
+    };
   }, [period]);
 
   return { data, loading, error };

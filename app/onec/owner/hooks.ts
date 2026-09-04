@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { API_URL } from "../shared";
+import { loadCheckAnalytics } from "../sales/check-api";
 import type {
   CheckAnalytics,
-  CheckAnalyticsResponse,
   OnecCategoryReference,
   OnecProductReference,
   OnecRetailReport,
@@ -42,6 +42,8 @@ export function useOwnerOverview(
   period: Period,
   dateRange?: OwnerDateRange | null,
 ): OwnerOverviewState {
+  const rangeFrom = dateRange?.from;
+  const rangeTo = dateRange?.to;
   const [reports, setReports] = useState<OnecRetailReport[]>([]);
   const [products, setProducts] = useState<OnecProductReference[]>([]);
   const [categories, setCategories] = useState<OnecCategoryReference[]>([]);
@@ -64,9 +66,16 @@ export function useOwnerOverview(
       try {
         setReportsLoading(true);
         setReportsError("");
-        const reportQuery = dateRange
-          ? `from=${previousRangeStart(dateRange)}&to=${dateRange.to}`
-          : `days=${period * 2}`;
+        const reportQuery =
+          rangeFrom && rangeTo
+            ? [
+                `from=${previousRangeStart({
+                  from: rangeFrom,
+                  to: rangeTo,
+                })}`,
+                `to=${rangeTo}`,
+              ].join("&")
+            : `days=${period * 2}`;
         const response = await fetch(
           `${API_URL}/api/dashboard/onec-reports?top=500&${reportQuery}&references=false`,
           { signal: controller.signal, credentials: "include" },
@@ -87,9 +96,16 @@ export function useOwnerOverview(
       try {
         setReferencesLoading(true);
         setReferencesError("");
-        const reportQuery = dateRange
-          ? `from=${previousRangeStart(dateRange)}&to=${dateRange.to}`
-          : `days=${period * 2}`;
+        const reportQuery =
+          rangeFrom && rangeTo
+            ? [
+                `from=${previousRangeStart({
+                  from: rangeFrom,
+                  to: rangeTo,
+                })}`,
+                `to=${rangeTo}`,
+              ].join("&")
+            : `days=${period * 2}`;
         const response = await fetch(
           `${API_URL}/api/dashboard/onec-reports?top=500&${reportQuery}`,
           { signal: controller.signal, credentials: "include" },
@@ -121,8 +137,8 @@ export function useOwnerOverview(
       try {
         setMarginLoading(true);
         setMarginError("");
-        const query = dateRange
-          ? `from=${dateRange.from}&to=${dateRange.to}`
+        const query = rangeFrom && rangeTo
+          ? `from=${rangeFrom}&to=${rangeTo}`
           : `days=${period}`;
         const response = await fetch(
           `${API_URL}/api/dashboard/onec-margin?${query}`,
@@ -145,29 +161,19 @@ export function useOwnerOverview(
       try {
         setChecksLoading(true);
         setChecksError("");
-        const [periodResponse, todayResponse] = await Promise.all([
-          fetch(
-            dateRange
-              ? `${API_URL}/api/dashboard/onec-check-analytics?from=${dateRange.from}&to=${dateRange.to}`
-              : `${API_URL}/api/dashboard/onec-check-analytics?days=${period}`,
-            { signal: controller.signal, credentials: "include" },
-          ),
-          fetch(
-            dateRange
-              ? `${API_URL}/api/dashboard/onec-check-analytics?from=${dateRange.to}&to=${dateRange.to}`
-              : `${API_URL}/api/dashboard/onec-check-analytics?days=1`,
-            {
-              signal: controller.signal,
-              credentials: "include",
-            },
-          ),
-        ]);
-        const [periodPayload, todayPayload] = await Promise.all([
-          readJson<CheckAnalyticsResponse>(periodResponse),
-          readJson<CheckAnalyticsResponse>(todayResponse),
-        ]);
-        setChecks(periodPayload.items || null);
-        setTodayChecks(todayPayload.items || null);
+        const query = rangeFrom && rangeTo
+          ? `from=${rangeFrom}&to=${rangeTo}`
+          : `days=${period}`;
+        const analytics = await loadCheckAnalytics(query);
+
+        if (controller.signal.aborted) return;
+
+        setChecks(analytics);
+        setTodayChecks(
+          analytics.latestDay
+            ? { ...analytics, current: analytics.latestDay }
+            : null,
+        );
       } catch (error) {
         if (isAbortError(error)) return;
         setChecks(null);
@@ -185,7 +191,7 @@ export function useOwnerOverview(
     loadChecks();
     loadMargin();
     return () => controller.abort();
-  }, [period, dateRange?.from, dateRange?.to]);
+  }, [period, rangeFrom, rangeTo]);
 
   const analytics = useMemo(
     () => buildOwnerOverview(reports, products, categories, period, dateRange),

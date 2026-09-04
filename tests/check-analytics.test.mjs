@@ -61,6 +61,8 @@ test("check analytics includes discounts, returns and gift certificates", () => 
   assert.equal(result.current.returnsAmount, 250);
   assert.equal(result.current.certificatePayments, 400);
   assert.equal(result.current.certificatesUsed, 2);
+  assert.equal(result.latestDay.checks, 2);
+  assert.equal(result.latestDay.netRevenue, 1750);
   assert.equal(result.previous.checks, 1);
 });
 

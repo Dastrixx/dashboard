@@ -158,6 +158,12 @@ export function buildCheckAnalytics(
   return {
     current: summarizeChecks(current, certificatePaymentKeys),
     previous: summarizeChecks(previous, certificatePaymentKeys),
+    latestDay: summarizeChecks(
+      current.filter(
+        (check) => parseOnecDateTime(check.Date) >= currentTo - DAY_MS + 1,
+      ),
+      certificatePaymentKeys,
+    ),
     series: buildBuckets(current, currentFrom, currentTo + 1, days),
     periodStart: new Date(currentFrom).toISOString(),
     periodEnd: new Date(currentTo).toISOString(),
@@ -287,7 +293,7 @@ async function loadChecksByRange({ fromTimestamp, toTimestamp, limit }) {
   return { checks: result, truncated: result.length >= limit };
 }
 
-export async function loadCheckAnalyticsRange({ from, to, limit }) {
+async function computeCheckAnalyticsRange({ from, to, limit }) {
   const currentFrom = parseOnecDateTime(`${from}T00:00:00`);
   const currentTo = parseOnecDateTime(`${to}T23:59:59`);
 
@@ -316,6 +322,12 @@ export async function loadCheckAnalyticsRange({ from, to, limit }) {
   return {
     current: summarizeChecks(current, certificatePaymentKeys),
     previous: summarizeChecks(previous, certificatePaymentKeys),
+    latestDay: summarizeChecks(
+      current.filter(
+        (check) => parseOnecDateTime(check.Date) >= currentTo - DAY_MS + 1,
+      ),
+      certificatePaymentKeys,
+    ),
     series: buildBuckets(current, currentFrom, currentTo + 1, days),
     periodStart: new Date(currentFrom).toISOString(),
     periodEnd: new Date(currentTo).toISOString(),
@@ -324,8 +336,39 @@ export async function loadCheckAnalyticsRange({ from, to, limit }) {
       : null,
     loaded: loaded.checks.length,
     truncated: loaded.truncated,
-    cache: "range",
   };
+}
+
+export async function loadCheckAnalyticsRange({ from, to, limit }) {
+  const key = `range:${from}:${to}:${limit}`;
+  const now = Date.now();
+  const cached = checkAnalyticsCache.get(key);
+
+  if (cached?.value && cached.expiresAt > now) {
+    return { ...cached.value, cache: "hit" };
+  }
+  if (cached?.promise) {
+    return { ...(await cached.promise), cache: "shared" };
+  }
+
+  const ttlMs = Math.max(
+    Number(process.env.ONEC_REPORT_CACHE_TTL_MS || 30_000),
+    5_000,
+  );
+  const promise = computeCheckAnalyticsRange({ from, to, limit });
+  checkAnalyticsCache.set(key, { promise, expiresAt: now + ttlMs });
+
+  try {
+    const value = await promise;
+    checkAnalyticsCache.set(key, {
+      value,
+      expiresAt: Date.now() + ttlMs,
+    });
+    return { ...value, cache: "miss" };
+  } catch (error) {
+    checkAnalyticsCache.delete(key);
+    throw error;
+  }
 }
 
 export async function loadCheckAnalytics({ days, limit }) {

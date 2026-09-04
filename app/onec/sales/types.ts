@@ -105,6 +105,7 @@ export type CheckSeriesItem = {
 export type CheckAnalytics = {
   current: CheckSummary;
   previous: CheckSummary;
+  latestDay?: CheckSummary;
   series: CheckSeriesItem[];
   periodStart: string | null;
   periodEnd: string | null;
