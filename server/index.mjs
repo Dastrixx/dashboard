@@ -38,18 +38,13 @@ import {
   loadCheckAnalytics,
   loadCheckAnalyticsRange,
 } from "./dashboard/checks.mjs";
+import {
+  parseSalesChannel,
+  salesChannelFromOrder,
+} from "./dashboard/sales-channels.mjs";
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
-
-function salesChannel(value) {
-  const channel = String(value || "all").toLowerCase();
-  return ["online", "offline"].includes(channel) ? channel : "all";
-}
-
-function channelByCustomerOrder(orderKey) {
-  return orderKey && orderKey !== EMPTY_GUID ? "online" : "offline";
-}
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
@@ -97,7 +92,7 @@ app.get("/api/dashboard/team-plan", (request, response) => {
     ? Number(request.query.period)
     : 30;
   const storeKey = String(request.query.storeKey || "all");
-  const channel = salesChannel(request.query.channel);
+  const channel = parseSalesChannel(request.query.channel);
   response.json({ item: authStore.getTeamSalesPlan(storeKey, period, channel) });
 });
 
@@ -110,7 +105,7 @@ app.put("/api/dashboard/team-plan", (request, response) => {
     const item = authStore.setTeamSalesPlan({
       storeKey: request.body?.storeKey || "all",
       periodDays: request.body?.period,
-      channel: salesChannel(request.body?.channel),
+      channel: parseSalesChannel(request.body?.channel),
       amount: request.body?.amount,
       updatedBy: request.auth.user.id,
     });
@@ -256,7 +251,11 @@ async function loadReportPagesByRange({ limit, from, to }) {
   const fromTimestamp = parseOnecDateTime(`${from}T00:00:00`);
   const toTimestamp = parseOnecDateTime(`${to}T23:59:59`);
 
-  if (!Number.isFinite(fromTimestamp) || !Number.isFinite(toTimestamp) || fromTimestamp > toTimestamp) {
+  if (
+    !Number.isFinite(fromTimestamp) ||
+    !Number.isFinite(toTimestamp) ||
+    fromTimestamp > toTimestamp
+  ) {
     throw new Error("Некорректный диапазон дат");
   }
 
@@ -359,7 +358,10 @@ async function loadConsultantReportPagesLegacy({ limit, days }) {
     return await load(dateFilter);
   } catch (error) {
     console.warn(
-      "1С не приняла период консультантов в розничных отчётах, используем совместимый fallback ec34f5a:",
+      [
+        "1С не приняла период консультантов в розничных отчётах,",
+        "используем совместимый fallback ec34f5a:",
+      ].join(" "),
       error instanceof Error ? error.message : error,
     );
     return load("Posted eq true");
@@ -453,6 +455,14 @@ async function loadReferencesByKeysBatched(entity, keys, select) {
   return loadReferencesByKeys(entity, keys, select);
 }
 
+function loadProductSubcategories(products) {
+  return loadReferencesByKeysBatched(
+    "Catalog_Номенклатура",
+    products.map((product) => product.Parent_Key),
+    "Ref_Key,Code,Description,Parent_Key,IsFolder",
+  );
+}
+
 async function loadProductKindsCatalog() {
   const now = Date.now();
 
@@ -495,23 +505,26 @@ app.get("/api/dashboard/onec-product-categories", async (request, response) => {
         "Code",
         "Description",
         "Артикул",
+        "Parent_Key",
         "ВидНоменклатуры_Key",
         "ТоварнаяГруппа_Key",
         "ТоварнаяКатегория_Key",
       ].join(","),
     });
 
-    const [productKinds, productGroups] = await Promise.all([
-      // В этой базе запрос Catalog_*(guid'...') может не вернуть запись.
-      // Справочник видов номенклатуры небольшой, поэтому надёжнее загрузить
-      // его целиком и сопоставить ключи в памяти.
-      loadProductKindsCatalog(),
-      loadReferencesByKeys(
-        "Catalog_ТоварныеГруппы",
-        products.map((product) => product.ТоварнаяГруппа_Key),
-        "Ref_Key,Code,Description,Parent_Key,IsFolder",
-      ),
-    ]);
+    const [productKinds, productGroups, productSubcategories] =
+      await Promise.all([
+        // В этой базе запрос Catalog_*(guid'...') может не вернуть запись.
+        // Справочник видов номенклатуры небольшой, поэтому надёжнее загрузить
+        // его целиком и сопоставить ключи в памяти.
+        loadProductKindsCatalog(),
+        loadReferencesByKeys(
+          "Catalog_ТоварныеГруппы",
+          products.map((product) => product.ТоварнаяГруппа_Key),
+          "Ref_Key,Code,Description,Parent_Key,IsFolder",
+        ),
+        loadProductSubcategories(products),
+      ]);
 
     const kinds = summarizeProductReference(
       products,
@@ -530,6 +543,11 @@ app.get("/api/dashboard/onec-product-categories", async (request, response) => {
     const categoryKeys = summarizeProductReference(
       products,
       "ТоварнаяКатегория_Key",
+    );
+    const subcategories = summarizeProductReference(
+      products,
+      "Parent_Key",
+      productSubcategories,
     );
 
     response.json({
@@ -550,17 +568,27 @@ app.get("/api/dashboard/onec-product-categories", async (request, response) => {
           })),
         productGroups: groups,
         productCategoryKeys: categoryKeys,
+        subcategories,
       },
-      references: { productKinds, productGroups },
+      references: {
+        productKinds,
+        productGroups,
+        subcategories: productSubcategories,
+      },
       meta: {
         loadedProducts: products.length,
         fields: {
           productKinds: "ВидНоменклатуры_Key",
           productGroups: "ТоварнаяГруппа_Key",
           productCategoryKeys: "ТоварнаяКатегория_Key",
+          subcategories: "Catalog_Номенклатура.Parent_Key",
         },
-        note:
-          "ТоварнаяКатегория_Key есть в карточке номенклатуры, но отдельный справочник товарных категорий не опубликован в standard.odata. Названия можно получить через ВидНоменклатуры, если именно там настроены четыре бизнес-категории.",
+        note: [
+          "ТоварнаяКатегория_Key есть в карточке номенклатуры,",
+          "но отдельный справочник товарных категорий не опубликован",
+          "в standard.odata. Названия можно получить через",
+          "ВидНоменклатуры, если там настроены бизнес-категории.",
+        ].join(" "),
       },
     });
   } catch (error) {
@@ -579,7 +607,7 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     const days = [1, 7, 30].includes(Number(request.query.days))
       ? Number(request.query.days)
       : 30;
-    const channel = salesChannel(request.query.channel);
+    const channel = parseSalesChannel(request.query.channel);
     const grouped = new Map();
     let salesLines = 0;
     let returnLines = 0;
@@ -606,7 +634,7 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
         line.ЗаказПокупателя_Key && line.ЗаказПокупателя_Key !== EMPTY_GUID
           ? line.ЗаказПокупателя_Key
           : orderKey;
-      const lineChannel = channelByCustomerOrder(lineOrderKey);
+      const lineChannel = salesChannelFromOrder(lineOrderKey);
       if (channel !== "all" && channel !== lineChannel) return;
       if (sign > 0) salesLines += 1;
       else returnLines += 1;
@@ -1337,7 +1365,7 @@ async function loadMarginPeriod(
   const scopedRows = rows.filter((item) => {
     const matchesStore = storeKey === "all" || item.Магазин_Key === storeKey;
     const matchesChannel = channel === "all" ||
-      channelByCustomerOrder(item.ЗаказПокупателя_Key) === channel;
+      salesChannelFromOrder(item.ЗаказПокупателя_Key) === channel;
     return matchesStore && matchesChannel;
   });
   const revenue = scopedRows.reduce(
@@ -1361,14 +1389,16 @@ app.get("/api/dashboard/onec-margin", async (request, response) => {
   try {
     const from = typeof request.query.from === "string" ? request.query.from : "";
     const to = typeof request.query.to === "string" ? request.query.to : "";
-    const hasCustomRange = /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to);
+    const hasCustomRange =
+      /^\d{4}-\d{2}-\d{2}$/.test(from) &&
+      /^\d{4}-\d{2}-\d{2}$/.test(to);
     const days = [1, 7, 30, 90].includes(Number(request.query.days))
       ? Number(request.query.days)
       : 30;
     const storeKey = typeof request.query.storeKey === "string"
       ? request.query.storeKey
       : "all";
-    const channel = salesChannel(request.query.channel);
+    const channel = parseSalesChannel(request.query.channel);
 
     let currentFrom;
     let currentTo;
@@ -1545,6 +1575,7 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
           "Description",
           "НаименованиеПолное",
           "Артикул",
+          "Parent_Key",
           "ВидНоменклатуры_Key",
         ].join(","),
       ),
@@ -1560,9 +1591,11 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
       ),
       loadProductKindsCatalog(),
     ]);
+    const productSubcategories = await loadProductSubcategories(rawProducts);
     const products = enrichProductsWithBusinessCategories(
       rawProducts,
       productKinds,
+      productSubcategories,
     );
     const categories = publicBusinessCategories();
     const latestOperationTimestamp = Math.max(
@@ -1582,6 +1615,7 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
         warehouses,
         categories,
         productKinds,
+        subcategories: productSubcategories,
         suppliers,
       },
       operations: { receipts, writeOffs, recounts },
@@ -1623,7 +1657,14 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
 
     const startedAt = Date.now();
     const reportResult = hasCustomRange
-      ? { items: await loadReportPagesByRange({ limit: requestedTop + 1, from, to }), cache: "range" }
+      ? {
+          items: await loadReportPagesByRange({
+            limit: requestedTop + 1,
+            from,
+            to,
+          }),
+          cache: "range",
+        }
       : await loadReportPagesCached({
           limit: requestedTop + 1,
           days,
@@ -1682,6 +1723,7 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
           "Description",
           "НаименованиеПолное",
           "Артикул",
+          "Parent_Key",
           "ВидНоменклатуры_Key",
         ].join(","),
       ),
@@ -1698,9 +1740,11 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
       ),
       loadProductKindsCatalog(),
     ]);
+    const productSubcategories = await loadProductSubcategories(rawProducts);
     const products = enrichProductsWithBusinessCategories(
       rawProducts,
       productKinds,
+      productSubcategories,
     );
     const categories = publicBusinessCategories();
 
@@ -1711,6 +1755,7 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
         warehouses,
         categories,
         productKinds,
+        subcategories: productSubcategories,
       },
       meta: {
         ...commonMeta,

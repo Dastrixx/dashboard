@@ -153,18 +153,31 @@ export function resolveBusinessCategory(kindName) {
   );
 }
 
-export function enrichProductsWithBusinessCategories(products, productKinds) {
+export function enrichProductsWithBusinessCategories(
+  products,
+  productKinds,
+  productSubcategories = [],
+) {
   const kindByKey = new Map(productKinds.map((kind) => [kind.Ref_Key, kind]));
+  const subcategoryByKey = new Map(
+    productSubcategories.map((subcategory) => [
+      subcategory.Ref_Key,
+      subcategory,
+    ]),
+  );
 
   return products.map((product) => {
     const kind = kindByKey.get(product.ВидНоменклатуры_Key);
     const category = resolveBusinessCategory(kind?.Description);
+    const subcategory = subcategoryByKey.get(product.Parent_Key);
 
     return {
       ...product,
       ВидНоменклатуры: kind?.Description || null,
       BusinessCategory_Key: category?.Ref_Key || null,
       BusinessCategory: category?.Description || null,
+      Subcategory_Key: subcategory?.Ref_Key || null,
+      Subcategory: subcategory?.Description || null,
     };
   });
 }

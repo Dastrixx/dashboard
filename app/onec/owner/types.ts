@@ -30,6 +30,14 @@ export type OwnerCategory = {
   label: string;
   revenue: number;
   share: number;
+  subcategories: OwnerSubcategory[];
+};
+
+export type OwnerSubcategory = {
+  key: string;
+  label: string;
+  revenue: number;
+  share: number;
 };
 
 export type OwnerComparisonBucket = RevenueBucket & {

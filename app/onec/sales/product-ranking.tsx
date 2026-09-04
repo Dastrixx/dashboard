@@ -14,16 +14,30 @@ type Props = {
   reports: OnecRetailReport[];
   products: OnecProductReference[];
   categories: OnecCategoryReference[];
+  anchorTimestamp: number;
 };
 
-export function ProductRanking({ reports, products, categories }: Props) {
+export function ProductRanking({
+  reports,
+  products,
+  categories,
+  anchorTimestamp,
+}: Props) {
   const [period, setPeriod] = useState<AnalyticsPeriod>("month");
   const [category, setCategory] = useState("");
+  const [subcategory, setSubcategory] = useState("");
   const [topLimit, setTopLimit] = useState(10);
   const [antiLimit, setAntiLimit] = useState(10);
   const rows = useMemo(
-    () => buildRankingRows(reports, products, categories, period),
-    [categories, period, products, reports],
+    () =>
+      buildRankingRows(
+        reports,
+        products,
+        categories,
+        period,
+        anchorTimestamp,
+      ),
+    [anchorTimestamp, categories, period, products, reports],
   );
   const availableCategories = useMemo(
     () =>
@@ -32,9 +46,29 @@ export function ProductRanking({ reports, products, categories }: Props) {
         .filter((item) => rows.some((row) => row.category === item)),
     [categories, rows],
   );
+  const availableSubcategories = useMemo(() => {
+    const options = new Map<string, string>();
+
+    rows
+      .filter((row) => row.category === category)
+      .forEach((row) => {
+        if (row.subcategoryKey) {
+          options.set(row.subcategoryKey, row.subcategory);
+        }
+      });
+
+    return [...options.entries()].sort((left, right) =>
+      left[1].localeCompare(right[1], "ru"),
+    );
+  }, [category, rows]);
   const filteredRows = useMemo(
-    () => rows.filter((row) => !category || row.category === category),
-    [category, rows],
+    () =>
+      rows.filter(
+        (row) =>
+          (!category || row.category === category) &&
+          (!subcategory || row.subcategoryKey === subcategory),
+      ),
+    [category, rows, subcategory],
   );
   const topRows = filteredRows.slice(0, topLimit);
   const lowDemandRows = useMemo(
@@ -63,9 +97,11 @@ export function ProductRanking({ reports, products, categories }: Props) {
         <div className="onec-ranking-filters">
           <label className="select-control">
             <select
+              aria-label="Категория товаров"
               value={category}
               onChange={(event) => {
                 setCategory(event.target.value);
+                setSubcategory("");
                 resetLimits();
               }}
             >
@@ -73,6 +109,24 @@ export function ProductRanking({ reports, products, categories }: Props) {
               {availableCategories.map((item) => (
                 <option value={item} key={item}>
                   {item}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="select-control">
+            <select
+              aria-label="Подкатегория товаров"
+              value={subcategory}
+              disabled={!category || !availableSubcategories.length}
+              onChange={(event) => {
+                setSubcategory(event.target.value);
+                resetLimits();
+              }}
+            >
+              <option value="">Все подкатегории</option>
+              {availableSubcategories.map(([key, name]) => (
+                <option value={key} key={key}>
+                  {name}
                 </option>
               ))}
             </select>
@@ -90,6 +144,7 @@ export function ProductRanking({ reports, products, categories }: Props) {
                 onClick={() => {
                   setPeriod(key);
                   setCategory("");
+                  setSubcategory("");
                   resetLimits();
                 }}
               >
@@ -129,7 +184,8 @@ export function ProductRanking({ reports, products, categories }: Props) {
                 <div>
                   <strong>{row.name}</strong>
                   <span>
-                    {row.article} · {number.format(row.sold)} ед.
+                    {row.category} · {row.subcategory} ·{" "}
+                    {number.format(row.sold)} ед.
                   </span>
                 </div>
                 <em>{money.format(row.revenue)}</em>
@@ -185,7 +241,8 @@ export function ProductRanking({ reports, products, categories }: Props) {
                 <div>
                   <strong>{row.name}</strong>
                   <span>
-                    {row.article} · {money.format(row.revenue)}
+                    {row.category} · {row.subcategory} ·{" "}
+                    {money.format(row.revenue)}
                   </span>
                 </div>
                 <em>{number.format(row.sold)} продаж</em>

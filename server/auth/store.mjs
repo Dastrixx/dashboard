@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { hashPassword, verifyPassword } from "./passwords.mjs";
+import { normalizeSalesChannel } from "../dashboard/sales-channels.mjs";
 
 const VALID_ROLES = new Set(["owner", "manager"]);
 const DUMMY_PASSWORD_HASH =
@@ -260,7 +261,13 @@ export class AuthStore {
     };
   }
 
-  setTeamSalesPlan({ storeKey, periodDays, channel = "all", amount, updatedBy }) {
+  setTeamSalesPlan({
+    storeKey,
+    periodDays,
+    channel = "all",
+    amount,
+    updatedBy,
+  }) {
     const normalizedStoreKey = String(storeKey || "all");
     const normalizedPeriod = Number(periodDays);
     const normalizedAmount = Number(amount);
@@ -291,7 +298,11 @@ export class AuthStore {
       updatedAt,
     );
 
-    return this.getTeamSalesPlan(normalizedStoreKey, normalizedPeriod, normalizedChannel);
+    return this.getTeamSalesPlan(
+      normalizedStoreKey,
+      normalizedPeriod,
+      normalizedChannel,
+    );
   }
 
   cleanupExpiredSessions(now = Date.now()) {
@@ -314,14 +325,6 @@ function validateRole(role) {
   if (!VALID_ROLES.has(role)) {
     throw new Error("Роль должна быть owner или manager");
   }
-}
-
-function normalizeSalesChannel(channel) {
-  const value = String(channel || "all").toLowerCase();
-  if (!["all", "online", "offline"].includes(value)) {
-    throw new Error("Канал продаж должен быть all, online или offline");
-  }
-  return value;
 }
 
 function publicUser(row) {

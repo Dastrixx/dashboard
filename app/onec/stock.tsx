@@ -4,6 +4,22 @@ import { useEffect, useMemo, useState } from "react";
 import { API_URL, DataState, number } from "./shared";
 import type { StockOperation, StockPayload } from "./types";
 
+function uniqueSubcategories(
+  rows: Array<{ subcategoryKey: string; subcategory: string }>,
+) {
+  const values = new Map<string, string>();
+
+  rows.forEach((row) => {
+    if (row.subcategoryKey) {
+      values.set(row.subcategoryKey, row.subcategory);
+    }
+  });
+
+  return [...values.entries()]
+    .map(([key, name]) => ({ key, name }))
+    .sort((left, right) => left.name.localeCompare(right.name, "ru"));
+}
+
 export function OnecStock() {
   const [payload, setPayload] = useState<StockPayload>({});
   const [loading, setLoading] = useState(true);
@@ -11,6 +27,7 @@ export function OnecStock() {
   const [warehouseMode, setWarehouseMode] = useState("all");
   const [warehouseKey, setWarehouseKey] = useState("all");
   const [category, setCategory] = useState("all");
+  const [subcategory, setSubcategory] = useState("all");
   const [status, setStatus] = useState("all");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -94,6 +111,8 @@ export function OnecStock() {
         name: string;
         categoryKey: string;
         category: string;
+        subcategoryKey: string;
+        subcategory: string;
         quantity: number;
         reserved: number;
         cost: number;
@@ -106,6 +125,7 @@ export function OnecStock() {
       .forEach((item) => {
         const product = products.get(item.Номенклатура_Key);
         const categoryKey = product?.BusinessCategory_Key || "";
+        const subcategoryKey = product?.Subcategory_Key || "";
         const current = grouped.get(item.Номенклатура_Key) || {
           key: item.Номенклатура_Key,
           sku: product?.Артикул || product?.Code || "Без артикула",
@@ -118,6 +138,8 @@ export function OnecStock() {
             product?.BusinessCategory ||
             categories.get(categoryKey)?.Description ||
             "Не классифицировано",
+          subcategoryKey,
+          subcategory: product?.Subcategory || "Без подкатегории",
           quantity: 0,
           reserved: 0,
           cost: 0,
@@ -155,11 +177,15 @@ export function OnecStock() {
     const query = search.trim().toLowerCase();
     const filtered = rows
       .filter((item) => category === "all" || item.categoryKey === category)
+      .filter(
+        (item) =>
+          subcategory === "all" || item.subcategoryKey === subcategory,
+      )
       .filter((item) => status === "all" || item.status === status)
       .filter(
         (item) =>
           !query ||
-          `${item.sku} ${item.name} ${item.locations}`
+          `${item.sku} ${item.name} ${item.subcategory} ${item.locations}`
             .toLowerCase()
             .includes(query),
       )
@@ -250,6 +276,12 @@ export function OnecStock() {
       categories: [...categories.values()].sort((left, right) =>
         (left.Description || "").localeCompare(right.Description || "", "ru"),
       ),
+      subcategories: uniqueSubcategories(
+        rows.filter(
+          (item) =>
+            category === "all" || item.categoryKey === category,
+        ),
+      ),
       totalQuantity: rows.reduce((sum, item) => sum + item.quantity, 0),
       totalReserved: rows.reduce((sum, item) => sum + item.reserved, 0),
       zero: rows.filter((item) => item.status === "zero").length,
@@ -279,7 +311,15 @@ export function OnecStock() {
       writeOffRows,
       recountRows,
     };
-  }, [payload, warehouseMode, warehouseKey, category, status, search]);
+  }, [
+    payload,
+    warehouseMode,
+    warehouseKey,
+    category,
+    subcategory,
+    status,
+    search,
+  ]);
 
   if (loading || error || !(payload.items || []).length) {
     return (
@@ -441,9 +481,11 @@ export function OnecStock() {
               />
             </label>
             <select
+              aria-label="Категория остатка"
               value={category}
               onChange={(event) => {
                 setCategory(event.target.value);
+                setSubcategory("all");
                 setPage(1);
               }}
             >
@@ -455,6 +497,23 @@ export function OnecStock() {
               ))}
             </select>
             <select
+              aria-label="Подкатегория остатка"
+              value={subcategory}
+              disabled={!view.subcategories.length}
+              onChange={(event) => {
+                setSubcategory(event.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="all">Все подкатегории</option>
+              {view.subcategories.map((item) => (
+                <option key={item.key} value={item.key}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Статус остатка"
               value={status}
               onChange={(event) => {
                 setStatus(event.target.value);
@@ -477,6 +536,7 @@ export function OnecStock() {
                 <th>Товар</th>
                 <th>Расположение</th>
                 <th>Категория</th>
+                <th>Подкатегория</th>
                 <th>Остаток</th>
                 <th>Резерв</th>
                 <th>Доступно</th>
@@ -495,6 +555,7 @@ export function OnecStock() {
                   </td>
                   <td>{item.locations}</td>
                   <td>{item.category}</td>
+                  <td>{item.subcategory}</td>
                   <td>{number.format(item.quantity)}</td>
                   <td>{number.format(item.reserved)}</td>
                   <td>
@@ -563,7 +624,10 @@ export function OnecStock() {
                     <b>{item.sku}</b>
                     <i
                       style={{
-                        height: `${Math.max((item.sku / view.maxReceiptSku) * 100, item.sku ? 8 : 0)}%`,
+                        height: `${Math.max(
+                          (item.sku / view.maxReceiptSku) * 100,
+                          item.sku ? 8 : 0,
+                        )}%`,
                       }}
                     />
                   </div>

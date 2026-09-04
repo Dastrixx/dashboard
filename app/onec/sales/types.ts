@@ -31,10 +31,13 @@ export type OnecProductReference = {
   Description: string;
   НаименованиеПолное: string;
   Артикул: string;
+  Parent_Key?: string | null;
   ВидНоменклатуры_Key: string;
   ВидНоменклатуры?: string | null;
   BusinessCategory_Key?: string | null;
   BusinessCategory?: string | null;
+  Subcategory_Key?: string | null;
+  Subcategory?: string | null;
 };
 
 export type OnecWarehouseReference = {
@@ -72,6 +75,7 @@ export type OnecSalesResponse = {
     products: OnecProductReference[];
     warehouses: OnecWarehouseReference[];
     categories: OnecCategoryReference[];
+    subcategories?: OnecCategoryReference[];
   };
   meta?: SalesLoadMeta;
   message?: string;
@@ -119,6 +123,8 @@ export type ProductRow = {
   article: string;
   name: string;
   category: string;
+  subcategoryKey: string;
+  subcategory: string;
   revenue: number;
   sold: number;
   share: number;
@@ -130,8 +136,12 @@ export type RevenueBucket = {
   value: number;
 };
 
-export type CategoryRevenue = RevenueBucket & {
+export type SubcategoryRevenue = RevenueBucket & {
   share: number;
+};
+
+export type CategoryRevenue = SubcategoryRevenue & {
+  subcategories: SubcategoryRevenue[];
 };
 
 export type SalesAnalytics = {

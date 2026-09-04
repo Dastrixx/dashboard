@@ -36,16 +36,37 @@ export function CategorySales({
         <div className="owner-category-list">
           {categories.map((category) => (
             <div className="owner-category-row" key={category.label}>
-              <div>
+              <div className="owner-category-summary">
                 <strong>{category.label}</strong>
                 <b>{money.format(category.revenue)}</b>
               </div>
               <span>{category.share.toFixed(1)}% выручки</span>
-              <i>
+              <i className="owner-category-bar">
                 <em
                   style={{ width: `${(category.revenue / maximum) * 100}%` }}
                 />
               </i>
+              {category.subcategories.length > 0 && (
+                <details className="owner-subcategories">
+                  <summary>
+                    Подкатегории · {category.subcategories.length}
+                  </summary>
+                  <div>
+                    {category.subcategories.map((subcategory) => (
+                      <div
+                        className="owner-subcategory-row"
+                        key={subcategory.key}
+                      >
+                        <span>{subcategory.label}</span>
+                        <strong>
+                          {subcategory.share.toFixed(1)}% ·{" "}
+                          {money.format(subcategory.revenue)}
+                        </strong>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
             </div>
           ))}
         </div>

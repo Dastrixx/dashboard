@@ -40,10 +40,13 @@ export type StockReference = {
   Description?: string;
   НаименованиеПолное?: string;
   Артикул?: string;
+  Parent_Key?: string | null;
   ВидНоменклатуры_Key?: string;
   ВидНоменклатуры?: string | null;
   BusinessCategory_Key?: string | null;
   BusinessCategory?: string | null;
+  Subcategory_Key?: string | null;
+  Subcategory?: string | null;
   ТипСклада?: string;
 };
 
@@ -76,6 +79,7 @@ export type StockPayload = {
     products?: StockReference[];
     warehouses?: StockReference[];
     categories?: StockReference[];
+    subcategories?: StockReference[];
     suppliers?: StockReference[];
   };
   operations?: {

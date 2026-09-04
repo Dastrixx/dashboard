@@ -85,7 +85,8 @@ export function SalesSummary({
           </div>
           <strong>{money.format(analytics.revenue)}</strong>
           <p>
-            Продажи {money.format(analytics.grossRevenue)} · возвраты −{money.format(analytics.returns)}
+            Продажи {money.format(analytics.grossRevenue)} · возвраты −
+            {money.format(analytics.returns)}
           </p>
         </article>
 
@@ -256,7 +257,7 @@ export function RevenueAnalysis({
         </div>
         <div className="onec-category-list">
           {analytics.categoryRows.map((item) => (
-            <div key={item.label}>
+            <div className="onec-category-row" key={item.label}>
               <div>
                 <strong>{item.label}</strong>
                 <span>
@@ -266,6 +267,24 @@ export function RevenueAnalysis({
               <i>
                 <b style={{ width: `${item.share}%` }} />
               </i>
+              {item.subcategories.length > 0 && (
+                <details className="onec-subcategories">
+                  <summary>
+                    Подкатегории · {item.subcategories.length}
+                  </summary>
+                  <div>
+                    {item.subcategories.map((subcategory) => (
+                      <span key={subcategory.label}>
+                        <b>{subcategory.label}</b>
+                        <em>
+                          {subcategory.share.toFixed(1)}% ·{" "}
+                          {money.format(subcategory.value)}
+                        </em>
+                      </span>
+                    ))}
+                  </div>
+                </details>
+              )}
             </div>
           ))}
           {!analytics.categoryRows.length && (
@@ -287,7 +306,9 @@ export function ReferenceSkeleton() {
       <div className="panel-head">
         <div>
           <h2>Подготавливаем товары</h2>
-          <p>Загружаем названия, артикулы и категории из 1С</p>
+          <p>
+            Загружаем названия, артикулы, категории и подкатегории из 1С
+          </p>
         </div>
         <span className="onec-spinner" />
       </div>

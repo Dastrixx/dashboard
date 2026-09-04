@@ -822,6 +822,23 @@ body{overflow-x:hidden}
   display:block;height:100%;border-radius:999px;
   background:linear-gradient(90deg,var(--green2),#28a879);
 }
+.onec-subcategories{
+  margin-top:10px;padding-top:9px;border-top:1px solid #edf2ef;
+}
+.onec-subcategories summary{
+  cursor:pointer;color:var(--muted);font-size:8px;font-weight:750;
+}
+.onec-subcategories>div{
+  display:grid;gap:7px;margin-top:9px;
+}
+.onec-subcategories span{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  color:var(--ink);font-size:8px;
+}
+.onec-subcategories span b{font-size:8px;font-weight:700}
+.onec-subcategories span em{
+  color:var(--muted);font-size:8px;font-style:normal;white-space:nowrap;
+}
 .onec-real-analysis-grid{grid-template-columns:minmax(0,1.45fr) minmax(320px,1fr)}
 .onec-check-analytics{padding:25px}
 .onec-check-head{align-items:flex-end;margin-bottom:20px}
@@ -907,7 +924,9 @@ body{overflow-x:hidden}
 .onec-ranking-toolbar h2{margin:5px 0 4px;font-size:22px;letter-spacing:-.03em}
 .onec-ranking-toolbar p{margin:0;color:var(--muted);font-size:10px}
 .onec-ranking-filters{display:flex;align-items:center;gap:12px}
-.onec-ranking-filters .select-control{min-width:240px}
+.onec-ranking-filters .select-control{min-width:190px}
+.onec-category-filters{display:flex;align-items:center;gap:9px}
+.onec-category-filters .select-control{min-width:190px}
 .onec-ranking-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
 .onec-ranking-card{padding:24px}
 .onec-ranking-card .panel-head{min-height:58px;padding-bottom:16px;border-bottom:1px solid var(--line)}
@@ -1012,6 +1031,8 @@ body{overflow-x:hidden}
   .onec-ranking-filters{align-items:stretch;flex-direction:column}
   .onec-ranking-filters .select-control{width:100%;min-width:0}
   .onec-ranking-filters .period-switch{display:grid;grid-template-columns:repeat(3,1fr)}
+  .onec-category-filters{width:100%;align-items:stretch;flex-direction:column}
+  .onec-category-filters .select-control{width:100%;min-width:0}
   .onec-ranking-grid{grid-template-columns:1fr}
   .onec-ranking-card{padding:18px}
   .onec-ranking-card .panel-head{align-items:flex-start;flex-direction:column;gap:12px}
@@ -1042,7 +1063,7 @@ body{overflow-x:hidden}
 }
 .stock-controls select:focus,.onec-stock-search:focus-within{border-color:#8fc3ab;box-shadow:0 0 0 3px rgba(20,137,94,.08)}
 .onec-stock-search{width:250px;min-height:38px;background:#fff}
-.stock-table{min-width:1180px}
+.stock-table{min-width:1280px}
 .stock-table td:nth-child(2){max-width:260px;white-space:normal;line-height:1.35}
 .stock-table td:nth-child(3){max-width:190px;white-space:normal;line-height:1.35;color:var(--muted)}
 .stock-status{
@@ -1102,7 +1123,10 @@ body{overflow-x:hidden}
 
 @media(max-width:1050px){
   .stock-toolbar{align-items:stretch;flex-direction:column}
-  .stock-controls{display:grid;grid-template-columns:minmax(220px,1.4fr) 1fr 1fr}
+  .stock-controls{
+    display:grid;
+    grid-template-columns:minmax(220px,1.4fr) repeat(3,minmax(0,1fr));
+  }
   .onec-stock-search{width:100%}
   .stock-controls select{width:100%;max-width:none}
   .stock-operations-grid,.stock-quality-grid{grid-template-columns:1fr}
@@ -1285,6 +1309,22 @@ body{overflow-x:hidden}
 .owner-category-row>span{display:block;margin:5px 0 8px;color:var(--muted);font-size:9px}
 .owner-category-row>i{display:block;height:7px;background:#e9efec;border-radius:10px;overflow:hidden}
 .owner-category-row>i>em{display:block;height:100%;background:linear-gradient(90deg,#0e865c,#30ad7e);border-radius:10px}
+.owner-subcategories{
+  margin-top:11px;padding-top:10px;border-top:1px solid #e8eeea;
+}
+.owner-subcategories summary{
+  cursor:pointer;color:#65756d;font-size:8px;font-weight:750;
+}
+.owner-subcategories>div{display:grid;gap:8px;margin-top:10px}
+.owner-subcategory-row{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+}
+.owner-subcategory-row>span{
+  margin:0;color:var(--ink);font-size:9px;
+}
+.owner-subcategory-row>strong{
+  color:var(--muted);font-size:8px;font-weight:700;white-space:nowrap;
+}
 .owner-category-state{min-height:190px;display:flex;align-items:center;justify-content:center;gap:9px;color:var(--muted);font-size:10px;text-align:center}
 .owner-category-state.error{flex-direction:column;padding:18px;border-radius:12px;background:#fff8ee;color:#8c6229}
 .owner-category-state.error strong{font-size:10px}

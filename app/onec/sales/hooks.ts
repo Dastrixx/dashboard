@@ -16,6 +16,29 @@ import type {
   MarginAnalyticsResponse,
 } from "./types";
 
+const SALES_HISTORY_DAYS = 60;
+const SALES_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
+function formatQueryDate(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function salesHistoryQuery(now = new Date()) {
+  const from = new Date(now);
+  from.setHours(0, 0, 0, 0);
+  from.setDate(from.getDate() - (SALES_HISTORY_DAYS - 1));
+
+  return new URLSearchParams({
+    top: "500",
+    from: formatQueryDate(from),
+    to: formatQueryDate(now),
+  }).toString();
+}
+
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
 }
@@ -30,9 +53,30 @@ export function useSalesData() {
   const [referencesLoading, setReferencesLoading] = useState(false);
   const [referenceError, setReferenceError] = useState("");
   const [loadMeta, setLoadMeta] = useState<SalesLoadMeta>();
+  const [analysisTimestamp, setAnalysisTimestamp] = useState(0);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    const refresh = () => setRefreshKey((value) => value + 1);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    const interval = window.setInterval(
+      refresh,
+      SALES_REFRESH_INTERVAL_MS,
+    );
+
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
+    const query = salesHistoryQuery();
 
     async function loadReferences() {
       setReferencesLoading(true);
@@ -40,8 +84,12 @@ export function useSalesData() {
 
       try {
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-reports?top=500&days=60`,
-          { signal: controller.signal, credentials: "include" },
+          `${API_URL}/api/dashboard/onec-reports?${query}`,
+          {
+            signal: controller.signal,
+            credentials: "include",
+            cache: "no-store",
+          },
         );
         const data = (await response.json()) as Partial<OnecSalesResponse>;
 
@@ -83,8 +131,12 @@ export function useSalesData() {
         setLoading(true);
         setError("");
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-reports?top=500&days=60&references=false`,
-          { signal: controller.signal, credentials: "include" },
+          `${API_URL}/api/dashboard/onec-reports?${query}&references=false`,
+          {
+            signal: controller.signal,
+            credentials: "include",
+            cache: "no-store",
+          },
         );
         const data = (await response.json()) as Partial<OnecSalesResponse>;
 
@@ -98,6 +150,7 @@ export function useSalesData() {
             : [],
         );
         setLoadMeta(data.meta);
+        setAnalysisTimestamp(Date.now());
         setLoading(false);
         await loadReferences();
       } catch (loadError) {
@@ -115,7 +168,7 @@ export function useSalesData() {
 
     loadReports();
     return () => controller.abort();
-  }, []);
+  }, [refreshKey]);
 
   return {
     reports,
@@ -127,6 +180,7 @@ export function useSalesData() {
     referencesLoading,
     referenceError,
     loadMeta,
+    analysisTimestamp,
   };
 }
 

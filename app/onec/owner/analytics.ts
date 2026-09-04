@@ -120,26 +120,58 @@ function buildCategories(
 
   const rows = buildProductRows(reports, products, categories);
   const revenueByCategory = new Map(
-    categories.map((category) => [category.Description, 0]),
+    categories.map((category) => [
+      category.Description,
+      {
+        revenue: 0,
+        subcategories: new Map<
+          string,
+          { label: string; revenue: number }
+        >(),
+      },
+    ]),
   );
 
   rows.forEach((row) => {
-    revenueByCategory.set(
-      row.category,
-      (revenueByCategory.get(row.category) || 0) + row.revenue,
-    );
+    const category = revenueByCategory.get(row.category) || {
+      revenue: 0,
+      subcategories: new Map<
+        string,
+        { label: string; revenue: number }
+      >(),
+    };
+    const subcategoryKey = row.subcategoryKey || row.subcategory;
+    const subcategory = category.subcategories.get(subcategoryKey) || {
+      label: row.subcategory,
+      revenue: 0,
+    };
+
+    category.revenue += row.revenue;
+    subcategory.revenue += row.revenue;
+    category.subcategories.set(subcategoryKey, subcategory);
+    revenueByCategory.set(row.category, category);
   });
 
   const total = [...revenueByCategory.values()].reduce(
-    (sum, revenue) => sum + revenue,
+    (sum, category) => sum + category.revenue,
     0,
   );
 
   return [...revenueByCategory.entries()]
-    .map(([label, revenue]) => ({
+    .map(([label, category]) => ({
       label,
-      revenue,
-      share: total ? (revenue / total) * 100 : 0,
+      revenue: category.revenue,
+      share: total ? (category.revenue / total) * 100 : 0,
+      subcategories: [...category.subcategories.entries()]
+        .map(([key, subcategory]) => ({
+          key,
+          label: subcategory.label,
+          revenue: subcategory.revenue,
+          share: category.revenue
+            ? (subcategory.revenue / category.revenue) * 100
+            : 0,
+        }))
+        .sort((left, right) => right.revenue - left.revenue),
     }))
     .filter((category) => category.revenue > 0)
     .sort((left, right) => right.revenue - left.revenue);

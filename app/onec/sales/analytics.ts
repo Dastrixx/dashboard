@@ -76,13 +76,13 @@ export function buildProductRows(
   const aggregate = new Map<string, { revenue: number; sold: number }>();
 
   const addLine = (line: OnecRetailReport["Товары"][number], sign: 1 | -1) => {
-      const current = aggregate.get(line.Номенклатура_Key) || {
-        revenue: 0,
-        sold: 0,
-      };
-      current.revenue += sign * Number(line.Сумма || 0);
-      current.sold += sign * Number(line.Количество || 0);
-      aggregate.set(line.Номенклатура_Key, current);
+    const current = aggregate.get(line.Номенклатура_Key) || {
+      revenue: 0,
+      sold: 0,
+    };
+    current.revenue += sign * Number(line.Сумма || 0);
+    current.sold += sign * Number(line.Количество || 0);
+    aggregate.set(line.Номенклатура_Key, current);
   };
 
   reports.forEach((report) => {
@@ -112,6 +112,8 @@ export function buildProductRows(
           product?.BusinessCategory ||
           categoryByKey.get(product?.BusinessCategory_Key || "") ||
           "Не классифицировано",
+        subcategoryKey: product?.Subcategory_Key || "",
+        subcategory: product?.Subcategory || "Без подкатегории",
         revenue: value.revenue,
         sold: value.sold,
         share: 0,
@@ -169,12 +171,14 @@ export function buildSalesAnalytics(
   products: OnecProductReference[],
   categories: OnecCategoryReference[],
   period: AnalyticsPeriod,
+  anchorTimestamp?: number,
 ): SalesAnalytics | null {
-  const latestTimestamp = Math.max(
+  const latestReportTimestamp = Math.max(
     ...reports.map((report) => new Date(report.Date).getTime()),
     0,
   );
-  if (!latestTimestamp) return null;
+  if (!latestReportTimestamp) return null;
+  const latestTimestamp = anchorTimestamp || latestReportTimestamp;
 
   const {
     currentFrom,
@@ -211,26 +215,44 @@ export function buildSalesAnalytics(
     );
   const sold = soldQuantity(currentReports);
   const rows = buildProductRows(currentReports, products, categories);
-  const categoryMap = new Map<string, number>(
-    categories.map((category) => [category.Description, 0]),
+  const categoryMap = new Map<
+    string,
+    { value: number; subcategories: Map<string, number> }
+  >(
+    categories.map((category) => [
+      category.Description,
+      { value: 0, subcategories: new Map() },
+    ]),
   );
 
   rows.forEach((row) => {
-    if (categoryMap.has(row.category)) {
-      categoryMap.set(
-        row.category,
-        (categoryMap.get(row.category) || 0) + row.revenue,
-      );
-    }
+    const category = categoryMap.get(row.category);
+    if (!category) return;
+
+    category.value += row.revenue;
+    category.subcategories.set(
+      row.subcategory,
+      (category.subcategories.get(row.subcategory) || 0) + row.revenue,
+    );
   });
 
   const categorizedRevenue =
-    [...categoryMap.values()].reduce((sum, value) => sum + value, 0) || 1;
+    [...categoryMap.values()].reduce(
+      (sum, category) => sum + category.value,
+      0,
+    ) || 1;
   const categoryRows = [...categoryMap.entries()]
-    .map(([label, value]) => ({
+    .map(([label, category]) => ({
       label,
-      value,
-      share: (value / categorizedRevenue) * 100,
+      value: category.value,
+      share: (category.value / categorizedRevenue) * 100,
+      subcategories: [...category.subcategories.entries()]
+        .map(([subcategoryLabel, value]) => ({
+          label: subcategoryLabel,
+          value,
+          share: category.value ? (value / category.value) * 100 : 0,
+        }))
+        .sort((left, right) => right.value - left.value),
     }))
     .sort((left, right) => right.value - left.value);
 
@@ -269,12 +291,14 @@ export function buildRankingRows(
   products: OnecProductReference[],
   categories: OnecCategoryReference[],
   period: AnalyticsPeriod,
+  anchorTimestamp?: number,
 ) {
-  const latestTimestamp = Math.max(
+  const latestReportTimestamp = Math.max(
     ...reports.map((report) => new Date(report.Date).getTime()),
     0,
   );
-  if (!latestTimestamp) return [];
+  if (!latestReportTimestamp) return [];
+  const latestTimestamp = anchorTimestamp || latestReportTimestamp;
 
   const { currentFrom, currentTo } = periodBounds(
     latestTimestamp,
@@ -319,11 +343,19 @@ export function downloadRankingCsv(filename: string, rows: ProductRow[]) {
   const escape = (value: string | number) =>
     `"${String(value).replaceAll('"', '""')}"`;
   const csv = [
-    ["Артикул", "Товар", "Категория", "Выручка, сом", "Продано"],
+    [
+      "Артикул",
+      "Товар",
+      "Категория",
+      "Подкатегория",
+      "Выручка, сом",
+      "Продано",
+    ],
     ...rows.map((row) => [
       row.article,
       row.name,
       row.category,
+      row.subcategory,
       row.revenue,
       row.sold,
     ]),

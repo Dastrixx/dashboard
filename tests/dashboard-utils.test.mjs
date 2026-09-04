@@ -9,6 +9,11 @@ import {
   resolveActivityAnchor,
   summarizeProductReference,
 } from "../server/dashboard/utils.mjs";
+import {
+  normalizeSalesChannel,
+  parseSalesChannel,
+  salesChannelFromOrder,
+} from "../server/dashboard/sales-channels.mjs";
 
 test("filterByPeriod keeps both range boundaries", () => {
   const rows = [
@@ -103,11 +108,12 @@ test("1C date without timezone is interpreted in configured timezone", () => {
   }
 });
 
-test("products receive the configured business category", () => {
+test("products receive category and subcategory from 1C references", () => {
   const products = [
     {
       Ref_Key: "product-1",
       ВидНоменклатуры_Key: "kind-1",
+      Parent_Key: "subcategory-1",
       Description: "Полотенце",
     },
   ];
@@ -117,15 +123,27 @@ test("products receive the configured business category", () => {
       Description: "Домашний текстиль",
     },
   ];
-
-  assert.deepEqual(enrichProductsWithBusinessCategories(products, kinds), [
+  const subcategories = [
     {
-      ...products[0],
-      ВидНоменклатуры: "Домашний текстиль",
-      BusinessCategory_Key: "home-textile",
-      BusinessCategory: "Домашний текстиль",
+      Ref_Key: "subcategory-1",
+      Description: "Полотенца",
+      IsFolder: true,
     },
-  ]);
+  ];
+
+  assert.deepEqual(
+    enrichProductsWithBusinessCategories(products, kinds, subcategories),
+    [
+      {
+        ...products[0],
+        ВидНоменклатуры: "Домашний текстиль",
+        BusinessCategory_Key: "home-textile",
+        BusinessCategory: "Домашний текстиль",
+        Subcategory_Key: "subcategory-1",
+        Subcategory: "Полотенца",
+      },
+    ],
+  );
 });
 
 test("summarizeProductReference groups products by reference", () => {
@@ -142,4 +160,22 @@ test("summarizeProductReference groups products by reference", () => {
   assert.equal(result.length, 1);
   assert.equal(result[0].name, "Домашний текстиль");
   assert.equal(result[0].productsCount, 2);
+});
+
+test("sales channel is derived from the customer order", () => {
+  assert.equal(salesChannelFromOrder("customer-order-key"), "online");
+  assert.equal(
+    salesChannelFromOrder("00000000-0000-0000-0000-000000000000"),
+    "offline",
+  );
+  assert.equal(salesChannelFromOrder(undefined), "offline");
+});
+
+test("sales channel input is normalized safely", () => {
+  assert.equal(normalizeSalesChannel("ONLINE"), "online");
+  assert.equal(parseSalesChannel("unsupported"), "all");
+  assert.throws(
+    () => normalizeSalesChannel("unsupported"),
+    /Канал продаж должен быть/,
+  );
 });

@@ -18,18 +18,37 @@ type Props = {
 export function AbcAnalysis({ rows, categories, period }: Props) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
+  const [subcategory, setSubcategory] = useState("");
   const [pagination, setPagination] = useState({ period, page: 1 });
   const summary = useMemo(() => summarizeAbc(rows), [rows]);
+  const subcategories = useMemo(() => {
+    const options = new Map<string, string>();
+
+    rows
+      .filter((row) => row.category === category)
+      .forEach((row) => {
+        if (row.subcategoryKey) {
+          options.set(row.subcategoryKey, row.subcategory);
+        }
+      });
+
+    return [...options.entries()].sort((left, right) =>
+      left[1].localeCompare(right[1], "ru"),
+    );
+  }, [category, rows]);
   const visibleRows = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
 
     return rows.filter(
       (row) =>
         (!category || row.category === category) &&
+        (!subcategory || row.subcategoryKey === subcategory) &&
         (!normalizedQuery ||
-          `${row.name} ${row.article}`.toLowerCase().includes(normalizedQuery)),
+          `${row.name} ${row.article} ${row.subcategory}`
+            .toLowerCase()
+            .includes(normalizedQuery)),
     );
-  }, [category, query, rows]);
+  }, [category, query, rows, subcategory]);
   const pageCount = Math.max(
     1,
     Math.ceil(visibleRows.length / TABLE_PAGE_SIZE),
@@ -87,22 +106,44 @@ export function AbcAnalysis({ rows, categories, period }: Props) {
               {visibleRows.length} позиций · по {TABLE_PAGE_SIZE} на странице
             </p>
           </div>
-          <label className="select-control">
-            <select
-              value={category}
-              onChange={(event) => {
-                setCategory(event.target.value);
-                setPagination({ period, page: 1 });
-              }}
-            >
-              <option value="">Все категории</option>
-              {categories.map((item) => (
-                <option value={item.Description} key={item.Ref_Key}>
-                  {item.Description}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="onec-category-filters">
+            <label className="select-control">
+              <select
+                aria-label="Категория ABC-анализа"
+                value={category}
+                onChange={(event) => {
+                  setCategory(event.target.value);
+                  setSubcategory("");
+                  setPagination({ period, page: 1 });
+                }}
+              >
+                <option value="">Все категории</option>
+                {categories.map((item) => (
+                  <option value={item.Description} key={item.Ref_Key}>
+                    {item.Description}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="select-control">
+              <select
+                aria-label="Подкатегория ABC-анализа"
+                value={subcategory}
+                disabled={!category || !subcategories.length}
+                onChange={(event) => {
+                  setSubcategory(event.target.value);
+                  setPagination({ period, page: 1 });
+                }}
+              >
+                <option value="">Все подкатегории</option>
+                {subcategories.map(([key, name]) => (
+                  <option value={key} key={key}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
         </div>
 
         <div className="inventory-controls">
@@ -114,7 +155,7 @@ export function AbcAnalysis({ rows, categories, period }: Props) {
                 setQuery(event.target.value);
                 setPagination({ period, page: 1 });
               }}
-              placeholder="Поиск по названию или артикулу"
+              placeholder="Название, артикул или подкатегория"
             />
           </label>
         </div>
@@ -126,6 +167,7 @@ export function AbcAnalysis({ rows, categories, period }: Props) {
                 <th>Артикул</th>
                 <th>Товар</th>
                 <th>Категория</th>
+                <th>Подкатегория</th>
                 <th>Выручка</th>
                 <th>Продано</th>
                 <th>Доля</th>
@@ -143,6 +185,7 @@ export function AbcAnalysis({ rows, categories, period }: Props) {
                     <small className="onec-key">{row.key}</small>
                   </td>
                   <td>{row.category}</td>
+                  <td>{row.subcategory}</td>
                   <td>{money.format(row.revenue)}</td>
                   <td>{number.format(row.sold)} ед.</td>
                   <td>{row.share.toFixed(1)}%</td>

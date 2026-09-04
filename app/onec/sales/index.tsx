@@ -65,8 +65,15 @@ export function OnecSales() {
         sales.products,
         sales.categories,
         period,
+        sales.analysisTimestamp,
       ),
-    [period, sales.categories, sales.products, sales.reports],
+    [
+      period,
+      sales.analysisTimestamp,
+      sales.categories,
+      sales.products,
+      sales.reports,
+    ],
   );
 
   if (sales.loading) return <LoadingState />;
@@ -109,6 +116,7 @@ export function OnecSales() {
         reports={sales.reports}
         products={sales.products}
         categories={sales.categories}
+        anchorTimestamp={sales.analysisTimestamp}
       />
 
       <AbcAnalysis
