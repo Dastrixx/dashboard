@@ -22,8 +22,6 @@ const CHECK_SELECT = [
   "ПогашениеПодарочныхСертификатов",
 ].join(",");
 
-const AVAILABLE_CHECK_FILTER = "DeletionMark eq false";
-
 export function isCompletedCheck(check) {
   const status = String(check?.СтатусЧекаККМ || "").toLocaleLowerCase(
     "ru-RU",
@@ -32,11 +30,7 @@ export function isCompletedCheck(check) {
   if (check?.DeletionMark || status.includes("аннулирован")) return false;
   if (status.includes("отложен")) return false;
 
-  return (
-    check?.Posted === true ||
-    status.includes("пробит") ||
-    status.includes("архив")
-  );
+  return true;
 }
 
 const checkAnalyticsCache = new Map();
@@ -218,7 +212,6 @@ async function loadChecks({ days, limit }) {
   const latestChecks = await onecGet(CHECK_ENTITY, {
     $top: 100,
     $select: "Date,DeletionMark,Posted,СтатусЧекаККМ",
-    $filter: AVAILABLE_CHECK_FILTER,
     $orderby: "Date desc",
   });
   const latest = latestChecks.filter(isCompletedCheck);
@@ -234,10 +227,7 @@ async function loadChecks({ days, limit }) {
     Math.max(Number(process.env.ONEC_CHECK_PAGE_SIZE || 100), 1),
     100,
   );
-  const dateFilter = [
-    AVAILABLE_CHECK_FILTER,
-    `Date ge datetime'${toOdataDateTime(fromTimestamp)}'`,
-  ].join(" and ");
+  const dateFilter = `Date ge datetime'${toOdataDateTime(fromTimestamp)}'`;
 
   async function load(filter) {
     const result = [];
@@ -269,7 +259,7 @@ async function loadChecks({ days, limit }) {
       "1С не приняла период аналитики чеков, используем локальный фильтр:",
       error instanceof Error ? error.message : error,
     );
-    loaded = await load(AVAILABLE_CHECK_FILTER);
+    loaded = await load("");
   }
 
   return {
@@ -290,7 +280,6 @@ async function loadChecksByRange({ fromTimestamp, toTimestamp, limit }) {
     100,
   );
   const filter = [
-    AVAILABLE_CHECK_FILTER,
     `Date ge datetime'${toOdataDateTime(fromTimestamp)}'`,
     `Date le datetime'${toOdataDateTime(toTimestamp)}'`,
   ].join(" and ");

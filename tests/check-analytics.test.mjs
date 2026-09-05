@@ -23,6 +23,11 @@ test("completed check filter keeps archived receipts", () => {
     isCompletedCheck({ Posted: true, СтатусЧекаККМ: "Отложенный" }),
     false,
   );
+  assert.equal(
+    isCompletedCheck({ Posted: false, СтатусЧекаККМ: "1" }),
+    true,
+  );
+  assert.equal(isCompletedCheck({ Posted: false }), true);
 });
 
 test("check analytics includes discounts, returns and gift certificates", () => {
