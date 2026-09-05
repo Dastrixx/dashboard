@@ -282,6 +282,38 @@ async function loadReportPagesByRange({ limit, from, to }) {
   return result;
 }
 
+async function loadReportPagesByRangeCached({ limit, from, to }) {
+  const key = `range:${limit}:${from}:${to}`;
+  const now = Date.now();
+  const cached = reportCache.get(key);
+
+  if (cached?.items && cached.expiresAt > now) {
+    return { items: cached.items, cache: "hit" };
+  }
+  if (cached?.promise) {
+    return { items: await cached.promise, cache: "shared" };
+  }
+
+  const ttlMs = Math.max(
+    Number(process.env.ONEC_REPORT_CACHE_TTL_MS || 30_000),
+    5_000,
+  );
+  const promise = loadReportPagesByRange({ limit, from, to });
+  reportCache.set(key, { promise, expiresAt: now + ttlMs });
+
+  try {
+    const items = await promise;
+    reportCache.set(key, {
+      items,
+      expiresAt: Date.now() + ttlMs,
+    });
+    return { items, cache: "miss" };
+  } catch (error) {
+    reportCache.delete(key);
+    throw error;
+  }
+}
+
 async function loadReportPagesCached({ limit, days }) {
   const key = `${limit}:${days}`;
   const now = Date.now();
@@ -398,6 +430,10 @@ async function loadConsultantReportPagesLegacyCached({ limit, days }) {
 }
 
 async function loadReferencesByKeys(entity, keys, select) {
+  const concurrency = Math.min(
+    Math.max(Number(process.env.ONEC_REFERENCE_CONCURRENCY || 15), 1),
+    25,
+  );
   const uniqueKeys = [
     ...new Set(
       keys.filter(
@@ -422,8 +458,8 @@ async function loadReferencesByKeys(entity, keys, select) {
     }
   }
 
-  for (let index = 0; index < missingKeys.length; index += 5) {
-    const chunk = missingKeys.slice(index, index + 5);
+  for (let index = 0; index < missingKeys.length; index += concurrency) {
+    const chunk = missingKeys.slice(index, index + concurrency);
     const chunkResults = await Promise.all(
       chunk.map(async (key) => {
         try {
@@ -1657,14 +1693,11 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
 
     const startedAt = Date.now();
     const reportResult = hasCustomRange
-      ? {
-          items: await loadReportPagesByRange({
-            limit: requestedTop + 1,
-            from,
-            to,
-          }),
-          cache: "range",
-        }
+      ? await loadReportPagesByRangeCached({
+          limit: requestedTop + 1,
+          from,
+          to,
+        })
       : await loadReportPagesCached({
           limit: requestedTop + 1,
           days,

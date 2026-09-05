@@ -77,9 +77,10 @@ export function useOwnerOverview(
             : `days=${period * 2}`;
         const response = await fetch(
           `${API_URL}/api/dashboard/onec-reports?top=500&${reportQuery}&references=false`,
-          { signal: controller.signal, credentials: "include" },
+          { credentials: "include" },
         );
         const payload = await readJson<OwnerReportsResponse>(response);
+        if (controller.signal.aborted) return;
         setReports(Array.isArray(payload.items) ? payload.items : []);
       } catch (error) {
         if (isAbortError(error)) return;
@@ -107,9 +108,10 @@ export function useOwnerOverview(
             : `days=${period * 2}`;
         const response = await fetch(
           `${API_URL}/api/dashboard/onec-reports?top=500&${reportQuery}`,
-          { signal: controller.signal, credentials: "include" },
+          { credentials: "include" },
         );
         const payload = await readJson<OwnerReportsResponse>(response);
+        if (controller.signal.aborted) return;
         setProducts(
           Array.isArray(payload.references?.products)
             ? payload.references.products
