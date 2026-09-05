@@ -24,6 +24,7 @@ const CHECK_SELECT = [
 
 const COMPLETED_CHECK_FILTER = [
   "DeletionMark eq false",
+  "and СтатусЧекаККМ ne 'Аннулированный'",
   "and (",
   "Posted eq true",
   "or СтатусЧекаККМ eq 'Пробитый'",
@@ -169,12 +170,6 @@ export function buildCheckAnalytics(
   return {
     current: summarizeChecks(current, certificatePaymentKeys),
     previous: summarizeChecks(previous, certificatePaymentKeys),
-    latestDay: summarizeChecks(
-      current.filter(
-        (check) => parseOnecDateTime(check.Date) >= currentTo - DAY_MS + 1,
-      ),
-      certificatePaymentKeys,
-    ),
     series: buildBuckets(current, currentFrom, currentTo + 1, days),
     periodStart: new Date(currentFrom).toISOString(),
     periodEnd: new Date(currentTo).toISOString(),
@@ -333,12 +328,6 @@ async function computeCheckAnalyticsRange({ from, to, limit }) {
   return {
     current: summarizeChecks(current, certificatePaymentKeys),
     previous: summarizeChecks(previous, certificatePaymentKeys),
-    latestDay: summarizeChecks(
-      current.filter(
-        (check) => parseOnecDateTime(check.Date) >= currentTo - DAY_MS + 1,
-      ),
-      certificatePaymentKeys,
-    ),
     series: buildBuckets(current, currentFrom, currentTo + 1, days),
     periodStart: new Date(currentFrom).toISOString(),
     periodEnd: new Date(currentTo).toISOString(),

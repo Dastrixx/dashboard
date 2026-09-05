@@ -17,15 +17,17 @@ function Trend({ value }: { value: number | null }) {
 
 export function OwnerKpis({
   analytics,
-  todayChecks,
+  checks,
   checksLoading,
+  periodCaption,
 }: {
   analytics: OwnerOverviewAnalytics;
-  todayChecks: CheckAnalytics | null;
+  checks: CheckAnalytics | null;
   checksLoading: boolean;
+  periodCaption: string;
 }) {
-  const checkCurrent = todayChecks?.current;
-  const checkPrevious = todayChecks?.previous;
+  const checkCurrent = checks?.current;
+  const checkPrevious = checks?.previous;
 
   return (
     <section className="owner-kpi-grid" aria-label="Показатели на сегодня">
@@ -45,7 +47,7 @@ export function OwnerKpis({
 
       <article className="owner-kpi-card">
         <div>
-          <span>Чеков за последний день</span>
+          <span>Чеков · {periodCaption}</span>
           <Trend
             value={
               checkCurrent && checkPrevious
@@ -61,12 +63,12 @@ export function OwnerKpis({
               ? number.format(checkCurrent.checks)
               : "—"}
         </strong>
-        <p>проведённые чеки продаж</p>
+        <p>пробитые и архивные чеки продаж</p>
       </article>
 
       <article className="owner-kpi-card">
         <div>
-          <span>Средний чек</span>
+          <span>Средний чек · {periodCaption}</span>
           <Trend
             value={
               checkCurrent && checkPrevious
@@ -85,7 +87,7 @@ export function OwnerKpis({
               ? money.format(checkCurrent.averageCheck)
               : "—"}
         </strong>
-        <p>по чекам 1С за последний день</p>
+        <p>по чекам 1С за выбранный период</p>
       </article>
 
       <article className="owner-kpi-card">

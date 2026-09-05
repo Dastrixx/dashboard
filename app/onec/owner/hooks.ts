@@ -49,7 +49,6 @@ export function useOwnerOverview(
   const [categories, setCategories] = useState<OnecCategoryReference[]>([]);
   const [checks, setChecks] = useState<CheckAnalytics | null>(null);
   const [margin, setMargin] = useState<MarginAnalytics | null>(null);
-  const [todayChecks, setTodayChecks] = useState<CheckAnalytics | null>(null);
   const [reportsLoading, setReportsLoading] = useState(true);
   const [referencesLoading, setReferencesLoading] = useState(true);
   const [checksLoading, setChecksLoading] = useState(true);
@@ -169,15 +168,9 @@ export function useOwnerOverview(
         if (controller.signal.aborted) return;
 
         setChecks(analytics);
-        setTodayChecks(
-          analytics.latestDay
-            ? { ...analytics, current: analytics.latestDay }
-            : null,
-        );
       } catch (error) {
         if (isAbortError(error)) return;
         setChecks(null);
-        setTodayChecks(null);
         setChecksError(
           error instanceof Error ? error.message : "Не удалось загрузить чеки 1С",
         );
@@ -201,7 +194,6 @@ export function useOwnerOverview(
   return {
     analytics,
     checks,
-    todayChecks,
     reportsLoading,
     referencesLoading,
     checksLoading,

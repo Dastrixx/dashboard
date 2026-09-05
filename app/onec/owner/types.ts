@@ -71,7 +71,6 @@ export type OwnerOverviewAnalytics = {
 export type OwnerOverviewState = {
   analytics: OwnerOverviewAnalytics | null;
   checks: CheckAnalytics | null;
-  todayChecks: CheckAnalytics | null;
   reportsLoading: boolean;
   referencesLoading: boolean;
   checksLoading: boolean;
