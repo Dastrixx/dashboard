@@ -1,7 +1,29 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildCheckAnalytics } from "../server/dashboard/checks.mjs";
+import {
+  buildCheckAnalytics,
+  isCompletedCheck,
+} from "../server/dashboard/checks.mjs";
+
+test("completed check filter keeps archived receipts", () => {
+  assert.equal(
+    isCompletedCheck({ Posted: false, СтатусЧекаККМ: "Архивный" }),
+    true,
+  );
+  assert.equal(
+    isCompletedCheck({ Posted: false, СтатусЧекаККМ: "Пробитый" }),
+    true,
+  );
+  assert.equal(
+    isCompletedCheck({ Posted: true, СтатусЧекаККМ: "Аннулированный" }),
+    false,
+  );
+  assert.equal(
+    isCompletedCheck({ Posted: true, СтатусЧекаККМ: "Отложенный" }),
+    false,
+  );
+});
 
 test("check analytics includes discounts, returns and gift certificates", () => {
   const latestTimestamp = new Date("2025-08-20T20:00:00").getTime();

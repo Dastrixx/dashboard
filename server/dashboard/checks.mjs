@@ -22,15 +22,22 @@ const CHECK_SELECT = [
   "ПогашениеПодарочныхСертификатов",
 ].join(",");
 
-const COMPLETED_CHECK_FILTER = [
-  "DeletionMark eq false",
-  "and СтатусЧекаККМ ne 'Аннулированный'",
-  "and (",
-  "Posted eq true",
-  "or СтатусЧекаККМ eq 'Пробитый'",
-  "or СтатусЧекаККМ eq 'Архивный'",
-  ")",
-].join(" ");
+const AVAILABLE_CHECK_FILTER = "DeletionMark eq false";
+
+export function isCompletedCheck(check) {
+  const status = String(check?.СтатусЧекаККМ || "").toLocaleLowerCase(
+    "ru-RU",
+  );
+
+  if (check?.DeletionMark || status.includes("аннулирован")) return false;
+  if (status.includes("отложен")) return false;
+
+  return (
+    check?.Posted === true ||
+    status.includes("пробит") ||
+    status.includes("архив")
+  );
+}
 
 const checkAnalyticsCache = new Map();
 let paymentKindsCache = null;
@@ -208,12 +215,13 @@ async function loadCertificatePaymentKeys() {
 }
 
 async function loadChecks({ days, limit }) {
-  const latest = await onecGet(CHECK_ENTITY, {
-    $top: 20,
-    $select: "Date",
-    $filter: COMPLETED_CHECK_FILTER,
+  const latestChecks = await onecGet(CHECK_ENTITY, {
+    $top: 100,
+    $select: "Date,DeletionMark,Posted,СтатусЧекаККМ",
+    $filter: AVAILABLE_CHECK_FILTER,
     $orderby: "Date desc",
   });
+  const latest = latestChecks.filter(isCompletedCheck);
 
   if (!latest.length) {
     return { checks: [], activity: null, truncated: false };
@@ -227,7 +235,7 @@ async function loadChecks({ days, limit }) {
     100,
   );
   const dateFilter = [
-    COMPLETED_CHECK_FILTER,
+    AVAILABLE_CHECK_FILTER,
     `Date ge datetime'${toOdataDateTime(fromTimestamp)}'`,
   ].join(" and ");
 
@@ -261,11 +269,16 @@ async function loadChecks({ days, limit }) {
       "1С не приняла период аналитики чеков, используем локальный фильтр:",
       error instanceof Error ? error.message : error,
     );
-    loaded = await load(COMPLETED_CHECK_FILTER);
+    loaded = await load(AVAILABLE_CHECK_FILTER);
   }
 
   return {
-    checks: filterByPeriod(loaded, "Date", startDate, endDate),
+    checks: filterByPeriod(
+      loaded.filter(isCompletedCheck),
+      "Date",
+      startDate,
+      endDate,
+    ),
     activity,
     truncated: loaded.length >= limit,
   };
@@ -277,7 +290,7 @@ async function loadChecksByRange({ fromTimestamp, toTimestamp, limit }) {
     100,
   );
   const filter = [
-    COMPLETED_CHECK_FILTER,
+    AVAILABLE_CHECK_FILTER,
     `Date ge datetime'${toOdataDateTime(fromTimestamp)}'`,
     `Date le datetime'${toOdataDateTime(toTimestamp)}'`,
   ].join(" and ");
@@ -296,7 +309,10 @@ async function loadChecksByRange({ fromTimestamp, toTimestamp, limit }) {
     if (page.length < currentPageSize) break;
   }
 
-  return { checks: result, truncated: result.length >= limit };
+  return {
+    checks: result.filter(isCompletedCheck),
+    truncated: result.length >= limit,
+  };
 }
 
 async function computeCheckAnalyticsRange({ from, to, limit }) {
