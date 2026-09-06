@@ -291,9 +291,8 @@ async function loadChecksByRange({ fromTimestamp, toTimestamp, limit }) {
     `Date le datetime'${toOdataDateTime(toTimestamp)}'`,
   ].join(" and ");
 
-  async function load(filterValue, stopAfterRange = false) {
+  async function load(filterValue) {
     const result = [];
-    let rangeCompleted = false;
     let sourceExhausted = false;
 
     while (result.length < limit) {
@@ -313,20 +312,11 @@ async function loadChecksByRange({ fromTimestamp, toTimestamp, limit }) {
         break;
       }
 
-      const oldestTimestamp = Math.min(
-        ...page.map((check) => parseOnecDateTime(check.Date)),
-      );
-
-      if (stopAfterRange && oldestTimestamp < fromTimestamp) {
-        rangeCompleted = true;
-        break;
-      }
     }
 
     return {
       items: result,
-      truncated:
-        !rangeCompleted && !sourceExhausted && result.length >= limit,
+      truncated: !sourceExhausted && result.length >= limit,
     };
   }
 
@@ -340,7 +330,7 @@ async function loadChecksByRange({ fromTimestamp, toTimestamp, limit }) {
         "используем постраничную загрузку:",
       error instanceof Error ? error.message : error,
     );
-    loaded = await load("", true);
+    loaded = await load("");
   }
 
   return {
