@@ -288,9 +288,22 @@ async function loadReportPagesByRange({ limit, from, to }) {
     });
     result.push(...page);
     if (page.length < currentPageSize) break;
+
+    const pageDates = page
+      .map((item) => parseOnecDateTime(item.Date))
+      .filter(Number.isFinite);
+    const oldestPageDate = Math.min(...pageDates);
+    if (Number.isFinite(oldestPageDate) && oldestPageDate < fromTimestamp) {
+      break;
+    }
   }
 
-  return result;
+  return filterByPeriod(
+    result,
+    "Date",
+    new Date(fromTimestamp),
+    new Date(toTimestamp),
+  );
 }
 
 async function loadReportPagesByRangeCached({ limit, from, to }) {
