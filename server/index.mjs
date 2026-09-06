@@ -174,6 +174,16 @@ const referenceCache = new Map();
 const reportCache = new Map();
 let productKindsCache = null;
 
+function uniqueReports(reports) {
+  const seen = new Set();
+  return reports.filter((report) => {
+    const key = report.Ref_Key;
+    if (!key || seen.has(key)) return !key;
+    seen.add(key);
+    return true;
+  });
+}
+
 async function loadReportPages({ limit, days }) {
   const configuredPageSize = Number(process.env.ONEC_PAGE_SIZE || 25);
   const pageSize = Math.min(Math.max(configuredPageSize, 1), 100);
@@ -1694,9 +1704,13 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
 
 app.get("/api/dashboard/onec-reports", async (request, response) => {
   try {
+    const maxTop = Math.min(
+      Math.max(Number(process.env.ONEC_REPORT_MAX_TOP) || 5000, 1),
+      10000,
+    );
     const requestedTop = Math.min(
       Math.max(Number(request.query.top) || 1, 1),
-      500,
+      maxTop,
     );
     const days = Math.min(
       Math.max(Number(request.query.days) || 60, 1),
@@ -1719,14 +1733,17 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
           limit: requestedTop + 1,
           days,
         });
+    const uniqueItems = uniqueReports(reportResult.items);
     const truncated = reportResult.items.length > requestedTop;
-    const items = reportResult.items.slice(0, requestedTop).map((report) => ({
+    const items = uniqueItems.slice(0, requestedTop).map((report) => ({
       ...report,
       Date: normalizeOnecDateTime(report.Date),
     }));
     const latestDate = items[0]?.Date || null;
     const commonMeta = {
       loaded: items.length,
+      uniqueDocuments: uniqueItems.length,
+      duplicatesRemoved: reportResult.items.length - uniqueItems.length,
       days: hasCustomRange ? undefined : days,
       from: hasCustomRange ? from : undefined,
       to: hasCustomRange ? to : undefined,

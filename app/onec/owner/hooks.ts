@@ -90,7 +90,7 @@ export function useOwnerOverview(
           to: effectiveRange.to,
         });
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-reports?top=500&${reportQuery}&references=false`,
+          `${API_URL}/api/dashboard/onec-reports?top=5000&${reportQuery}&references=false`,
           { credentials: "include" },
         );
         const payload = await readJson<OwnerReportsResponse>(response);
@@ -117,7 +117,7 @@ export function useOwnerOverview(
           to: effectiveRange.to,
         });
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-reports?top=500&${reportQuery}&references=only`,
+          `${API_URL}/api/dashboard/onec-reports?top=5000&${reportQuery}&references=only`,
           { credentials: "include" },
         );
         const payload = await readJson<OwnerReportsResponse>(response);

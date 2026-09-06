@@ -28,7 +28,7 @@ const SALES_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 function salesHistoryQuery(dateRange?: SalesDateRange | null) {
   const range = dateRange || rollingDateRange(SALES_HISTORY_DAYS);
   const query = new URLSearchParams(dateRangeQuery(range));
-  query.set("top", "500");
+  query.set("top", "5000");
 
   return query.toString();
 }
