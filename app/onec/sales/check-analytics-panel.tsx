@@ -1,12 +1,16 @@
-import { percentageChange } from "./analytics";
 import { money, number, PERIODS } from "./config";
-import type { AnalyticsPeriod, CheckAnalytics } from "./types";
+import type {
+  AnalyticsPeriod,
+  CheckAnalytics,
+  SalesDateRange,
+} from "./types";
 
 type Props = {
   period: AnalyticsPeriod;
   analytics: CheckAnalytics | null;
   loading: boolean;
   error: string;
+  dateRange?: SalesDateRange | null;
 };
 
 export function CheckAnalyticsPanel({
@@ -14,6 +18,7 @@ export function CheckAnalyticsPanel({
   analytics,
   loading,
   error,
+  dateRange,
 }: Props) {
   const chartMaximum = Math.max(
     ...(analytics?.series.map((item) => item.checks) || []),
@@ -24,62 +29,46 @@ export function CheckAnalyticsPanel({
         {
           label: "Чеков продаж",
           value: number.format(analytics.current.checks),
-          note: `предыдущий период: ${number.format(analytics.previous.checks)}`,
-          change: percentageChange(
-            analytics.current.checks,
-            analytics.previous.checks,
-          ),
+          note: "за выбранный период",
         },
         {
           label: "Средний чек",
           value: money.format(analytics.current.averageCheck),
-          note: `предыдущий: ${money.format(analytics.previous.averageCheck)}`,
-          change: percentageChange(
-            analytics.current.averageCheck,
-            analytics.previous.averageCheck,
-          ),
+          note: "по чекам выбранного периода",
         },
         {
           label: "Продажи по чекам",
           value: money.format(analytics.current.revenue),
           note: "сумма чеков продаж, без вычета возвратов",
-          change: percentageChange(
-            analytics.current.revenue,
-            analytics.previous.revenue,
-          ),
         },
         {
           label: "Чистые продажи",
           value: money.format(analytics.current.netRevenue),
           note: "продажи по чекам минус возвраты",
-          change: percentageChange(
-            analytics.current.netRevenue,
-            analytics.previous.netRevenue,
-          ),
         },
         {
           label: "Возвраты",
-          value: `${number.format(analytics.current.returns)} · ${money.format(analytics.current.returnsAmount)}`,
+          value: [
+            number.format(analytics.current.returns),
+            money.format(analytics.current.returnsAmount),
+          ].join(" · "),
           note: "количество и сумма чеков возврата",
-          change: null,
         },
         {
           label: "Скидки",
           value: money.format(analytics.current.discounts),
-          note: `${analytics.current.discountShare.toFixed(1)}% · сумма товаров до скидок ${money.format(analytics.current.grossRevenue)}`,
-          change: percentageChange(
-            analytics.current.discounts,
-            analytics.previous.discounts,
-          ),
+          note: [
+            `${analytics.current.discountShare.toFixed(1)}%`,
+            "сумма товаров до скидок",
+            money.format(analytics.current.grossRevenue),
+          ].join(" · "),
         },
         {
           label: "Оплата сертификатами",
           value: money.format(analytics.current.certificatePayments),
-          note: `погашено сертификатов: ${number.format(analytics.current.certificatesUsed)}`,
-          change: percentageChange(
-            analytics.current.certificatePayments,
-            analytics.previous.certificatePayments,
-          ),
+          note:
+            "погашено сертификатов: " +
+            number.format(analytics.current.certificatesUsed),
         },
       ]
     : [];
@@ -90,11 +79,17 @@ export function CheckAnalyticsPanel({
         <div>
           <span className="onec-source-kicker">Document_ЧекККМ</span>
           <h2>Аналитика по чекам</h2>
-          <p>Количество, средний чек и возвраты {PERIODS[period].caption}</p>
+          <p>
+            Количество, средний чек и возвраты{" "}
+            {dateRange
+              ? `за ${dateRange.from} — ${dateRange.to}`
+              : PERIODS[period].caption}
+          </p>
         </div>
-        {analytics?.periodEnd && (
+        {analytics?.latestDate && (
           <span className="onec-period-note">
-            Последний чек: {new Date(analytics.periodEnd).toLocaleString("ru-RU")}
+            Последний чек:{" "}
+            {new Date(analytics.latestDate).toLocaleString("ru-RU")}
           </span>
         )}
       </div>
@@ -106,26 +101,29 @@ export function CheckAnalyticsPanel({
         </div>
       ) : error ? (
         <div className="onec-check-state error" role="status">
-          <strong>Продажи загружены, но чеки временно недоступны.</strong>
+          <strong>
+            Продажи загружены, но чеки временно недоступны.
+          </strong>
           <span>{error}</span>
         </div>
       ) : analytics ? (
         <>
+          {!analytics.latestDate && (
+            <div className="onec-reference-warning" role="status">
+              <strong>
+                В Document_ЧекККМ нет чеков за выбранный диапазон.
+              </strong>
+              <span>
+                Продажи продолжают отображаться по проведённым документам
+                «Отчёт о розничных продажах».
+              </span>
+            </div>
+          )}
           <div className="onec-check-kpis">
             {cards.map((item) => (
               <article key={item.label}>
                 <div>
                   <span>{item.label}</span>
-                  {item.change !== null && (
-                    <b
-                      className={
-                        item.change >= 0 ? "trend" : "trend neutral"
-                      }
-                    >
-                      {item.change >= 0 ? "+" : ""}
-                      {item.change.toFixed(1)}%
-                    </b>
-                  )}
                 </div>
                 <strong>{item.value}</strong>
                 <small>{item.note}</small>

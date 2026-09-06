@@ -1,12 +1,22 @@
 import { makeChartPoints } from "./analytics";
 import { compactNumber, money, number, PERIODS } from "./config";
-import type { AnalyticsPeriod, MarginAnalytics, SalesAnalytics } from "./types";
+import type {
+  AnalyticsPeriod,
+  MarginAnalytics,
+  SalesAnalytics,
+  SalesDateRange,
+} from "./types";
 import { dataFreshness } from "../shared";
+import {
+  SalesDateFilter,
+  type SalesDateFilterProps,
+} from "./date-filter";
 
 type SalesSummaryProps = {
   analytics: SalesAnalytics;
   period: AnalyticsPeriod;
   onPeriodChange: (period: AnalyticsPeriod) => void;
+  dateFilter: SalesDateFilterProps;
   referencesLoading: boolean;
   referenceError: string;
   truncated?: boolean;
@@ -19,6 +29,7 @@ export function SalesSummary({
   analytics,
   period,
   onPeriodChange,
+  dateFilter,
   referencesLoading,
   referenceError,
   truncated,
@@ -33,8 +44,13 @@ export function SalesSummary({
       <section className="analytics-filter-bar">
         <div className="filter-copy">
           <span>Период анализа</span>
-          <strong>{PERIODS[period].label}</strong>
+          <strong>
+            {dateFilter.appliedRange
+              ? `${dateFilter.appliedRange.from} — ${dateFilter.appliedRange.to}`
+              : PERIODS[period].label}
+          </strong>
         </div>
+        <SalesDateFilter {...dateFilter} />
         <div className="period-switch" role="group" aria-label="Период анализа">
           {(Object.keys(PERIODS) as AnalyticsPeriod[]).map((key) => (
             <button
@@ -48,7 +64,7 @@ export function SalesSummary({
         </div>
         <span className="onec-period-note">
           {referencesLoading
-            ? "Аналитика готова · загружаем названия товаров…"
+            ? "Аналитика готова · загружаем справочники…"
             : `Данные по состоянию на ${new Date(
                 analytics.latestTimestamp,
               ).toLocaleDateString("ru-RU")}`}
@@ -63,7 +79,9 @@ export function SalesSummary({
 
       {referenceError && (
         <section className="onec-reference-warning" role="status">
-          <strong>Продажи загружены, справочники временно недоступны.</strong>
+          <strong>
+            Продажи загружены, справочники временно недоступны.
+          </strong>
           <span>{referenceError}</span>
         </section>
       )}
@@ -153,13 +171,20 @@ export function SalesSummary({
 export function RevenueAnalysis({
   analytics,
   period,
+  dateRange,
 }: {
   analytics: SalesAnalytics;
   period: AnalyticsPeriod;
+  dateRange?: SalesDateRange | null;
 }) {
+  const hasPreviousPeriod = analytics.previousBuckets.some(
+    (item) => item.value !== 0,
+  );
   const maximum = Math.max(
     ...analytics.currentBuckets.map((item) => item.value),
-    ...analytics.previousBuckets.map((item) => item.value),
+    ...(hasPreviousPeriod
+      ? analytics.previousBuckets.map((item) => item.value)
+      : []),
     1,
   );
   const currentPoints = makeChartPoints(analytics.currentBuckets, maximum);
@@ -174,17 +199,23 @@ export function RevenueAnalysis({
         <div className="panel-head">
           <div>
             <h2>Динамика выручки</h2>
-            <p>{PERIODS[period].label} в сравнении с предыдущим периодом</p>
+            <p>
+              {dateRange
+                ? `Период ${dateRange.from} — ${dateRange.to}`
+                : PERIODS[period].label}
+            </p>
           </div>
           <div className="chart-key compact">
             <span>
               <i className="actual" />
               Текущий
             </span>
-            <span>
-              <i className="previous" />
-              Предыдущий
-            </span>
+            {hasPreviousPeriod && (
+              <span>
+                <i className="previous" />
+                Предыдущий
+              </span>
+            )}
           </div>
         </div>
 
@@ -202,7 +233,7 @@ export function RevenueAnalysis({
           <svg
             viewBox={`0 0 ${chartWidth} ${chartHeight}`}
             role="img"
-            aria-label="Динамика выручки текущего и предыдущего периода"
+            aria-label="Динамика выручки за выбранный период"
           >
             {[18, 96, 174, 252].map((y) => (
               <line
@@ -214,12 +245,14 @@ export function RevenueAnalysis({
                 y2={y}
               />
             ))}
-            <polyline
-              className="onec-revenue-line previous"
-              points={previousPoints
-                .map((point) => `${point.x},${point.y}`)
-                .join(" ")}
-            />
+            {hasPreviousPeriod && (
+              <polyline
+                className="onec-revenue-line previous"
+                points={previousPoints
+                  .map((point) => `${point.x},${point.y}`)
+                  .join(" ")}
+              />
+            )}
             <polyline
               className="onec-revenue-line current"
               points={currentPoints
@@ -243,7 +276,7 @@ export function RevenueAnalysis({
           <div className="onec-chart-x-axis" aria-hidden="true">
             <span>Начало</span>
             <span>Середина</span>
-            <span>Сегодня</span>
+            <span>{dateRange ? "Конец периода" : "Сегодня"}</span>
           </div>
         </div>
       </article>
@@ -252,7 +285,12 @@ export function RevenueAnalysis({
         <div className="panel-head">
           <div>
             <h2>Продажи по категориям</h2>
-            <p>Структура выручки {PERIODS[period].caption}</p>
+            <p>
+              Структура выручки{" "}
+              {dateRange
+                ? `за ${dateRange.from} — ${dateRange.to}`
+                : PERIODS[period].caption}
+            </p>
           </div>
         </div>
         <div className="onec-category-list">
@@ -288,7 +326,9 @@ export function RevenueAnalysis({
             </div>
           ))}
           {!analytics.categoryRows.length && (
-            <p className="onec-no-data">Нет категорий за выбранный период</p>
+            <p className="onec-no-data">
+              Нет категорий за выбранный период
+            </p>
           )}
         </div>
       </article>
@@ -307,7 +347,8 @@ export function ReferenceSkeleton() {
         <div>
           <h2>Подготавливаем товары</h2>
           <p>
-            Загружаем названия, артикулы, категории и подкатегории из 1С
+            Загружаем названия, артикулы, категории и подкатегории
+            из 1С
           </p>
         </div>
         <span className="onec-spinner" />

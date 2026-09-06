@@ -8,6 +8,7 @@ import type {
   ProductRow,
   RevenueBucket,
   SalesAnalytics,
+  SalesDateRange,
 } from "./types";
 
 export function percentageChange(current: number, previous: number) {
@@ -39,6 +40,29 @@ function periodBounds(latestTimestamp: number, days: number) {
     previousTo,
     duration: days * DAY_MS,
   };
+}
+
+function customRangeBounds(range: SalesDateRange) {
+  const currentFrom = new Date(`${range.from}T00:00:00`).getTime();
+  const currentTo = new Date(`${range.to}T23:59:59.999`).getTime();
+  const duration = currentTo - currentFrom + 1;
+  const previousTo = currentFrom - 1;
+
+  return {
+    currentFrom,
+    currentTo,
+    previousFrom: currentFrom - duration,
+    previousTo,
+    duration,
+  };
+}
+
+function chartPeriod(duration: number): AnalyticsPeriod {
+  const days = Math.max(Math.round(duration / DAY_MS), 1);
+
+  if (days === 1) return "day";
+  if (days <= 7) return "week";
+  return "month";
 }
 
 function grossRevenue(reports: OnecRetailReport[]) {
@@ -172,21 +196,25 @@ export function buildSalesAnalytics(
   categories: OnecCategoryReference[],
   period: AnalyticsPeriod,
   anchorTimestamp?: number,
+  dateRange?: SalesDateRange | null,
 ): SalesAnalytics | null {
   const latestReportTimestamp = Math.max(
     ...reports.map((report) => new Date(report.Date).getTime()),
     0,
   );
   if (!latestReportTimestamp) return null;
-  const latestTimestamp = anchorTimestamp || latestReportTimestamp;
-
+  const analysisTimestamp = anchorTimestamp || latestReportTimestamp;
+  const bounds = dateRange
+    ? customRangeBounds(dateRange)
+    : periodBounds(analysisTimestamp, PERIODS[period].days);
   const {
     currentFrom,
     currentTo,
     previousFrom,
     previousTo,
     duration,
-  } = periodBounds(latestTimestamp, PERIODS[period].days);
+  } = bounds;
+  const bucketPeriod = dateRange ? chartPeriod(duration) : period;
   const currentReports = reports.filter((report) =>
     inRange(report.Date, currentFrom, currentTo),
   );
@@ -257,7 +285,7 @@ export function buildSalesAnalytics(
     .sort((left, right) => right.value - left.value);
 
   return {
-    latestTimestamp,
+    latestTimestamp: latestReportTimestamp,
     currentReports,
     revenue,
     previousRevenue,
@@ -274,13 +302,13 @@ export function buildSalesAnalytics(
       currentReports,
       currentFrom,
       duration,
-      period,
+      bucketPeriod,
     ),
     previousBuckets: buildRevenueBuckets(
       previousReports,
       previousFrom,
       duration,
-      period,
+      bucketPeriod,
     ),
     growth: percentageChange(revenue, previousRevenue),
   };
@@ -292,18 +320,17 @@ export function buildRankingRows(
   categories: OnecCategoryReference[],
   period: AnalyticsPeriod,
   anchorTimestamp?: number,
+  dateRange?: SalesDateRange | null,
 ) {
   const latestReportTimestamp = Math.max(
     ...reports.map((report) => new Date(report.Date).getTime()),
     0,
   );
   if (!latestReportTimestamp) return [];
-  const latestTimestamp = anchorTimestamp || latestReportTimestamp;
-
-  const { currentFrom, currentTo } = periodBounds(
-    latestTimestamp,
-    PERIODS[period].days,
-  );
+  const analysisTimestamp = anchorTimestamp || latestReportTimestamp;
+  const { currentFrom, currentTo } = dateRange
+    ? customRangeBounds(dateRange)
+    : periodBounds(analysisTimestamp, PERIODS[period].days);
   return buildProductRows(
     reports.filter((report) => inRange(report.Date, currentFrom, currentTo)),
     products,

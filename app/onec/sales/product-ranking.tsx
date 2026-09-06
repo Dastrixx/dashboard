@@ -8,6 +8,7 @@ import type {
   OnecCategoryReference,
   OnecProductReference,
   OnecRetailReport,
+  SalesDateRange,
 } from "./types";
 
 type Props = {
@@ -15,6 +16,7 @@ type Props = {
   products: OnecProductReference[];
   categories: OnecCategoryReference[];
   anchorTimestamp: number;
+  dateRange?: SalesDateRange | null;
 };
 
 export function ProductRanking({
@@ -22,6 +24,7 @@ export function ProductRanking({
   products,
   categories,
   anchorTimestamp,
+  dateRange,
 }: Props) {
   const [period, setPeriod] = useState<AnalyticsPeriod>("month");
   const [category, setCategory] = useState("");
@@ -36,8 +39,9 @@ export function ProductRanking({
         categories,
         period,
         anchorTimestamp,
+        dateRange,
       ),
-    [anchorTimestamp, categories, period, products, reports],
+    [anchorTimestamp, categories, dateRange, period, products, reports],
   );
   const availableCategories = useMemo(
     () =>
@@ -92,7 +96,12 @@ export function ProductRanking({
         <div>
           <span className="onec-source-kicker">Аналитика спроса</span>
           <h2>Рейтинг товаров</h2>
-          <p>Выручка и количество продаж {PERIODS[period].caption}</p>
+          <p>
+            Выручка и количество продаж{" "}
+            {dateRange
+              ? `за ${dateRange.from} — ${dateRange.to}`
+              : PERIODS[period].caption}
+          </p>
         </div>
         <div className="onec-ranking-filters">
           <label className="select-control">
@@ -131,27 +140,29 @@ export function ProductRanking({
               ))}
             </select>
           </label>
-          <div
-            className="period-switch"
-            role="group"
-            aria-label="Период рейтинга товаров"
-          >
-            {(Object.keys(PERIODS) as AnalyticsPeriod[]).map((key) => (
-              <button
-                type="button"
-                key={key}
-                className={period === key ? "active" : ""}
-                onClick={() => {
-                  setPeriod(key);
-                  setCategory("");
-                  setSubcategory("");
-                  resetLimits();
-                }}
-              >
-                {PERIODS[key].label}
-              </button>
-            ))}
-          </div>
+          {!dateRange && (
+            <div
+              className="period-switch"
+              role="group"
+              aria-label="Период рейтинга товаров"
+            >
+              {(Object.keys(PERIODS) as AnalyticsPeriod[]).map((key) => (
+                <button
+                  type="button"
+                  key={key}
+                  className={period === key ? "active" : ""}
+                  onClick={() => {
+                    setPeriod(key);
+                    setCategory("");
+                    setSubcategory("");
+                    resetLimits();
+                  }}
+                >
+                  {PERIODS[key].label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </header>
 
@@ -192,7 +203,9 @@ export function ProductRanking({
               </div>
             ))}
             {!topRows.length && (
-              <p className="onec-no-data">Нет продаж за выбранный период</p>
+              <p className="onec-no-data">
+                Нет продаж за выбранный период
+              </p>
             )}
           </div>
 
@@ -249,7 +262,9 @@ export function ProductRanking({
               </div>
             ))}
             {!antiRows.length && (
-              <p className="onec-no-data">Нет продаж за выбранный период</p>
+              <p className="onec-no-data">
+                Нет продаж за выбранный период
+              </p>
             )}
           </div>
 
@@ -269,8 +284,9 @@ export function ProductRanking({
       </div>
 
       <p className="onec-ranking-note">
-        Антитоп рассчитан по фактическому количеству продаж. После подключения
-        регистра остатков 1С сюда добавятся товары с нулевым спросом, но
+        Антитоп рассчитан по фактическому количеству продаж. После
+        подключения регистра остатков 1С сюда добавятся товары с нулевым
+        спросом, но
         фактическим наличием на складе.
       </p>
     </section>

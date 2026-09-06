@@ -1,5 +1,10 @@
 export type AnalyticsPeriod = "day" | "week" | "month";
 
+export type SalesDateRange = {
+  from: string;
+  to: string;
+};
+
 export type OnecProductLine = {
   LineNumber: string;
   Номенклатура_Key: string;

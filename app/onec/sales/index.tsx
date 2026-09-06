@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { AbcAnalysis } from "./abc-analysis";
 import { buildSalesAnalytics } from "./analytics";
 import { CheckAnalyticsPanel } from "./check-analytics-panel";
+import { rollingDateRange } from "./config";
 import { useCheckAnalytics, useMarginAnalytics, useSalesData } from "./hooks";
 import {
   ReferenceSkeleton,
@@ -11,7 +12,9 @@ import {
   SalesSummary,
 } from "./overview";
 import { ProductRanking } from "./product-ranking";
-import type { AnalyticsPeriod } from "./types";
+import type { AnalyticsPeriod, SalesDateRange } from "./types";
+
+const DEFAULT_SALES_RANGE = rollingDateRange(30);
 
 function LoadingState() {
   return (
@@ -55,9 +58,24 @@ function EmptyState() {
 
 export function OnecSales() {
   const [period, setPeriod] = useState<AnalyticsPeriod>("month");
-  const sales = useSalesData();
-  const checks = useCheckAnalytics(period);
-  const margin = useMarginAnalytics(period);
+  const [dateFrom, setDateFrom] = useState(DEFAULT_SALES_RANGE.from);
+  const [dateTo, setDateTo] = useState(DEFAULT_SALES_RANGE.to);
+  const [dateRange, setDateRange] = useState<SalesDateRange | null>(null);
+  const canApplyDateRange = Boolean(dateFrom && dateTo && dateFrom <= dateTo);
+  const sales = useSalesData(dateRange);
+  const checks = useCheckAnalytics(period, dateRange);
+  const margin = useMarginAnalytics(period, dateRange);
+
+  const selectPeriod = (value: AnalyticsPeriod) => {
+    setPeriod(value);
+    setDateRange(null);
+  };
+
+  const applyDateRange = () => {
+    if (!canApplyDateRange) return;
+    setDateRange({ from: dateFrom, to: dateTo });
+  };
+
   const analytics = useMemo(
     () =>
       buildSalesAnalytics(
@@ -66,8 +84,10 @@ export function OnecSales() {
         sales.categories,
         period,
         sales.analysisTimestamp,
+        dateRange,
       ),
     [
+      dateRange,
       period,
       sales.analysisTimestamp,
       sales.categories,
@@ -92,7 +112,16 @@ export function OnecSales() {
       <SalesSummary
         analytics={analytics}
         period={period}
-        onPeriodChange={setPeriod}
+        onPeriodChange={selectPeriod}
+        dateFilter={{
+          from: dateFrom,
+          to: dateTo,
+          appliedRange: dateRange,
+          canApply: canApplyDateRange,
+          onFromChange: setDateFrom,
+          onToChange: setDateTo,
+          onApply: applyDateRange,
+        }}
         referencesLoading={sales.referencesLoading}
         referenceError={sales.referenceError}
         truncated={sales.loadMeta?.truncated}
@@ -106,9 +135,14 @@ export function OnecSales() {
         analytics={checks.data}
         loading={checks.loading}
         error={checks.error}
+        dateRange={dateRange}
       />
 
-      <RevenueAnalysis analytics={analytics} period={period} />
+      <RevenueAnalysis
+        analytics={analytics}
+        period={period}
+        dateRange={dateRange}
+      />
 
       {sales.referencesLoading && <ReferenceSkeleton />}
 
@@ -117,6 +151,7 @@ export function OnecSales() {
         products={sales.products}
         categories={sales.categories}
         anchorTimestamp={sales.analysisTimestamp}
+        dateRange={dateRange}
       />
 
       <AbcAnalysis

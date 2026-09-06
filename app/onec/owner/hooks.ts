@@ -78,22 +78,8 @@ export function useOwnerOverview(
   );
 
   useEffect(() => {
-    const refresh = () => setRefreshedAt(Date.now());
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") refresh();
-    };
-    const interval = window.setInterval(refresh, OWNER_REFRESH_INTERVAL_MS);
-
-    document.addEventListener("visibilitychange", refreshWhenVisible);
-
-    return () => {
-      window.clearInterval(interval);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
-    };
-  }, []);
-
-  useEffect(() => {
     const controller = new AbortController();
+    let refreshTimer: number | undefined;
 
     async function loadReports() {
       try {
@@ -213,11 +199,24 @@ export function useOwnerOverview(
       }
     }
 
-    loadReports();
-    loadReferences();
-    loadChecks();
-    loadMargin();
-    return () => controller.abort();
+    void Promise.allSettled([
+      loadReports(),
+      loadReferences(),
+      loadChecks(),
+      loadMargin(),
+    ]).then(() => {
+      if (controller.signal.aborted) return;
+
+      refreshTimer = window.setTimeout(
+        () => setRefreshedAt(Date.now()),
+        OWNER_REFRESH_INTERVAL_MS,
+      );
+    });
+
+    return () => {
+      controller.abort();
+      if (refreshTimer) window.clearTimeout(refreshTimer);
+    };
   }, [effectiveRange.from, effectiveRange.to, refreshedAt]);
 
   const analytics = useMemo(
