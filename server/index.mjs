@@ -276,8 +276,9 @@ async function loadReportPagesByRange({ limit, from, to }) {
   ].join(" and ");
   const result = [];
 
-  while (result.length < limit) {
-    const currentPageSize = Math.min(pageSize, limit - result.length);
+  while (limit === null || result.length < limit) {
+    const currentPageSize =
+      limit === null ? pageSize : Math.min(pageSize, limit - result.length);
     const page = await onecGet(RETAIL_REPORT_ENTITY, {
       $top: currentPageSize,
       $skip: result.length,
@@ -293,7 +294,7 @@ async function loadReportPagesByRange({ limit, from, to }) {
 }
 
 async function loadReportPagesByRangeCached({ limit, from, to }) {
-  const key = `range:${limit}:${from}:${to}`;
+  const key = `range:${limit ?? "all"}:${from}:${to}`;
   const now = Date.now();
   const cached = reportCache.get(key);
 
@@ -1725,7 +1726,7 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
     const startedAt = Date.now();
     const reportResult = hasCustomRange
       ? await loadReportPagesByRangeCached({
-          limit: requestedTop + 1,
+          limit: null,
           from,
           to,
         })
@@ -1734,11 +1735,15 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
           days,
         });
     const uniqueItems = uniqueReports(reportResult.items);
-    const truncated = reportResult.items.length > requestedTop;
-    const items = uniqueItems.slice(0, requestedTop).map((report) => ({
-      ...report,
-      Date: normalizeOnecDateTime(report.Date),
-    }));
+    const truncated = hasCustomRange
+      ? false
+      : reportResult.items.length > requestedTop;
+    const items = uniqueItems
+      .slice(0, hasCustomRange ? undefined : requestedTop)
+      .map((report) => ({
+        ...report,
+        Date: normalizeOnecDateTime(report.Date),
+      }));
     const latestDate = items[0]?.Date || null;
     const commonMeta = {
       loaded: items.length,
