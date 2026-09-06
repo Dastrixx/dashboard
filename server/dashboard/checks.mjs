@@ -290,24 +290,67 @@ async function loadChecksByRange({ fromTimestamp, toTimestamp, limit }) {
     `Date ge datetime'${toOdataDateTime(fromTimestamp)}'`,
     `Date le datetime'${toOdataDateTime(toTimestamp)}'`,
   ].join(" and ");
-  const result = [];
 
-  while (result.length < limit) {
-    const currentPageSize = Math.min(pageSize, limit - result.length);
-    const page = await onecGet(CHECK_ENTITY, {
-      $top: currentPageSize,
-      $skip: result.length,
-      $select: CHECK_SELECT,
-      $filter: filter,
-      $orderby: "Date desc",
-    });
-    result.push(...page);
-    if (page.length < currentPageSize) break;
+  async function load(filterValue, stopAfterRange = false) {
+    const result = [];
+    let rangeCompleted = false;
+    let sourceExhausted = false;
+
+    while (result.length < limit) {
+      const currentPageSize = Math.min(pageSize, limit - result.length);
+      const page = await onecGet(CHECK_ENTITY, {
+        $top: currentPageSize,
+        $skip: result.length,
+        $select: CHECK_SELECT,
+        $filter: filterValue,
+        $orderby: "Date desc",
+      });
+
+      result.push(...page);
+
+      if (page.length < currentPageSize) {
+        sourceExhausted = true;
+        break;
+      }
+
+      const oldestTimestamp = Math.min(
+        ...page.map((check) => parseOnecDateTime(check.Date)),
+      );
+
+      if (stopAfterRange && oldestTimestamp < fromTimestamp) {
+        rangeCompleted = true;
+        break;
+      }
+    }
+
+    return {
+      items: result,
+      truncated:
+        !rangeCompleted && !sourceExhausted && result.length >= limit,
+    };
+  }
+
+  let loaded;
+
+  try {
+    loaded = await load(filter);
+  } catch (error) {
+    console.warn(
+      "1С не разрешила фильтрацию чеков по Date; " +
+        "используем постраничную загрузку:",
+      error instanceof Error ? error.message : error,
+    );
+    loaded = await load("", true);
   }
 
   return {
-    checks: result.filter(isCompletedCheck),
-    truncated: result.length >= limit,
+    checks: filterByPeriod(
+      loaded.items.filter(isCompletedCheck),
+      "Date",
+      new Date(fromTimestamp),
+      new Date(toTimestamp),
+    ),
+    truncated: loaded.truncated,
   };
 }
 
@@ -320,7 +363,11 @@ async function computeCheckAnalyticsRange({
   const currentFrom = parseOnecDateTime(`${from}T00:00:00`);
   const currentTo = parseOnecDateTime(`${to}T23:59:59`);
 
-  if (!Number.isFinite(currentFrom) || !Number.isFinite(currentTo) || currentFrom > currentTo) {
+  if (
+    !Number.isFinite(currentFrom) ||
+    !Number.isFinite(currentTo) ||
+    currentFrom > currentTo
+  ) {
     throw new Error("Некорректный диапазон дат чеков");
   }
 
