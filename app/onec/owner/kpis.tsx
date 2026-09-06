@@ -27,7 +27,6 @@ export function OwnerKpis({
   periodCaption: string;
 }) {
   const checkCurrent = checks?.current;
-  const checkPrevious = checks?.previous;
 
   return (
     <section className="owner-kpi-grid" aria-label="Показатели на сегодня">
@@ -48,13 +47,6 @@ export function OwnerKpis({
       <article className="owner-kpi-card">
         <div>
           <span>Чеков · {periodCaption}</span>
-          <Trend
-            value={
-              checkCurrent && checkPrevious
-                ? change(checkCurrent.checks, checkPrevious.checks)
-                : null
-            }
-          />
         </div>
         <strong>
           {checksLoading
@@ -69,16 +61,6 @@ export function OwnerKpis({
       <article className="owner-kpi-card">
         <div>
           <span>Средний чек · {periodCaption}</span>
-          <Trend
-            value={
-              checkCurrent && checkPrevious
-                ? change(
-                    checkCurrent.averageCheck,
-                    checkPrevious.averageCheck,
-                  )
-                : null
-            }
-          />
         </div>
         <strong>
           {checksLoading

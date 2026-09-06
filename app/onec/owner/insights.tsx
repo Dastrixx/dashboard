@@ -1,4 +1,4 @@
-import { BadgePercent, CircleAlert, Gift, TrendingDown, TrendingUp } from "lucide-react";
+import { BadgePercent, CircleAlert, Gift, TrendingUp } from "lucide-react";
 import type { CheckAnalytics } from "../sales/types";
 import { money } from "./format";
 import type { OwnerOverviewAnalytics } from "./types";
@@ -22,23 +22,16 @@ export function ImportantInsights({
   periodCaption: string;
 }) {
   const insights: Insight[] = [];
-  const growth = analytics.period.revenueGrowth;
-
-  if (growth !== null) {
-    insights.push({
-      tone: growth >= 0 ? "good" : "warn",
-      title: growth >= 0 ? "Выручка растёт" : "Выручка снизилась",
-      description: `${Math.abs(growth).toFixed(1)}% относительно предыдущего периода такой же длины.`,
-      icon: growth >= 0 ? TrendingUp : TrendingDown,
-    });
-  }
 
   const leader = analytics.categories[0];
   if (leader) {
     insights.push({
       tone: "good",
       title: `Лидер — ${leader.label}`,
-      description: `${leader.share.toFixed(1)}% выручки, ${money.format(leader.revenue)} за ${periodCaption}.`,
+      description: [
+        `${leader.share.toFixed(1)}% выручки,`,
+        `${money.format(leader.revenue)} за ${periodCaption}.`,
+      ].join(" "),
       icon: TrendingUp,
     });
   }
@@ -47,7 +40,10 @@ export function ImportantInsights({
     insights.push({
       tone: checks.current.discountShare > 10 ? "warn" : "neutral",
       title: "Скидки под контролем",
-      description: `${checks.current.discountShare.toFixed(1)}% от суммы до скидок — ${money.format(checks.current.discounts)}.`,
+      description: [
+        `${checks.current.discountShare.toFixed(1)}% от суммы до скидок —`,
+        `${money.format(checks.current.discounts)}.`,
+      ].join(" "),
       icon: BadgePercent,
     });
 
@@ -55,7 +51,10 @@ export function ImportantInsights({
       insights.push({
         tone: "neutral",
         title: "Использованы сертификаты",
-        description: `${money.format(checks.current.certificatePayments)}, погашений: ${checks.current.certificatesUsed}.`,
+        description: [
+          `${money.format(checks.current.certificatePayments)},`,
+          `погашений: ${checks.current.certificatesUsed}.`,
+        ].join(" "),
         icon: Gift,
       });
     }
@@ -63,7 +62,9 @@ export function ImportantInsights({
     insights.push({
       tone: "warn",
       title: "Чеки временно недоступны",
-      description: "Продажи показаны по розничным отчётам; средний чек и скидки обновятся после ответа 1С.",
+      description:
+        "Продажи показаны по розничным отчётам; средний чек и скидки " +
+        "обновятся после ответа 1С.",
       icon: CircleAlert,
     });
   }

@@ -19,6 +19,8 @@ import type {
   OwnerReportsResponse,
 } from "./types";
 
+const OWNER_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
 }
@@ -31,19 +33,31 @@ async function readJson<T>(response: Response): Promise<T> {
   return payload;
 }
 
-function previousRangeStart(range: OwnerDateRange) {
-  const from = new Date(`${range.from}T00:00:00`).getTime();
-  const to = new Date(`${range.to}T23:59:59.999`).getTime();
-  const duration = to - from + 1;
-  return new Date(from - duration).toISOString().slice(0, 10);
+function formatQueryDate(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function rollingDateRange(days: Period, timestamp: number): OwnerDateRange {
+  const to = new Date(timestamp);
+  const from = new Date(to);
+  from.setHours(0, 0, 0, 0);
+  from.setDate(from.getDate() - (days - 1));
+
+  return {
+    from: formatQueryDate(from),
+    to: formatQueryDate(to),
+  };
 }
 
 export function useOwnerOverview(
   period: Period,
   dateRange?: OwnerDateRange | null,
 ): OwnerOverviewState {
-  const rangeFrom = dateRange?.from;
-  const rangeTo = dateRange?.to;
+  const [refreshedAt, setRefreshedAt] = useState(() => Date.now());
   const [reports, setReports] = useState<OnecRetailReport[]>([]);
   const [products, setProducts] = useState<OnecProductReference[]>([]);
   const [categories, setCategories] = useState<OnecCategoryReference[]>([]);
@@ -58,6 +72,26 @@ export function useOwnerOverview(
   const [checksError, setChecksError] = useState("");
   const [marginError, setMarginError] = useState("");
 
+  const effectiveRange = useMemo(
+    () => dateRange || rollingDateRange(period, refreshedAt),
+    [dateRange, period, refreshedAt],
+  );
+
+  useEffect(() => {
+    const refresh = () => setRefreshedAt(Date.now());
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    const interval = window.setInterval(refresh, OWNER_REFRESH_INTERVAL_MS);
+
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, []);
+
   useEffect(() => {
     const controller = new AbortController();
 
@@ -65,16 +99,10 @@ export function useOwnerOverview(
       try {
         setReportsLoading(true);
         setReportsError("");
-        const reportQuery =
-          rangeFrom && rangeTo
-            ? [
-                `from=${previousRangeStart({
-                  from: rangeFrom,
-                  to: rangeTo,
-                })}`,
-                `to=${rangeTo}`,
-              ].join("&")
-            : `days=${period * 2}`;
+        const reportQuery = new URLSearchParams({
+          from: effectiveRange.from,
+          to: effectiveRange.to,
+        });
         const response = await fetch(
           `${API_URL}/api/dashboard/onec-reports?top=500&${reportQuery}&references=false`,
           { credentials: "include" },
@@ -85,7 +113,9 @@ export function useOwnerOverview(
       } catch (error) {
         if (isAbortError(error)) return;
         setReportsError(
-          error instanceof Error ? error.message : "Не удалось загрузить отчёты 1С",
+          error instanceof Error
+            ? error.message
+            : "Не удалось загрузить отчёты 1С",
         );
       } finally {
         if (!controller.signal.aborted) setReportsLoading(false);
@@ -96,18 +126,12 @@ export function useOwnerOverview(
       try {
         setReferencesLoading(true);
         setReferencesError("");
-        const reportQuery =
-          rangeFrom && rangeTo
-            ? [
-                `from=${previousRangeStart({
-                  from: rangeFrom,
-                  to: rangeTo,
-                })}`,
-                `to=${rangeTo}`,
-              ].join("&")
-            : `days=${period * 2}`;
+        const reportQuery = new URLSearchParams({
+          from: effectiveRange.from,
+          to: effectiveRange.to,
+        });
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-reports?top=500&${reportQuery}`,
+          `${API_URL}/api/dashboard/onec-reports?top=500&${reportQuery}&references=only`,
           { credentials: "include" },
         );
         const payload = await readJson<OwnerReportsResponse>(response);
@@ -138,9 +162,11 @@ export function useOwnerOverview(
       try {
         setMarginLoading(true);
         setMarginError("");
-        const query = rangeFrom && rangeTo
-          ? `from=${rangeFrom}&to=${rangeTo}`
-          : `days=${period}`;
+        const query = new URLSearchParams({
+          from: effectiveRange.from,
+          to: effectiveRange.to,
+          includePrevious: "false",
+        });
         const response = await fetch(
           `${API_URL}/api/dashboard/onec-margin?${query}`,
           { signal: controller.signal, credentials: "include" },
@@ -151,7 +177,9 @@ export function useOwnerOverview(
         if (isAbortError(error)) return;
         setMargin(null);
         setMarginError(
-          error instanceof Error ? error.message : "Не удалось загрузить маржу 1С",
+          error instanceof Error
+            ? error.message
+            : "Не удалось загрузить маржу 1С",
         );
       } finally {
         if (!controller.signal.aborted) setMarginLoading(false);
@@ -162,10 +190,12 @@ export function useOwnerOverview(
       try {
         setChecksLoading(true);
         setChecksError("");
-        const query = rangeFrom && rangeTo
-          ? `from=${rangeFrom}&to=${rangeTo}`
-          : `days=${period}`;
-        const analytics = await loadCheckAnalytics(query);
+        const query = new URLSearchParams({
+          from: effectiveRange.from,
+          to: effectiveRange.to,
+          includePrevious: "false",
+        });
+        const analytics = await loadCheckAnalytics(query.toString());
 
         if (controller.signal.aborted) return;
 
@@ -174,7 +204,9 @@ export function useOwnerOverview(
         if (isAbortError(error)) return;
         setChecks(null);
         setChecksError(
-          error instanceof Error ? error.message : "Не удалось загрузить чеки 1С",
+          error instanceof Error
+            ? error.message
+            : "Не удалось загрузить чеки 1С",
         );
       } finally {
         if (!controller.signal.aborted) setChecksLoading(false);
@@ -186,11 +218,18 @@ export function useOwnerOverview(
     loadChecks();
     loadMargin();
     return () => controller.abort();
-  }, [period, rangeFrom, rangeTo]);
+  }, [effectiveRange.from, effectiveRange.to, refreshedAt]);
 
   const analytics = useMemo(
-    () => buildOwnerOverview(reports, products, categories, period, dateRange),
-    [reports, products, categories, period, dateRange],
+    () =>
+      buildOwnerOverview(
+        reports,
+        products,
+        categories,
+        period,
+        effectiveRange,
+      ),
+    [reports, products, categories, period, effectiveRange],
   );
 
   return {

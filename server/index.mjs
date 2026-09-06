@@ -1435,6 +1435,7 @@ app.get("/api/dashboard/onec-margin", async (request, response) => {
       ? request.query.storeKey
       : "all";
     const channel = parseSalesChannel(request.query.channel);
+    const includePrevious = request.query.includePrevious !== "false";
 
     let currentFrom;
     let currentTo;
@@ -1470,9 +1471,23 @@ app.get("/api/dashboard/onec-margin", async (request, response) => {
     const previousTo = new Date(currentFrom.getTime());
     const previousFrom = new Date(previousTo.getTime() - duration);
 
+    const currentPromise = loadMarginPeriod(
+      currentFrom,
+      currentTo,
+      storeKey,
+      channel,
+    );
+    const previousPromise = includePrevious
+      ? loadMarginPeriod(previousFrom, previousTo, storeKey, channel)
+      : Promise.resolve({
+          revenue: 0,
+          cost: 0,
+          profit: 0,
+          marginPercent: 0,
+        });
     const [current, previous] = await Promise.all([
-      loadMarginPeriod(currentFrom, currentTo, storeKey, channel),
-      loadMarginPeriod(previousFrom, previousTo, storeKey, channel),
+      currentPromise,
+      previousPromise,
     ]);
 
     response.json({
@@ -1689,7 +1704,9 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
     );
     const from = typeof request.query.from === "string" ? request.query.from : "";
     const to = typeof request.query.to === "string" ? request.query.to : "";
-    const hasCustomRange = /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to);
+    const hasCustomRange =
+      /^\d{4}-\d{2}-\d{2}$/.test(from) &&
+      /^\d{4}-\d{2}-\d{2}$/.test(to);
 
     const startedAt = Date.now();
     const reportResult = hasCustomRange
@@ -1782,7 +1799,7 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
     const categories = publicBusinessCategories();
 
     response.json({
-      items,
+      items: request.query.references === "only" ? [] : items,
       references: {
         products,
         warehouses,
@@ -1822,11 +1839,19 @@ app.get("/api/dashboard/onec-check-analytics", async (request, response) => {
     );
     const from = typeof request.query.from === "string" ? request.query.from : "";
     const to = typeof request.query.to === "string" ? request.query.to : "";
-    const hasCustomRange = /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to);
+    const hasCustomRange =
+      /^\d{4}-\d{2}-\d{2}$/.test(from) &&
+      /^\d{4}-\d{2}-\d{2}$/.test(to);
+    const includePrevious = request.query.includePrevious !== "false";
     const startedAt = Date.now();
     const analytics = hasCustomRange
-      ? await loadCheckAnalyticsRange({ from, to, limit })
-      : await loadCheckAnalytics({ days, limit });
+      ? await loadCheckAnalyticsRange({
+          from,
+          to,
+          limit,
+          includePrevious,
+        })
+      : await loadCheckAnalytics({ days, limit, includePrevious });
 
     response.json({
       items: analytics,

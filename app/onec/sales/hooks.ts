@@ -16,7 +16,7 @@ import type {
   MarginAnalyticsResponse,
 } from "./types";
 
-const SALES_HISTORY_DAYS = 60;
+const SALES_HISTORY_DAYS = 30;
 const SALES_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 function formatQueryDate(date: Date) {
@@ -84,7 +84,7 @@ export function useSalesData() {
 
       try {
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-reports?${query}`,
+          `${API_URL}/api/dashboard/onec-reports?${query}&references=only`,
           {
             signal: controller.signal,
             credentials: "include",

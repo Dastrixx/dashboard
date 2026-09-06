@@ -152,6 +152,7 @@ export function buildCheckAnalytics(
   latestTimestamp,
   days,
   certificatePaymentKeys = new Set(),
+  includePrevious = true,
 ) {
   const latestDate = new Date(latestTimestamp);
   latestDate.setHours(0, 0, 0, 0);
@@ -163,10 +164,12 @@ export function buildCheckAnalytics(
     parseOnecDateTime(check.Date) >= currentFrom &&
     parseOnecDateTime(check.Date) <= currentTo,
   );
-  const previous = checks.filter((check) =>
-    parseOnecDateTime(check.Date) >= previousFrom &&
-    parseOnecDateTime(check.Date) <= previousTo,
-  );
+  const previous = includePrevious
+    ? checks.filter((check) =>
+        parseOnecDateTime(check.Date) >= previousFrom &&
+        parseOnecDateTime(check.Date) <= previousTo,
+      )
+    : [];
 
   return {
     current: summarizeChecks(current, certificatePaymentKeys),
@@ -193,7 +196,9 @@ async function loadCertificatePaymentKeys() {
     const keys = new Set(
       paymentKinds
         .filter((item) =>
-          /сертификат/i.test(`${item.Description || ""} ${item.ТипОплаты || ""}`),
+          /сертификат/i.test(
+            `${item.Description || ""} ${item.ТипОплаты || ""}`,
+          ),
         )
         .map((item) => item.Ref_Key),
     );
@@ -208,7 +213,7 @@ async function loadCertificatePaymentKeys() {
   }
 }
 
-async function loadChecks({ days, limit }) {
+async function loadChecks({ days, limit, includePrevious = true }) {
   const latestChecks = await onecGet(CHECK_ENTITY, {
     $top: 100,
     $select: "Date,DeletionMark,Posted,СтатусЧекаККМ",
@@ -222,7 +227,8 @@ async function loadChecks({ days, limit }) {
 
   const activity = resolveActivityAnchor(latest, "Date");
   const latestTimestamp = activity.anchorDate.getTime();
-  const fromTimestamp = latestTimestamp - days * 2 * DAY_MS;
+  const loadedDays = includePrevious ? days * 2 : days;
+  const fromTimestamp = latestTimestamp - loadedDays * DAY_MS;
   const pageSize = Math.min(
     Math.max(Number(process.env.ONEC_CHECK_PAGE_SIZE || 100), 1),
     100,
@@ -256,7 +262,8 @@ async function loadChecks({ days, limit }) {
     loaded = await load(dateFilter);
   } catch (error) {
     console.warn(
-      "1С не приняла период аналитики чеков, используем локальный фильтр:",
+      "1С не приняла период аналитики чеков, " +
+        "используем локальный фильтр:",
       error instanceof Error ? error.message : error,
     );
     loaded = await load("");
@@ -304,7 +311,12 @@ async function loadChecksByRange({ fromTimestamp, toTimestamp, limit }) {
   };
 }
 
-async function computeCheckAnalyticsRange({ from, to, limit }) {
+async function computeCheckAnalyticsRange({
+  from,
+  to,
+  limit,
+  includePrevious = true,
+}) {
   const currentFrom = parseOnecDateTime(`${from}T00:00:00`);
   const currentTo = parseOnecDateTime(`${to}T23:59:59`);
 
@@ -316,7 +328,11 @@ async function computeCheckAnalyticsRange({ from, to, limit }) {
   const previousTo = currentFrom - 1;
   const previousFrom = previousTo - duration + 1;
   const [loaded, certificatePaymentKeys] = await Promise.all([
-    loadChecksByRange({ fromTimestamp: previousFrom, toTimestamp: currentTo, limit }),
+    loadChecksByRange({
+      fromTimestamp: includePrevious ? previousFrom : currentFrom,
+      toTimestamp: currentTo,
+      limit,
+    }),
     loadCertificatePaymentKeys(),
   ]);
 
@@ -324,10 +340,12 @@ async function computeCheckAnalyticsRange({ from, to, limit }) {
     const timestamp = parseOnecDateTime(check.Date);
     return timestamp >= currentFrom && timestamp <= currentTo;
   });
-  const previous = loaded.checks.filter((check) => {
-    const timestamp = parseOnecDateTime(check.Date);
-    return timestamp >= previousFrom && timestamp <= previousTo;
-  });
+  const previous = includePrevious
+    ? loaded.checks.filter((check) => {
+        const timestamp = parseOnecDateTime(check.Date);
+        return timestamp >= previousFrom && timestamp <= previousTo;
+      })
+    : [];
   const days = Math.max(Math.round(duration / DAY_MS), 1);
 
   return {
@@ -344,8 +362,13 @@ async function computeCheckAnalyticsRange({ from, to, limit }) {
   };
 }
 
-export async function loadCheckAnalyticsRange({ from, to, limit }) {
-  const key = `range:${from}:${to}:${limit}`;
+export async function loadCheckAnalyticsRange({
+  from,
+  to,
+  limit,
+  includePrevious = true,
+}) {
+  const key = `range:${from}:${to}:${limit}:${includePrevious}`;
   const now = Date.now();
   const cached = checkAnalyticsCache.get(key);
 
@@ -360,7 +383,12 @@ export async function loadCheckAnalyticsRange({ from, to, limit }) {
     Number(process.env.ONEC_REPORT_CACHE_TTL_MS || 30_000),
     5_000,
   );
-  const promise = computeCheckAnalyticsRange({ from, to, limit });
+  const promise = computeCheckAnalyticsRange({
+    from,
+    to,
+    limit,
+    includePrevious,
+  });
   checkAnalyticsCache.set(key, { promise, expiresAt: now + ttlMs });
 
   try {
@@ -376,8 +404,12 @@ export async function loadCheckAnalyticsRange({ from, to, limit }) {
   }
 }
 
-export async function loadCheckAnalytics({ days, limit }) {
-  const key = `${days}:${limit}`;
+export async function loadCheckAnalytics({
+  days,
+  limit,
+  includePrevious = true,
+}) {
+  const key = `${days}:${limit}:${includePrevious}`;
   const now = Date.now();
   const cached = checkAnalyticsCache.get(key);
 
@@ -394,7 +426,7 @@ export async function loadCheckAnalytics({ days, limit }) {
   );
   const promise = (async () => {
     const [loaded, certificatePaymentKeys] = await Promise.all([
-      loadChecks({ days, limit }),
+      loadChecks({ days, limit, includePrevious }),
       loadCertificatePaymentKeys(),
     ]);
 
@@ -417,6 +449,7 @@ export async function loadCheckAnalytics({ days, limit }) {
         loaded.activity.anchorDate.getTime(),
         days,
         certificatePaymentKeys,
+        includePrevious,
       ),
       latestDate: loaded.activity.anchorDate.toISOString(),
       absoluteLatestDate:

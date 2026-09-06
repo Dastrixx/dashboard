@@ -98,7 +98,7 @@ export function Dashboard({
     setOwnerDateRange({ from: dateFrom, to: dateTo });
   };
 
-  const useOwnerPreset = (value: Period) => {
+  const selectOwnerPreset = (value: Period) => {
     setPeriod(value);
     setOwnerDateRange(null);
   };
@@ -263,7 +263,7 @@ export function Dashboard({
                     {([7, 30, 90] as Period[]).map((value) => (
                       <button
                         key={value}
-                        onClick={() => useOwnerPreset(value)}
+                        onClick={() => selectOwnerPreset(value)}
                         className={!ownerDateRange && period === value ? "active" : ""}
                       >
                         {value} дней

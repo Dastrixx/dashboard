@@ -114,3 +114,32 @@ test("day period uses calendar date instead of rolling 24 hours", () => {
   assert.equal(result.previous.checks, 1);
   assert.equal(result.previous.revenue, 500);
 });
+
+test("current-only analytics ignores the previous period", () => {
+  const latestTimestamp = new Date("2025-12-25T19:49:13").getTime();
+  const checks = [
+    {
+      Date: "2025-12-25T10:00:00",
+      ВидОперации: "Продажа",
+      СуммаДокумента: 1000,
+    },
+    {
+      Date: "2025-12-24T10:00:00",
+      ВидОперации: "Продажа",
+      СуммаДокумента: 500,
+    },
+  ];
+
+  const result = buildCheckAnalytics(
+    checks,
+    latestTimestamp,
+    1,
+    new Set(),
+    false,
+  );
+
+  assert.equal(result.current.checks, 1);
+  assert.equal(result.current.revenue, 1000);
+  assert.equal(result.previous.checks, 0);
+  assert.equal(result.previous.revenue, 0);
+});
