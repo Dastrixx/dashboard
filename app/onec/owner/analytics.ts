@@ -14,10 +14,7 @@ const DAY_MS = 86_400_000;
 
 function reportRevenue(reports: OnecRetailReport[]) {
   return reports.reduce(
-    (sum, report) =>
-      sum +
-      Number(report.СуммаДокумента || 0) -
-      Number(report.СуммаВозвратов || 0),
+    (sum, report) => sum + Number(report.СуммаДокумента || 0),
     0,
   );
 }
@@ -97,9 +94,7 @@ function buildComparison(
         Math.max(Math.floor((timestamp - rangeStart) / bucketSize), 0),
         buckets.length - 1,
       );
-      buckets[index][field] +=
-        Number(report.СуммаДокумента || 0) -
-        Number(report.СуммаВозвратов || 0);
+      buckets[index][field] += Number(report.СуммаДокумента || 0);
     });
   };
 

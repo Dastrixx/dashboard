@@ -20,11 +20,14 @@ export function OwnerCheckSummary({
     );
   }
 
-  if (!checks) {
+  if (!checks || checks.dataAvailable === false) {
     return (
       <section className="owner-check-strip error">
-        <strong>Данные чеков временно недоступны.</strong>
-        <span>{error}</span>
+        <strong>Количество чеков временно недоступно.</strong>
+        <span>
+          {error ||
+            "Связанные документы ЧекККМ не опубликованы в OData 1С."}
+        </span>
       </section>
     );
   }

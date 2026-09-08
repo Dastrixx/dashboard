@@ -179,9 +179,13 @@ export type ChartPoint = RevenueBucket & {
 
 export type MarginSummary = {
   revenue: number;
+  revenueBeforeDiscount: number;
+  discounts: number;
+  discountShare: number;
   cost: number;
   profit: number;
   marginPercent: number;
+  dataAvailable: boolean;
 };
 
 export type MarginAnalytics = {

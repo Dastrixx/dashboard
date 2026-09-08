@@ -67,7 +67,10 @@ function chartPeriod(duration: number): AnalyticsPeriod {
 
 function grossRevenue(reports: OnecRetailReport[]) {
   return reports.reduce(
-    (sum, report) => sum + Number(report.СуммаДокумента || 0),
+    (sum, report) =>
+      sum +
+      Number(report.СуммаДокумента || 0) +
+      Number(report.СуммаВозвратов || 0),
     0,
   );
 }
@@ -80,10 +83,7 @@ function returnsAmount(reports: OnecRetailReport[]) {
 }
 
 function netRevenue(report: OnecRetailReport) {
-  return (
-    Number(report.СуммаДокумента || 0) -
-    Number(report.СуммаВозвратов || 0)
-  );
+  return Number(report.СуммаДокумента || 0);
 }
 
 export function buildProductRows(

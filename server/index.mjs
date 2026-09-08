@@ -1416,6 +1416,7 @@ async function loadMarginPeriod(
       "Номенклатура_Key",
       ...(channel === "all" ? [] : ["ЗаказПокупателя_Key"]),
       "СтоимостьTurnover",
+      "СтоимостьБезСкидокTurnover",
       "ор_СебестоимостьTurnover",
     ].join(","),
   });
@@ -1461,8 +1462,8 @@ app.get("/api/dashboard/onec-margin", async (request, response) => {
       if (!latest.length) {
         return response.json({
           items: {
-            current: { revenue: 0, cost: 0, profit: 0, marginPercent: 0 },
-            previous: { revenue: 0, cost: 0, profit: 0, marginPercent: 0 },
+            current: summarizeMarginRows([]),
+            previous: summarizeMarginRows([]),
           },
           meta: { source: "AccumulationRegister_Продажи/Turnovers" },
         });
@@ -1489,8 +1490,12 @@ app.get("/api/dashboard/onec-margin", async (request, response) => {
       ? loadMarginPeriod(previousFrom, previousTo, storeKey, channel)
       : Promise.resolve({
           revenue: 0,
+          revenueBeforeDiscount: 0,
+          discounts: 0,
+          discountShare: 0,
           cost: 0,
           profit: 0,
+          dataAvailable: true,
           marginPercent: 0,
         });
     const [current, previous] = await Promise.all([
@@ -1503,6 +1508,7 @@ app.get("/api/dashboard/onec-margin", async (request, response) => {
       meta: {
         source: "AccumulationRegister_Продажи/Turnovers",
         revenueField: "СтоимостьTurnover",
+        revenueBeforeDiscountField: "СтоимостьБезСкидокTurnover",
         costField: "ор_СебестоимостьTurnover",
         storeKey,
         channel,

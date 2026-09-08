@@ -47,14 +47,19 @@ export function RevenueComparison({
           <strong>
             {marginLoading
               ? "…"
-              : margin
+              : margin?.current.dataAvailable
                 ? `${margin.current.marginPercent.toFixed(1)}%`
                 : "—"}
           </strong>
           <small>
-            {margin
-              ? `валовая прибыль ${money.format(margin.current.profit)}`
-              : marginError || "Себестоимость из регистра продаж 1С"}
+            {margin?.current.dataAvailable
+              ? [
+                  `валовая прибыль ${money.format(margin.current.profit)}`,
+                  `скидки ${money.format(margin.current.discounts)}`,
+                ].join(" · ")
+              : margin
+                ? "1С не вернула себестоимость за период"
+                : marginError || "Себестоимость из регистра продаж 1С"}
           </small>
         </div>
       </div>

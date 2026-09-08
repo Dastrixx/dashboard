@@ -20,9 +20,15 @@ export function TeamSummary({
   margin,
   marginError,
 }: Props) {
-  const marginNote = margin
-    ? `валовая прибыль ${money.format(margin.current.profit)}`
-    : marginError || "данные регистра 1С";
+  const hasMargin = margin?.current.dataAvailable === true;
+  const marginNote = hasMargin
+    ? [
+        `валовая прибыль ${money.format(margin.current.profit)}`,
+        `скидки ${money.format(margin.current.discounts)}`,
+      ].join(" · ")
+    : margin
+      ? "1С не вернула себестоимость за период"
+      : marginError || "данные регистра 1С";
 
   return (
     <section className="team-kpi-grid">
@@ -47,7 +53,7 @@ export function TeamSummary({
       <PlanKpi plan={plan} percent={planPercent} />
       <Kpi
         label="Маржа"
-        value={margin ? `${margin.current.marginPercent.toFixed(1)}%` : "—"}
+        value={hasMargin ? `${margin.current.marginPercent.toFixed(1)}%` : "—"}
         note={marginNote}
       />
     </section>

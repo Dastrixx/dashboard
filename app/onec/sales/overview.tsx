@@ -103,8 +103,11 @@ export function SalesSummary({
           </div>
           <strong>{money.format(analytics.revenue)}</strong>
           <p>
-            Продажи {money.format(analytics.grossRevenue)} · возвраты −
+            После скидок {money.format(analytics.grossRevenue)} · возвраты −
             {money.format(analytics.returns)}
+            {margin && (
+              <> · скидки −{money.format(margin.current.discounts)}</>
+            )}
           </p>
         </article>
 
@@ -135,7 +138,9 @@ export function SalesSummary({
         <article className="kpi-card">
           <div className="kpi-top">
             <span>Маржа</span>
-            {margin?.previous && margin.previous.marginPercent > 0 && (
+            {margin?.current.dataAvailable &&
+              margin.previous.dataAvailable &&
+              margin.previous.marginPercent > 0 && (
               <b
                 className={
                   margin.current.marginPercent >= margin.previous.marginPercent
@@ -151,16 +156,18 @@ export function SalesSummary({
           <strong>
             {marginLoading
               ? "…"
-              : margin
+              : margin?.current.dataAvailable
                 ? `${margin.current.marginPercent.toFixed(1)}%`
                 : "—"}
           </strong>
           <p>
             {marginError
               ? "себестоимость временно недоступна"
-              : margin
+              : margin?.current.dataAvailable
                 ? `валовая прибыль ${money.format(margin.current.profit)}`
-                : "по себестоимости из регистра продаж 1С"}
+                : margin
+                  ? "1С не вернула себестоимость за период"
+                  : "по себестоимости из регистра продаж 1С"}
           </p>
         </article>
       </section>
