@@ -116,6 +116,9 @@ export type CheckAnalytics = {
   latestDate: string | null;
   loaded: number;
   truncated: boolean;
+  dataAvailable?: boolean;
+  source?: string;
+  unavailableReason?: string | null;
 };
 
 export type CheckAnalyticsResponse = {

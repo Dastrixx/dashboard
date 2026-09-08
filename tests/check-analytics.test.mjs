@@ -3,8 +3,22 @@ import test from "node:test";
 
 import {
   buildCheckAnalytics,
+  checkReportFilter,
   isCompletedCheck,
 } from "../server/dashboard/checks.mjs";
+
+test("check query links receipts to a retail report without Date filter", () => {
+  const filter = checkReportFilter(
+    "12345678-1234-1234-1234-123456789abc",
+  );
+
+  assert.equal(
+    filter,
+    "ОтчетОРозничныхПродажах_Key eq " +
+      "guid'12345678-1234-1234-1234-123456789abc'",
+  );
+  assert.equal(filter.includes("Date"), false);
+});
 
 test("completed check filter keeps archived receipts", () => {
   assert.equal(

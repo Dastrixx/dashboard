@@ -38,6 +38,7 @@ import {
   loadCheckAnalytics,
   loadCheckAnalyticsRange,
 } from "./dashboard/checks.mjs";
+import { summarizeMarginRows } from "./dashboard/margin.mjs";
 import {
   parseSalesChannel,
   salesChannelFromOrder,
@@ -1399,16 +1400,20 @@ async function loadMarginPeriod(
   channel = "all",
 ) {
   const dimensions = [
-    ...(storeKey === "all" ? [] : ["Магазин"]),
+    "Магазин",
+    "Склад",
+    "Номенклатура",
     ...(channel === "all" ? [] : ["ЗаказПокупателя"]),
   ];
   const rows = await onecTurnovers("AccumulationRegister_Продажи", {
     startPeriod: startDate,
     endPeriod: endDate,
     dimensions: dimensions.join(","),
-    top: dimensions.length ? 10_000 : 10,
+    top: 10_000,
     select: [
-      ...(storeKey === "all" ? [] : ["Магазин_Key"]),
+      "Магазин_Key",
+      "Склад_Key",
+      "Номенклатура_Key",
       ...(channel === "all" ? [] : ["ЗаказПокупателя_Key"]),
       "СтоимостьTurnover",
       "ор_СебестоимостьTurnover",
@@ -1420,21 +1425,8 @@ async function loadMarginPeriod(
       salesChannelFromOrder(item.ЗаказПокупателя_Key) === channel;
     return matchesStore && matchesChannel;
   });
-  const revenue = scopedRows.reduce(
-    (sum, item) => sum + Number(item.СтоимостьTurnover || 0),
-    0,
-  );
-  const cost = scopedRows.reduce(
-    (sum, item) => sum + Number(item.ор_СебестоимостьTurnover || 0),
-    0,
-  );
-  const profit = revenue - cost;
-  return {
-    revenue,
-    cost,
-    profit,
-    marginPercent: revenue > 0 ? (profit / revenue) * 100 : 0,
-  };
+
+  return summarizeMarginRows(scopedRows);
 }
 
 app.get("/api/dashboard/onec-margin", async (request, response) => {
@@ -1871,12 +1863,24 @@ app.get("/api/dashboard/onec-check-analytics", async (request, response) => {
       /^\d{4}-\d{2}-\d{2}$/.test(to);
     const includePrevious = request.query.includePrevious !== "false";
     const startedAt = Date.now();
+    const reportRecords = hasCustomRange
+      ? uniqueReports(
+          (
+            await loadReportPagesByRangeCached({
+              limit: null,
+              from,
+              to,
+            })
+          ).items,
+        )
+      : [];
     const analytics = hasCustomRange
       ? await loadCheckAnalyticsRange({
           from,
           to,
           limit,
           includePrevious,
+          reportRecords,
         })
       : await loadCheckAnalytics({ days, limit, includePrevious });
 
@@ -1895,7 +1899,7 @@ app.get("/api/dashboard/onec-check-analytics", async (request, response) => {
         truncated: analytics.truncated,
         cache: analytics.cache,
         durationMs: Date.now() - startedAt,
-        source: "Document_ЧекККМ",
+        source: analytics.source || "Document_ЧекККМ",
       },
     });
   } catch (error) {

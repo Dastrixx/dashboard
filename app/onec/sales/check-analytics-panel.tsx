@@ -106,6 +106,17 @@ export function CheckAnalyticsPanel({
           </strong>
           <span>{error}</span>
         </div>
+      ) : analytics?.dataAvailable === false ? (
+        <div className="onec-check-state error" role="status">
+          <strong>
+            Количество чеков и средний чек сейчас недоступны.
+          </strong>
+          <span>
+            В 1С есть розничные отчёты за выбранный период, но связанные
+            документы ЧекККМ не опубликованы в OData. Продажи выше рассчитаны
+            по проведённым отчётам и остаются актуальными.
+          </span>
+        </div>
       ) : analytics ? (
         <>
           {!analytics.latestDate && (
