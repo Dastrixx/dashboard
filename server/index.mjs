@@ -1426,8 +1426,70 @@ async function loadMarginPeriod(
       salesChannelFromOrder(item.ЗаказПокупателя_Key) === channel;
     return matchesStore && matchesChannel;
   });
+  const summary = summarizeMarginRows(scopedRows);
+  if (summary.dataAvailable || !scopedRows.length) return summary;
 
-  return summarizeMarginRows(scopedRows);
+  try {
+    const rawRows = await loadRawMarginRows(startDate, endDate);
+    const rawScopedRows = rawRows.filter((item) => {
+      const matchesStore =
+        storeKey === "all" || item.Магазин_Key === storeKey;
+      const matchesChannel =
+        channel === "all" ||
+        salesChannelFromOrder(item.ЗаказПокупателя_Key) === channel;
+      return matchesStore && matchesChannel;
+    });
+
+    return summarizeMarginRows(rawScopedRows);
+  } catch (error) {
+    console.warn(
+      "Не удалось загрузить исходные движения для расчёта себестоимости:",
+      error instanceof Error ? error.message : error,
+    );
+    return summary;
+  }
+}
+
+async function loadRawMarginRows(startDate, endDate) {
+  const pageSize = Math.min(
+    Math.max(Number(process.env.ONEC_PAGE_SIZE || 100), 1),
+    100,
+  );
+  const filter = [
+    "Active eq true",
+    `Period ge datetime'${toOdataDateTime(startDate.getTime())}'`,
+    `Period le datetime'${toOdataDateTime(endDate.getTime())}'`,
+  ].join(" and ");
+  const rows = [];
+
+  while (true) {
+    const page = await onecGet("AccumulationRegister_Продажи_RecordType", {
+      $top: pageSize,
+      $skip: rows.length,
+      $select: [
+        "Period",
+        "Active",
+        "Магазин_Key",
+        "Склад_Key",
+        "Номенклатура_Key",
+        "ЗаказПокупателя_Key",
+        "Стоимость",
+        "СтоимостьБезСкидок",
+        "ор_Себестоимость",
+      ].join(","),
+      $filter: filter,
+      $orderby: "Period asc",
+    });
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    СтоимостьTurnover: row.Стоимость,
+    СтоимостьБезСкидокTurnover: row.СтоимостьБезСкидок,
+    ор_СебестоимостьTurnover: row.ор_Себестоимость,
+  }));
 }
 
 app.get("/api/dashboard/onec-margin", async (request, response) => {
