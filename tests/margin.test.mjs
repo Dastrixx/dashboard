@@ -24,6 +24,7 @@ test("margin uses every turnover row", () => {
   assert.equal(result.cost, 11_368_378.25);
   assert.equal(result.profit, 5_647_346.550000001);
   assert.ok(Math.abs(result.marginPercent - 33.188986) < 0.000001);
+  assert.ok(Math.abs(result.efficiencyPercent - 49.675921) < 0.000001);
   assert.equal(result.dataAvailable, true);
 });
 
@@ -38,6 +39,7 @@ test("missing cost never becomes a false 100 percent margin", () => {
 
   assert.equal(result.dataAvailable, false);
   assert.equal(result.marginPercent, 0);
+  assert.equal(result.efficiencyPercent, 0);
   assert.equal(result.profit, 0);
 });
 
@@ -83,6 +85,7 @@ test("margin can be calculated from product cost snapshot", () => {
   assert.equal(result.cost, 1_200);
   assert.equal(result.profit, 500);
   assert.ok(Math.abs(result.marginPercent - 29.411765) < 0.000001);
+  assert.ok(Math.abs(result.efficiencyPercent - 41.666667) < 0.000001);
   assert.equal(result.discounts, 300);
 });
 

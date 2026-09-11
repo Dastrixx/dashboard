@@ -188,6 +188,7 @@ export type MarginSummary = {
   cost: number;
   profit: number;
   marginPercent: number;
+  efficiencyPercent: number;
   dataAvailable: boolean;
   costSource?: string;
 };

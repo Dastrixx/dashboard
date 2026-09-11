@@ -1452,16 +1452,7 @@ app.get("/api/dashboard/onec-margin", async (request, response) => {
     );
     const previousPromise = includePrevious
       ? loadMarginPeriod(previousFrom, previousTo, storeKey, channel)
-      : Promise.resolve({
-          revenue: 0,
-          revenueBeforeDiscount: 0,
-          discounts: 0,
-          discountShare: 0,
-          cost: 0,
-          profit: 0,
-          dataAvailable: true,
-          marginPercent: 0,
-        });
+      : Promise.resolve(summarizeMarginRows([]));
     const [current, previous] = await Promise.all([
       currentPromise,
       previousPromise,
@@ -1477,7 +1468,8 @@ app.get("/api/dashboard/onec-margin", async (request, response) => {
         previousCostSource: previous.costSource,
         calculation:
           "profit = revenue - cost; " +
-          "marginPercent = profit / revenue * 100",
+          "marginPercent = profit / revenue * 100; " +
+          "efficiencyPercent = profit / cost * 100",
         storeKey,
         channel,
         periodStart: currentFrom.toISOString(),

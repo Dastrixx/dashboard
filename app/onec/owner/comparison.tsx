@@ -19,6 +19,10 @@ export function RevenueComparison({
     ...analytics.comparison.map((bucket) => bucket.value),
     1,
   );
+  const activeMargin =
+    margin?.current?.dataAvailable === true ? margin.current : null;
+  const hasMargin = activeMargin !== null;
+  const efficiencyPercent = activeMargin?.efficiencyPercent ?? 0;
 
   return (
     <article className="panel owner-revenue-panel">
@@ -47,15 +51,17 @@ export function RevenueComparison({
           <strong>
             {marginLoading
               ? "…"
-              : margin?.current.dataAvailable
-                ? `${margin.current.marginPercent.toFixed(1)}%`
+              : hasMargin
+                ? `${activeMargin.marginPercent.toFixed(1)}%`
                 : "—"}
           </strong>
           <small>
-            {margin?.current.dataAvailable
+            {hasMargin
               ? [
-                  `валовая прибыль ${money.format(margin.current.profit)}`,
-                  `скидки ${money.format(margin.current.discounts)}`,
+                  `валовая прибыль ${money.format(activeMargin.profit)}`,
+                  `вычет себестоимости −${money.format(activeMargin.cost)}`,
+                  `эффективность продаж ${efficiencyPercent.toFixed(1)}%`,
+                  `скидки −${money.format(activeMargin.discounts)}`,
                 ].join(" · ")
               : margin
                 ? "1С не вернула себестоимость за период"

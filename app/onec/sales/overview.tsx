@@ -38,6 +38,17 @@ export function SalesSummary({
   marginError,
 }: SalesSummaryProps) {
   const freshness = dataFreshness(analytics.latestTimestamp);
+  const activeMargin =
+    margin?.current?.dataAvailable === true ? margin.current : null;
+  const previousMargin = margin?.previous;
+  const hasMargin = activeMargin !== null;
+  const marginChange =
+    hasMargin &&
+    previousMargin?.dataAvailable &&
+    previousMargin.marginPercent > 0
+      ? activeMargin.marginPercent - previousMargin.marginPercent
+      : null;
+  const efficiencyPercent = activeMargin?.efficiencyPercent ?? 0;
 
   return (
     <>
@@ -138,33 +149,35 @@ export function SalesSummary({
         <article className="kpi-card">
           <div className="kpi-top">
             <span>Маржа</span>
-            {margin?.current.dataAvailable &&
-              margin.previous.dataAvailable &&
-              margin.previous.marginPercent > 0 && (
+            {marginChange !== null && (
               <b
-                className={
-                  margin.current.marginPercent >= margin.previous.marginPercent
-                    ? "trend"
-                    : "trend neutral"
-                }
+                className={marginChange >= 0 ? "trend" : "trend neutral"}
               >
-                {margin.current.marginPercent >= margin.previous.marginPercent ? "+" : ""}
-                {(margin.current.marginPercent - margin.previous.marginPercent).toFixed(1)} п.п.
+                {marginChange >= 0 ? "+" : ""}
+                {marginChange.toFixed(1)} п.п.
               </b>
             )}
           </div>
           <strong>
             {marginLoading
               ? "…"
-              : margin?.current.dataAvailable
-                ? `${margin.current.marginPercent.toFixed(1)}%`
+              : hasMargin
+                ? `${activeMargin.marginPercent.toFixed(1)}%`
                 : "—"}
           </strong>
           <p>
             {marginError
               ? "себестоимость временно недоступна"
-              : margin?.current.dataAvailable
-                ? `валовая прибыль ${money.format(margin.current.profit)}`
+              : hasMargin
+                ? (
+                  <>
+                    валовая прибыль {money.format(activeMargin.profit)}
+                    <br />
+                    вычет себестоимости −{money.format(activeMargin.cost)}
+                    <br />
+                    эффективность продаж {efficiencyPercent.toFixed(1)}%
+                  </>
+                )
                 : margin
                   ? "1С не вернула себестоимость за период"
                   : "по себестоимости из регистра продаж 1С"}

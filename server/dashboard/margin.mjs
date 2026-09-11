@@ -18,6 +18,8 @@ export function summarizeMarginRows(rows) {
     0,
   );
   const profit = costAvailable ? totals.revenue - totals.cost : 0;
+  const efficiencyPercent =
+    costAvailable && totals.cost > 0 ? (profit / totals.cost) * 100 : 0;
 
   return {
     ...totals,
@@ -31,5 +33,6 @@ export function summarizeMarginRows(rows) {
       costAvailable && totals.revenue > 0
         ? (profit / totals.revenue) * 100
         : 0,
+    efficiencyPercent,
   };
 }
