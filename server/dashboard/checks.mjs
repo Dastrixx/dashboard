@@ -3,8 +3,13 @@ import {
   filterByPeriod,
   parseOnecDateTime,
   resolveActivityAnchor,
+  startOfOnecDay,
   toOdataDateTime,
 } from "./utils.mjs";
+import {
+  loadSalesDocuments,
+  summarizeSalesDocuments,
+} from "./sales-register.mjs";
 
 const DAY_MS = 86_400_000;
 const CHECK_ENTITY = "Document_ЧекККМ";
@@ -38,7 +43,9 @@ export function isCompletedCheck(check) {
 
 export function checkReportFilter(reportKey) {
   if (!GUID_PATTERN.test(reportKey)) {
-    throw new Error("Некорректный ключ отчёта о розничных продажах");
+    throw new Error(
+      "Некорректный ключ отчёта о розничных продажах",
+    );
   }
 
   return `ОтчетОРозничныхПродажах_Key eq guid'${reportKey}'`;
@@ -46,6 +53,7 @@ export function checkReportFilter(reportKey) {
 
 const checkAnalyticsCache = new Map();
 let paymentKindsCache = null;
+let latestPublishedCheckCache = null;
 
 function isReturnCheck(check) {
   return /возврат/i.test(String(check?.ВидОперации || ""));
@@ -104,6 +112,7 @@ function summarizeChecks(checks, certificatePaymentKeys = new Set()) {
   );
 
   return {
+    totalChecks: sales.length + returns.length,
     checks: sales.length,
     revenue,
     netRevenue: revenue - returnsAmount,
@@ -165,10 +174,9 @@ export function buildCheckAnalytics(
   certificatePaymentKeys = new Set(),
   includePrevious = true,
 ) {
-  const latestDate = new Date(latestTimestamp);
-  latestDate.setHours(0, 0, 0, 0);
-  const currentFrom = latestDate.getTime() - (days - 1) * DAY_MS;
-  const currentTo = latestDate.getTime() + DAY_MS - 1;
+  const latestDayStart = startOfOnecDay(latestTimestamp);
+  const currentFrom = latestDayStart - (days - 1) * DAY_MS;
+  const currentTo = latestDayStart + DAY_MS - 1;
   const previousTo = currentFrom - 1;
   const previousFrom = currentFrom - days * DAY_MS;
   const current = checks.filter((check) =>
@@ -221,6 +229,39 @@ async function loadCertificatePaymentKeys() {
       error instanceof Error ? error.message : error,
     );
     return new Set();
+  }
+}
+
+async function canLoadPublishedChecks(currentFrom) {
+  const now = Date.now();
+
+  if (latestPublishedCheckCache?.expiresAt > now) {
+    return latestPublishedCheckCache.timestamp >= currentFrom;
+  }
+
+  try {
+    const checks = await onecGet(CHECK_ENTITY, {
+      $top: 20,
+      $select: "Date,DeletionMark,Posted,СтатусЧекаККМ",
+      $orderby: "Date desc",
+    });
+    const latestTimestamp = checks
+      .filter(isCompletedCheck)
+      .map((check) => parseOnecDateTime(check.Date))
+      .find(Number.isFinite) ?? Number.NEGATIVE_INFINITY;
+
+    latestPublishedCheckCache = {
+      timestamp: latestTimestamp,
+      expiresAt: now + 30_000,
+    };
+    return latestTimestamp >= currentFrom;
+  } catch (error) {
+    console.warn(
+      "Не удалось определить последний " +
+        "опубликованный чек:",
+      error instanceof Error ? error.message : error,
+    );
+    return true;
   }
 }
 
@@ -376,16 +417,44 @@ async function computeCheckAnalyticsRange({
   const hasRetailReports = reportRecords.length > 0;
   let loadError = null;
   let loaded = { checks: [], truncated: false };
+  let registerSummary = null;
+  let registerTruncated = false;
+  const registerPromise = loadSalesDocuments({
+    startDate: new Date(currentFrom),
+    endDate: new Date(currentTo + 1),
+    limit,
+  }).then(
+    (result) => ({ result, error: null }),
+    (error) => ({ result: null, error }),
+  );
 
   try {
-    loaded = hasRetailReports
-      ? await loadChecksByReports(reportRecords, limit)
-      : loaded;
+    const publishedChecksAvailable =
+      hasRetailReports && (await canLoadPublishedChecks(currentFrom));
+
+    if (publishedChecksAvailable) {
+      loaded = await loadChecksByReports(reportRecords, limit);
+    }
   } catch (error) {
     loadError = error;
     console.warn(
-      "Не удалось загрузить чеки, связанные с розничными отчётами:",
+      "Не удалось загрузить чеки, связанные " +
+        "с розничными отчётами:",
       error instanceof Error ? error.message : error,
+    );
+  }
+
+  const registerLoad = await registerPromise;
+  if (registerLoad.result) {
+    registerSummary = summarizeSalesDocuments(registerLoad.result.rows);
+    registerTruncated = registerLoad.result.truncated;
+  } else {
+    loadError ||= registerLoad.error;
+    console.warn(
+      "Не удалось восстановить чеки из регистра продаж:",
+      registerLoad.error instanceof Error
+        ? registerLoad.error.message
+        : registerLoad.error,
     );
   }
 
@@ -403,25 +472,60 @@ async function computeCheckAnalyticsRange({
     : [];
   const days = Math.max(Math.round(duration / DAY_MS), 1);
 
+  const documentSummary = summarizeChecks(current, certificatePaymentKeys);
+  const usedRegisterFallback = Boolean(registerSummary?.totalChecks);
+  const documentDetailsAvailable = usedRegisterFallback
+    ? documentSummary.totalChecks === registerSummary.totalChecks &&
+      !loaded.truncated
+    : documentSummary.totalChecks > 0;
+  const currentSummary = usedRegisterFallback
+    ? {
+        ...registerSummary,
+        certificatePayments: documentDetailsAvailable
+          ? documentSummary.certificatePayments
+          : 0,
+        certificatesUsed: documentDetailsAvailable
+          ? documentSummary.certificatesUsed
+          : 0,
+      }
+    : documentSummary;
+  const latestCheckTimestamp = current.length
+    ? Math.max(
+        ...current.map((check) => parseOnecDateTime(check.Date)),
+      )
+    : null;
+
   return {
-    current: summarizeChecks(current, certificatePaymentKeys),
+    current: currentSummary,
     previous: summarizeChecks(previous, certificatePaymentKeys),
-    series: buildBuckets(current, currentFrom, currentTo + 1, days),
+    series: documentDetailsAvailable
+      ? buildBuckets(current, currentFrom, currentTo + 1, days)
+      : [],
     periodStart: new Date(currentFrom).toISOString(),
     periodEnd: new Date(currentTo).toISOString(),
-    latestDate: current.length
-      ? new Date(Math.max(...current.map((check) => parseOnecDateTime(check.Date)))).toISOString()
+    latestDate: latestCheckTimestamp
+      ? new Date(latestCheckTimestamp).toISOString()
       : null,
-    loaded: loaded.checks.length,
-    truncated: loaded.truncated,
-    dataAvailable: !hasRetailReports || current.length > 0,
-    source: hasRetailReports
-      ? "Document_ЧекККМ.ОтчетОРозничныхПродажах_Key"
-      : "Document_ЧекККМ",
+    loaded: usedRegisterFallback
+      ? currentSummary.totalChecks
+      : loaded.checks.length,
+    truncated: loaded.truncated || registerTruncated,
+    dataAvailable:
+      !hasRetailReports || current.length > 0 || usedRegisterFallback,
+    seriesAvailable: documentDetailsAvailable,
+    documentDetailsAvailable,
+    source: usedRegisterFallback
+      ? documentDetailsAvailable
+        ? "AccumulationRegister_Продажи + Document_ЧекККМ"
+        : "AccumulationRegister_Продажи.ДокументПродажи"
+      : hasRetailReports
+        ? "Document_ЧекККМ.ОтчетОРозничныхПродажах_Key"
+        : "Document_ЧекККМ",
     unavailableReason: loadError instanceof Error
       ? loadError.message
-      : hasRetailReports && current.length === 0
-        ? "Связанные документы ЧекККМ не опубликованы в OData"
+      : hasRetailReports && current.length === 0 && !usedRegisterFallback
+        ? "Связанные документы ЧекККМ " +
+          "не опубликованы в OData"
         : null,
   };
 }

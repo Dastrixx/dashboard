@@ -136,6 +136,7 @@ export function OnecSales() {
         loading={checks.loading}
         error={checks.error}
         dateRange={dateRange}
+        reportRevenue={analytics.revenue}
       />
 
       <RevenueAnalysis

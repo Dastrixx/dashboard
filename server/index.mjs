@@ -24,6 +24,7 @@ import {
   parseOnecDateTime,
   publicBusinessCategories,
   resolveActivityAnchor,
+  startOfOnecDay,
   summarizeProductReference,
   toOdataDateTime,
 } from "./dashboard/utils.mjs";
@@ -38,6 +39,7 @@ import {
   loadCheckAnalytics,
   loadCheckAnalyticsRange,
 } from "./dashboard/checks.mjs";
+import { loadMarginPeriod } from "./dashboard/margin-loader.mjs";
 import { summarizeMarginRows } from "./dashboard/margin.mjs";
 import {
   parseSalesChannel,
@@ -1393,105 +1395,6 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
   }
 });
 
-async function loadMarginPeriod(
-  startDate,
-  endDate,
-  storeKey = "all",
-  channel = "all",
-) {
-  const dimensions = [
-    "Магазин",
-    "Склад",
-    "Номенклатура",
-    ...(channel === "all" ? [] : ["ЗаказПокупателя"]),
-  ];
-  const rows = await onecTurnovers("AccumulationRegister_Продажи", {
-    startPeriod: startDate,
-    endPeriod: endDate,
-    dimensions: dimensions.join(","),
-    top: 10_000,
-    select: [
-      "Магазин_Key",
-      "Склад_Key",
-      "Номенклатура_Key",
-      ...(channel === "all" ? [] : ["ЗаказПокупателя_Key"]),
-      "СтоимостьTurnover",
-      "СтоимостьБезСкидокTurnover",
-      "ор_СебестоимостьTurnover",
-    ].join(","),
-  });
-  const scopedRows = rows.filter((item) => {
-    const matchesStore = storeKey === "all" || item.Магазин_Key === storeKey;
-    const matchesChannel = channel === "all" ||
-      salesChannelFromOrder(item.ЗаказПокупателя_Key) === channel;
-    return matchesStore && matchesChannel;
-  });
-  const summary = summarizeMarginRows(scopedRows);
-  if (summary.dataAvailable || !scopedRows.length) return summary;
-
-  try {
-    const rawRows = await loadRawMarginRows(startDate, endDate);
-    const rawScopedRows = rawRows.filter((item) => {
-      const matchesStore =
-        storeKey === "all" || item.Магазин_Key === storeKey;
-      const matchesChannel =
-        channel === "all" ||
-        salesChannelFromOrder(item.ЗаказПокупателя_Key) === channel;
-      return matchesStore && matchesChannel;
-    });
-
-    return summarizeMarginRows(rawScopedRows);
-  } catch (error) {
-    console.warn(
-      "Не удалось загрузить исходные движения для расчёта себестоимости:",
-      error instanceof Error ? error.message : error,
-    );
-    return summary;
-  }
-}
-
-async function loadRawMarginRows(startDate, endDate) {
-  const pageSize = Math.min(
-    Math.max(Number(process.env.ONEC_PAGE_SIZE || 100), 1),
-    100,
-  );
-  const filter = [
-    "Active eq true",
-    `Period ge datetime'${toOdataDateTime(startDate.getTime())}'`,
-    `Period le datetime'${toOdataDateTime(endDate.getTime())}'`,
-  ].join(" and ");
-  const rows = [];
-
-  while (true) {
-    const page = await onecGet("AccumulationRegister_Продажи_RecordType", {
-      $top: pageSize,
-      $skip: rows.length,
-      $select: [
-        "Period",
-        "Active",
-        "Магазин_Key",
-        "Склад_Key",
-        "Номенклатура_Key",
-        "ЗаказПокупателя_Key",
-        "Стоимость",
-        "СтоимостьБезСкидок",
-        "ор_Себестоимость",
-      ].join(","),
-      $filter: filter,
-      $orderby: "Period asc",
-    });
-    rows.push(...page);
-    if (page.length < pageSize) break;
-  }
-
-  return rows.map((row) => ({
-    ...row,
-    СтоимостьTurnover: row.Стоимость,
-    СтоимостьБезСкидокTurnover: row.СтоимостьБезСкидок,
-    ор_СебестоимостьTurnover: row.ор_Себестоимость,
-  }));
-}
-
 app.get("/api/dashboard/onec-margin", async (request, response) => {
   try {
     const from = typeof request.query.from === "string" ? request.query.from : "";
@@ -1532,10 +1435,9 @@ app.get("/api/dashboard/onec-margin", async (request, response) => {
       }
       const activity = resolveActivityAnchor(latest, "Period");
       const anchor = activity.anchorDate;
-      const dayStart = new Date(anchor);
-      dayStart.setHours(0, 0, 0, 0);
-      currentFrom = new Date(dayStart.getTime() - (days - 1) * 86_400_000);
-      currentTo = new Date(dayStart.getTime() + 86_400_000);
+      const dayStart = startOfOnecDay(anchor);
+      currentFrom = new Date(dayStart - (days - 1) * 86_400_000);
+      currentTo = new Date(dayStart + 86_400_000);
     }
 
     const duration = currentTo.getTime() - currentFrom.getTime();
@@ -1571,7 +1473,11 @@ app.get("/api/dashboard/onec-margin", async (request, response) => {
         source: "AccumulationRegister_Продажи/Turnovers",
         revenueField: "СтоимостьTurnover",
         revenueBeforeDiscountField: "СтоимостьБезСкидокTurnover",
-        costField: "ор_СебестоимостьTurnover",
+        costSource: current.costSource,
+        previousCostSource: previous.costSource,
+        calculation:
+          "profit = revenue - cost; " +
+          "marginPercent = profit / revenue * 100",
         storeKey,
         channel,
         periodStart: currentFrom.toISOString(),
@@ -1919,10 +1825,10 @@ app.get("/api/dashboard/onec-check-analytics", async (request, response) => {
     const limit = Math.min(
       Math.max(
         Number(request.query.limit) ||
-          Number(process.env.ONEC_CHECK_ANALYTICS_LIMIT || 5000),
+          Number(process.env.ONEC_CHECK_ANALYTICS_LIMIT || 20_000),
         100,
       ),
-      10_000,
+      50_000,
     );
     const from = typeof request.query.from === "string" ? request.query.from : "";
     const to = typeof request.query.to === "string" ? request.query.to : "";

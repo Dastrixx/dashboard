@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { summarizeMarginWithSnapshotCosts } from "../server/dashboard/margin-loader.mjs";
 import { summarizeMarginRows } from "../server/dashboard/margin.mjs";
 
 test("margin uses every turnover row", () => {
@@ -38,4 +39,71 @@ test("missing cost never becomes a false 100 percent margin", () => {
   assert.equal(result.dataAvailable, false);
   assert.equal(result.marginPercent, 0);
   assert.equal(result.profit, 0);
+});
+
+test("margin can be calculated from product cost snapshot", () => {
+  const marginSummary = summarizeMarginRows([
+    {
+      СтоимостьTurnover: 1_700,
+      СтоимостьБезСкидокTurnover: 2_000,
+    },
+  ]);
+  const result = summarizeMarginWithSnapshotCosts(
+    [
+      {
+        Магазин_Key: "store",
+        Номенклатура_Key: "product-1",
+        Характеристика_Key: "variant",
+        КоличествоTurnover: 2,
+      },
+      {
+        Магазин_Key: "store",
+        Номенклатура_Key: "product-2",
+        Характеристика_Key: "variant",
+        КоличествоTurnover: 1,
+      },
+    ],
+    [
+      {
+        Магазин_Key: "store",
+        Номенклатура_Key: "product-1",
+        Характеристика_Key: "variant",
+        Цена: 500,
+      },
+      {
+        Магазин_Key: "store",
+        Номенклатура_Key: "product-2",
+        Характеристика_Key: "variant",
+        Цена: 200,
+      },
+    ],
+    marginSummary,
+  );
+
+  assert.equal(result.cost, 1_200);
+  assert.equal(result.profit, 500);
+  assert.ok(Math.abs(result.marginPercent - 29.411765) < 0.000001);
+  assert.equal(result.discounts, 300);
+});
+
+test("snapshot calculation stops when a product cost is missing", () => {
+  const marginSummary = summarizeMarginRows([
+    {
+      СтоимостьTurnover: 1_700,
+      СтоимостьБезСкидокTurnover: 2_000,
+    },
+  ]);
+  const result = summarizeMarginWithSnapshotCosts(
+    [
+      {
+        Магазин_Key: "store",
+        Номенклатура_Key: "product-without-cost",
+        КоличествоTurnover: 1,
+      },
+    ],
+    [],
+    marginSummary,
+  );
+
+  assert.equal(result, null);
 });

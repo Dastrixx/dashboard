@@ -37,6 +37,21 @@ export function parseOnecDateTime(value) {
   return localAsUtc - onecTimezoneOffsetMinutes() * 60_000;
 }
 
+export function startOfOnecDay(value) {
+  const timestamp = parseOnecDateTime(value);
+  if (!Number.isFinite(timestamp)) return Number.NaN;
+
+  const offset = onecTimezoneOffsetMinutes() * 60_000;
+  const shifted = new Date(timestamp + offset);
+  const localMidnightAsUtc = Date.UTC(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate(),
+  );
+
+  return localMidnightAsUtc - offset;
+}
+
 export function normalizeOnecDateTime(value) {
   const timestamp = parseOnecDateTime(value);
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : value;

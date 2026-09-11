@@ -87,6 +87,7 @@ export type OnecSalesResponse = {
 };
 
 export type CheckSummary = {
+  totalChecks: number;
   checks: number;
   revenue: number;
   netRevenue: number;
@@ -119,6 +120,8 @@ export type CheckAnalytics = {
   dataAvailable?: boolean;
   source?: string;
   unavailableReason?: string | null;
+  seriesAvailable?: boolean;
+  documentDetailsAvailable?: boolean;
 };
 
 export type CheckAnalyticsResponse = {
@@ -186,6 +189,7 @@ export type MarginSummary = {
   profit: number;
   marginPercent: number;
   dataAvailable: boolean;
+  costSource?: string;
 };
 
 export type MarginAnalytics = {
