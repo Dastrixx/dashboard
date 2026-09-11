@@ -8,6 +8,7 @@ import type {
   ProductRow,
   RevenueBucket,
   SalesAnalytics,
+  SalesDateRange,
 } from "./types";
 
 export function percentageChange(current: number, previous: number) {
@@ -41,9 +42,35 @@ function periodBounds(latestTimestamp: number, days: number) {
   };
 }
 
+function customRangeBounds(range: SalesDateRange) {
+  const currentFrom = new Date(`${range.from}T00:00:00`).getTime();
+  const currentTo = new Date(`${range.to}T23:59:59.999`).getTime();
+  const duration = currentTo - currentFrom + 1;
+  const previousTo = currentFrom - 1;
+
+  return {
+    currentFrom,
+    currentTo,
+    previousFrom: currentFrom - duration,
+    previousTo,
+    duration,
+  };
+}
+
+function chartPeriod(duration: number): AnalyticsPeriod {
+  const days = Math.max(Math.round(duration / DAY_MS), 1);
+
+  if (days === 1) return "day";
+  if (days <= 7) return "week";
+  return "month";
+}
+
 function grossRevenue(reports: OnecRetailReport[]) {
   return reports.reduce(
-    (sum, report) => sum + Number(report.СуммаДокумента || 0),
+    (sum, report) =>
+      sum +
+      Number(report.СуммаДокумента || 0) +
+      Number(report.СуммаВозвратов || 0),
     0,
   );
 }
@@ -56,10 +83,7 @@ function returnsAmount(reports: OnecRetailReport[]) {
 }
 
 function netRevenue(report: OnecRetailReport) {
-  return (
-    Number(report.СуммаДокумента || 0) -
-    Number(report.СуммаВозвратов || 0)
-  );
+  return Number(report.СуммаДокумента || 0);
 }
 
 export function buildProductRows(
@@ -76,13 +100,13 @@ export function buildProductRows(
   const aggregate = new Map<string, { revenue: number; sold: number }>();
 
   const addLine = (line: OnecRetailReport["Товары"][number], sign: 1 | -1) => {
-      const current = aggregate.get(line.Номенклатура_Key) || {
-        revenue: 0,
-        sold: 0,
-      };
-      current.revenue += sign * Number(line.Сумма || 0);
-      current.sold += sign * Number(line.Количество || 0);
-      aggregate.set(line.Номенклатура_Key, current);
+    const current = aggregate.get(line.Номенклатура_Key) || {
+      revenue: 0,
+      sold: 0,
+    };
+    current.revenue += sign * Number(line.Сумма || 0);
+    current.sold += sign * Number(line.Количество || 0);
+    aggregate.set(line.Номенклатура_Key, current);
   };
 
   reports.forEach((report) => {
@@ -112,6 +136,8 @@ export function buildProductRows(
           product?.BusinessCategory ||
           categoryByKey.get(product?.BusinessCategory_Key || "") ||
           "Не классифицировано",
+        subcategoryKey: product?.Subcategory_Key || "",
+        subcategory: product?.Subcategory || "Без подкатегории",
         revenue: value.revenue,
         sold: value.sold,
         share: 0,
@@ -169,20 +195,26 @@ export function buildSalesAnalytics(
   products: OnecProductReference[],
   categories: OnecCategoryReference[],
   period: AnalyticsPeriod,
+  anchorTimestamp?: number,
+  dateRange?: SalesDateRange | null,
 ): SalesAnalytics | null {
-  const latestTimestamp = Math.max(
+  const latestReportTimestamp = Math.max(
     ...reports.map((report) => new Date(report.Date).getTime()),
     0,
   );
-  if (!latestTimestamp) return null;
-
+  if (!latestReportTimestamp) return null;
+  const analysisTimestamp = anchorTimestamp || latestReportTimestamp;
+  const bounds = dateRange
+    ? customRangeBounds(dateRange)
+    : periodBounds(analysisTimestamp, PERIODS[period].days);
   const {
     currentFrom,
     currentTo,
     previousFrom,
     previousTo,
     duration,
-  } = periodBounds(latestTimestamp, PERIODS[period].days);
+  } = bounds;
+  const bucketPeriod = dateRange ? chartPeriod(duration) : period;
   const currentReports = reports.filter((report) =>
     inRange(report.Date, currentFrom, currentTo),
   );
@@ -211,31 +243,49 @@ export function buildSalesAnalytics(
     );
   const sold = soldQuantity(currentReports);
   const rows = buildProductRows(currentReports, products, categories);
-  const categoryMap = new Map<string, number>(
-    categories.map((category) => [category.Description, 0]),
+  const categoryMap = new Map<
+    string,
+    { value: number; subcategories: Map<string, number> }
+  >(
+    categories.map((category) => [
+      category.Description,
+      { value: 0, subcategories: new Map() },
+    ]),
   );
 
   rows.forEach((row) => {
-    if (categoryMap.has(row.category)) {
-      categoryMap.set(
-        row.category,
-        (categoryMap.get(row.category) || 0) + row.revenue,
-      );
-    }
+    const category = categoryMap.get(row.category);
+    if (!category) return;
+
+    category.value += row.revenue;
+    category.subcategories.set(
+      row.subcategory,
+      (category.subcategories.get(row.subcategory) || 0) + row.revenue,
+    );
   });
 
   const categorizedRevenue =
-    [...categoryMap.values()].reduce((sum, value) => sum + value, 0) || 1;
+    [...categoryMap.values()].reduce(
+      (sum, category) => sum + category.value,
+      0,
+    ) || 1;
   const categoryRows = [...categoryMap.entries()]
-    .map(([label, value]) => ({
+    .map(([label, category]) => ({
       label,
-      value,
-      share: (value / categorizedRevenue) * 100,
+      value: category.value,
+      share: (category.value / categorizedRevenue) * 100,
+      subcategories: [...category.subcategories.entries()]
+        .map(([subcategoryLabel, value]) => ({
+          label: subcategoryLabel,
+          value,
+          share: category.value ? (value / category.value) * 100 : 0,
+        }))
+        .sort((left, right) => right.value - left.value),
     }))
     .sort((left, right) => right.value - left.value);
 
   return {
-    latestTimestamp,
+    latestTimestamp: latestReportTimestamp,
     currentReports,
     revenue,
     previousRevenue,
@@ -252,13 +302,13 @@ export function buildSalesAnalytics(
       currentReports,
       currentFrom,
       duration,
-      period,
+      bucketPeriod,
     ),
     previousBuckets: buildRevenueBuckets(
       previousReports,
       previousFrom,
       duration,
-      period,
+      bucketPeriod,
     ),
     growth: percentageChange(revenue, previousRevenue),
   };
@@ -269,17 +319,18 @@ export function buildRankingRows(
   products: OnecProductReference[],
   categories: OnecCategoryReference[],
   period: AnalyticsPeriod,
+  anchorTimestamp?: number,
+  dateRange?: SalesDateRange | null,
 ) {
-  const latestTimestamp = Math.max(
+  const latestReportTimestamp = Math.max(
     ...reports.map((report) => new Date(report.Date).getTime()),
     0,
   );
-  if (!latestTimestamp) return [];
-
-  const { currentFrom, currentTo } = periodBounds(
-    latestTimestamp,
-    PERIODS[period].days,
-  );
+  if (!latestReportTimestamp) return [];
+  const analysisTimestamp = anchorTimestamp || latestReportTimestamp;
+  const { currentFrom, currentTo } = dateRange
+    ? customRangeBounds(dateRange)
+    : periodBounds(analysisTimestamp, PERIODS[period].days);
   return buildProductRows(
     reports.filter((report) => inRange(report.Date, currentFrom, currentTo)),
     products,
@@ -319,11 +370,19 @@ export function downloadRankingCsv(filename: string, rows: ProductRow[]) {
   const escape = (value: string | number) =>
     `"${String(value).replaceAll('"', '""')}"`;
   const csv = [
-    ["Артикул", "Товар", "Категория", "Выручка, сом", "Продано"],
+    [
+      "Артикул",
+      "Товар",
+      "Категория",
+      "Подкатегория",
+      "Выручка, сом",
+      "Продано",
+    ],
     ...rows.map((row) => [
       row.article,
       row.name,
       row.category,
+      row.subcategory,
       row.revenue,
       row.sold,
     ]),

@@ -15,25 +15,37 @@ export function OwnerCheckSummary({
   if (loading) {
     return (
       <section className="owner-check-strip loading" aria-live="polite">
-        <span className="onec-spinner" /> Получаем чеки, скидки и сертификаты…
+        <span className="onec-spinner" />
+        Получаем чеки, скидки и сертификаты…
       </section>
     );
   }
 
-  if (!checks) {
+  if (!checks || checks.dataAvailable === false) {
     return (
       <section className="owner-check-strip error">
-        <strong>Данные чеков временно недоступны.</strong>
-        <span>{error}</span>
+        <strong>Количество чеков временно недоступно.</strong>
+        <span>
+          {error ||
+            "Связанные документы ЧекККМ " +
+              "не опубликованы в OData 1С."}
+        </span>
       </section>
     );
   }
 
   return (
-    <section className="owner-check-strip" aria-label="Показатели чеков за период">
+    <section
+      className="owner-check-strip"
+      aria-label="Показатели чеков за период"
+    >
       <div>
         <span>Чеков · {periodCaption}</span>
-        <strong>{number.format(checks.current.checks)}</strong>
+        <strong>{number.format(checks.current.totalChecks)}</strong>
+        <small>
+          продажи {number.format(checks.current.checks)} · возвраты{" "}
+          {number.format(checks.current.returns)}
+        </small>
       </div>
       <div>
         <span>Продажи по чекам</span>
@@ -46,12 +58,23 @@ export function OwnerCheckSummary({
       <div>
         <span>Скидки</span>
         <strong>{money.format(checks.current.discounts)}</strong>
-        <small>{checks.current.discountShare.toFixed(1)}% · сумма до скидок {money.format(checks.current.grossRevenue)}</small>
+        <small>
+          {checks.current.discountShare.toFixed(1)}% · сумма до скидок{" "}
+          {money.format(checks.current.grossRevenue)}
+        </small>
       </div>
       <div>
         <span>Сертификаты</span>
-        <strong>{money.format(checks.current.certificatePayments)}</strong>
-        <small>{number.format(checks.current.certificatesUsed)} погашений</small>
+        <strong>
+          {checks.documentDetailsAvailable === false
+            ? "—"
+            : money.format(checks.current.certificatePayments)}
+        </strong>
+        <small>
+          {checks.documentDetailsAvailable === false
+            ? "архивная детализация недоступна"
+            : `${number.format(checks.current.certificatesUsed)} погашений`}
+        </small>
       </div>
       <div>
         <span>Возвраты</span>

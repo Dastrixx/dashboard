@@ -37,6 +37,21 @@ export function parseOnecDateTime(value) {
   return localAsUtc - onecTimezoneOffsetMinutes() * 60_000;
 }
 
+export function startOfOnecDay(value) {
+  const timestamp = parseOnecDateTime(value);
+  if (!Number.isFinite(timestamp)) return Number.NaN;
+
+  const offset = onecTimezoneOffsetMinutes() * 60_000;
+  const shifted = new Date(timestamp + offset);
+  const localMidnightAsUtc = Date.UTC(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate(),
+  );
+
+  return localMidnightAsUtc - offset;
+}
+
 export function normalizeOnecDateTime(value) {
   const timestamp = parseOnecDateTime(value);
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : value;
@@ -153,18 +168,31 @@ export function resolveBusinessCategory(kindName) {
   );
 }
 
-export function enrichProductsWithBusinessCategories(products, productKinds) {
+export function enrichProductsWithBusinessCategories(
+  products,
+  productKinds,
+  productSubcategories = [],
+) {
   const kindByKey = new Map(productKinds.map((kind) => [kind.Ref_Key, kind]));
+  const subcategoryByKey = new Map(
+    productSubcategories.map((subcategory) => [
+      subcategory.Ref_Key,
+      subcategory,
+    ]),
+  );
 
   return products.map((product) => {
     const kind = kindByKey.get(product.ВидНоменклатуры_Key);
     const category = resolveBusinessCategory(kind?.Description);
+    const subcategory = subcategoryByKey.get(product.Parent_Key);
 
     return {
       ...product,
       ВидНоменклатуры: kind?.Description || null,
       BusinessCategory_Key: category?.Ref_Key || null,
       BusinessCategory: category?.Description || null,
+      Subcategory_Key: subcategory?.Ref_Key || null,
+      Subcategory: subcategory?.Description || null,
     };
   });
 }

@@ -72,7 +72,8 @@ async function onecRequest(path, params = {}, accept = "application/json") {
       if (!retryable || attempt === retries) {
         if (error?.name === "TimeoutError") {
           throw new Error(
-            `1С не ответила за ${Math.round(timeoutMs / 1000)} секунд. Уменьшите ONEC_PAGE_SIZE или увеличьте ONEC_TIMEOUT_MS.`,
+            `1С не ответила за ${Math.round(timeoutMs / 1000)} секунд. ` +
+              "Уменьшите ONEC_PAGE_SIZE или увеличьте ONEC_TIMEOUT_MS.",
           );
         }
 
@@ -165,6 +166,26 @@ export function onecTurnovers(register, options = {}) {
     `Dimensions=${dimensions},`,
     `EndPeriod=datetime'${endPeriod}',`,
     `StartPeriod=datetime'${startPeriod}')`,
+  ].join("");
+
+  return onecRequest(path, {
+    $format: "json",
+    $top: options.top,
+    $select: options.select,
+  });
+}
+
+export function onecSliceLast(register, options = {}) {
+  if (!/^InformationRegister_[\p{L}\p{N}_]+$/u.test(register)) {
+    throw new Error("Недопустимое имя регистра сведений 1С");
+  }
+
+  const period = toOdataDateTime(new Date(options.period).getTime());
+  const condition = quoteOdataString(options.condition || "");
+  const path = [
+    `${register}/SliceLast(`,
+    `Condition=${condition},`,
+    `Period=datetime'${period}')`,
   ].join("");
 
   return onecRequest(path, {

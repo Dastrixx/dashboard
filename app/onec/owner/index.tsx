@@ -59,8 +59,9 @@ export function OnecOverview({
 
       <OwnerKpis
         analytics={analytics}
-        todayChecks={state.todayChecks}
+        checks={state.checks}
         checksLoading={state.checksLoading}
+        periodCaption={periodCaption}
       />
 
       <OwnerCheckSummary

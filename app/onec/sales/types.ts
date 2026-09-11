@@ -1,5 +1,10 @@
 export type AnalyticsPeriod = "day" | "week" | "month";
 
+export type SalesDateRange = {
+  from: string;
+  to: string;
+};
+
 export type OnecProductLine = {
   LineNumber: string;
   Номенклатура_Key: string;
@@ -31,10 +36,13 @@ export type OnecProductReference = {
   Description: string;
   НаименованиеПолное: string;
   Артикул: string;
+  Parent_Key?: string | null;
   ВидНоменклатуры_Key: string;
   ВидНоменклатуры?: string | null;
   BusinessCategory_Key?: string | null;
   BusinessCategory?: string | null;
+  Subcategory_Key?: string | null;
+  Subcategory?: string | null;
 };
 
 export type OnecWarehouseReference = {
@@ -72,12 +80,14 @@ export type OnecSalesResponse = {
     products: OnecProductReference[];
     warehouses: OnecWarehouseReference[];
     categories: OnecCategoryReference[];
+    subcategories?: OnecCategoryReference[];
   };
   meta?: SalesLoadMeta;
   message?: string;
 };
 
 export type CheckSummary = {
+  totalChecks: number;
   checks: number;
   revenue: number;
   netRevenue: number;
@@ -107,6 +117,11 @@ export type CheckAnalytics = {
   latestDate: string | null;
   loaded: number;
   truncated: boolean;
+  dataAvailable?: boolean;
+  source?: string;
+  unavailableReason?: string | null;
+  seriesAvailable?: boolean;
+  documentDetailsAvailable?: boolean;
 };
 
 export type CheckAnalyticsResponse = {
@@ -119,6 +134,8 @@ export type ProductRow = {
   article: string;
   name: string;
   category: string;
+  subcategoryKey: string;
+  subcategory: string;
   revenue: number;
   sold: number;
   share: number;
@@ -130,8 +147,12 @@ export type RevenueBucket = {
   value: number;
 };
 
-export type CategoryRevenue = RevenueBucket & {
+export type SubcategoryRevenue = RevenueBucket & {
   share: number;
+};
+
+export type CategoryRevenue = SubcategoryRevenue & {
+  subcategories: SubcategoryRevenue[];
 };
 
 export type SalesAnalytics = {
@@ -161,9 +182,15 @@ export type ChartPoint = RevenueBucket & {
 
 export type MarginSummary = {
   revenue: number;
+  revenueBeforeDiscount: number;
+  discounts: number;
+  discountShare: number;
   cost: number;
   profit: number;
   marginPercent: number;
+  efficiencyPercent: number;
+  dataAvailable: boolean;
+  costSource?: string;
 };
 
 export type MarginAnalytics = {

@@ -30,6 +30,14 @@ export type OwnerCategory = {
   label: string;
   revenue: number;
   share: number;
+  subcategories: OwnerSubcategory[];
+};
+
+export type OwnerSubcategory = {
+  key: string;
+  label: string;
+  revenue: number;
+  share: number;
 };
 
 export type OwnerComparisonBucket = RevenueBucket & {
@@ -63,7 +71,6 @@ export type OwnerOverviewAnalytics = {
 export type OwnerOverviewState = {
   analytics: OwnerOverviewAnalytics | null;
   checks: CheckAnalytics | null;
-  todayChecks: CheckAnalytics | null;
   reportsLoading: boolean;
   referencesLoading: boolean;
   checksLoading: boolean;

@@ -1,11 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { API_URL, PERIODS } from "./config";
+import {
+  API_URL,
+  dateRangeQuery,
+  PERIODS,
+  rollingDateRange,
+} from "./config";
+import { loadCheckAnalytics } from "./check-api";
 import type {
   AnalyticsPeriod,
   CheckAnalytics,
-  CheckAnalyticsResponse,
   OnecCategoryReference,
   OnecProductReference,
   OnecRetailReport,
@@ -14,13 +19,25 @@ import type {
   SalesLoadMeta,
   MarginAnalytics,
   MarginAnalyticsResponse,
+  SalesDateRange,
 } from "./types";
+
+const SALES_HISTORY_DAYS = 30;
+const SALES_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
+function salesHistoryQuery(dateRange?: SalesDateRange | null) {
+  const range = dateRange || rollingDateRange(SALES_HISTORY_DAYS);
+  const query = new URLSearchParams(dateRangeQuery(range));
+  query.set("top", "5000");
+
+  return query.toString();
+}
 
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
-export function useSalesData() {
+export function useSalesData(dateRange?: SalesDateRange | null) {
   const [reports, setReports] = useState<OnecRetailReport[]>([]);
   const [products, setProducts] = useState<OnecProductReference[]>([]);
   const [warehouses, setWarehouses] = useState<OnecWarehouseReference[]>([]);
@@ -30,9 +47,13 @@ export function useSalesData() {
   const [referencesLoading, setReferencesLoading] = useState(false);
   const [referenceError, setReferenceError] = useState("");
   const [loadMeta, setLoadMeta] = useState<SalesLoadMeta>();
+  const [analysisTimestamp, setAnalysisTimestamp] = useState(0);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
-    const controller = new AbortController();
+    let active = true;
+    let refreshTimer: number | undefined;
+    const query = salesHistoryQuery(dateRange);
 
     async function loadReferences() {
       setReferencesLoading(true);
@@ -40,14 +61,19 @@ export function useSalesData() {
 
       try {
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-reports?top=500&days=60`,
-          { signal: controller.signal, credentials: "include" },
+          `${API_URL}/api/dashboard/onec-reports?${query}&references=only`,
+          {
+            credentials: "include",
+            cache: "no-store",
+          },
         );
         const data = (await response.json()) as Partial<OnecSalesResponse>;
 
         if (!response.ok) {
           throw new Error(data.message || `Ошибка HTTP ${response.status}`);
         }
+
+        if (!active) return;
 
         setProducts(
           Array.isArray(data.references?.products)
@@ -66,7 +92,7 @@ export function useSalesData() {
         );
         setLoadMeta(data.meta);
       } catch (loadError) {
-        if (isAbortError(loadError)) return;
+        if (!active || isAbortError(loadError)) return;
 
         setReferenceError(
           loadError instanceof Error
@@ -74,7 +100,7 @@ export function useSalesData() {
             : "Не удалось получить названия товаров",
         );
       } finally {
-        if (!controller.signal.aborted) setReferencesLoading(false);
+        if (active) setReferencesLoading(false);
       }
     }
 
@@ -83,8 +109,11 @@ export function useSalesData() {
         setLoading(true);
         setError("");
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-reports?top=500&days=60&references=false`,
-          { signal: controller.signal, credentials: "include" },
+          `${API_URL}/api/dashboard/onec-reports?${query}&references=false`,
+          {
+            credentials: "include",
+            cache: "no-store",
+          },
         );
         const data = (await response.json()) as Partial<OnecSalesResponse>;
 
@@ -92,16 +121,19 @@ export function useSalesData() {
           throw new Error(data.message || `Ошибка HTTP ${response.status}`);
         }
 
+        if (!active) return;
+
         setReports(
           Array.isArray(data.items)
             ? data.items.filter((report) => report.Posted)
             : [],
         );
         setLoadMeta(data.meta);
+        setAnalysisTimestamp(Date.now());
         setLoading(false);
         await loadReferences();
       } catch (loadError) {
-        if (isAbortError(loadError)) return;
+        if (!active || isAbortError(loadError)) return;
 
         setError(
           loadError instanceof Error
@@ -109,13 +141,22 @@ export function useSalesData() {
             : "Не удалось загрузить данные 1С",
         );
       } finally {
-        if (!controller.signal.aborted) setLoading(false);
+        if (active) {
+          setLoading(false);
+          refreshTimer = window.setTimeout(
+            () => setRefreshKey((value) => value + 1),
+            SALES_REFRESH_INTERVAL_MS,
+          );
+        }
       }
     }
 
     loadReports();
-    return () => controller.abort();
-  }, []);
+    return () => {
+      active = false;
+      if (refreshTimer) window.clearTimeout(refreshTimer);
+    };
+  }, [dateRange, refreshKey]);
 
   return {
     reports,
@@ -127,37 +168,32 @@ export function useSalesData() {
     referencesLoading,
     referenceError,
     loadMeta,
+    analysisTimestamp,
   };
 }
 
-export function useCheckAnalytics(period: AnalyticsPeriod) {
+export function useCheckAnalytics(
+  period: AnalyticsPeriod,
+  dateRange?: SalesDateRange | null,
+) {
   const [data, setData] = useState<CheckAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const controller = new AbortController();
+    let active = true;
 
     async function load() {
       try {
         setLoading(true);
         setError("");
-        const response = await fetch(
-          `${API_URL}/api/dashboard/onec-check-analytics?days=${PERIODS[period].days}`,
-          { signal: controller.signal, credentials: "include" },
-        );
-        const payload = (await response.json()) as CheckAnalyticsResponse;
-
-        if (!response.ok) {
-          throw new Error(payload.message || `Ошибка HTTP ${response.status}`);
-        }
-        if (!payload.items) {
-          throw new Error("1С вернула пустой ответ по чекам");
-        }
-
-        setData(payload.items);
+        const range = dateRange || rollingDateRange(PERIODS[period].days);
+        const query = new URLSearchParams(dateRangeQuery(range));
+        query.set("includePrevious", "false");
+        const analytics = await loadCheckAnalytics(query.toString());
+        if (active) setData(analytics);
       } catch (loadError) {
-        if (isAbortError(loadError)) return;
+        if (!active) return;
 
         setData(null);
         setError(
@@ -166,19 +202,24 @@ export function useCheckAnalytics(period: AnalyticsPeriod) {
             : "Не удалось загрузить аналитику чеков",
         );
       } finally {
-        if (!controller.signal.aborted) setLoading(false);
+        if (active) setLoading(false);
       }
     }
 
     load();
-    return () => controller.abort();
-  }, [period]);
+    return () => {
+      active = false;
+    };
+  }, [dateRange, period]);
 
   return { data, loading, error };
 }
 
 
-export function useMarginAnalytics(period: AnalyticsPeriod) {
+export function useMarginAnalytics(
+  period: AnalyticsPeriod,
+  dateRange?: SalesDateRange | null,
+) {
   const [data, setData] = useState<MarginAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -190,8 +231,11 @@ export function useMarginAnalytics(period: AnalyticsPeriod) {
       try {
         setLoading(true);
         setError("");
+        const range = dateRange || rollingDateRange(PERIODS[period].days);
+        const query = new URLSearchParams(dateRangeQuery(range));
+        query.set("includePrevious", "false");
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-margin?days=${PERIODS[period].days}`,
+          `${API_URL}/api/dashboard/onec-margin?${query}`,
           { signal: controller.signal, credentials: "include" },
         );
         const payload = (await response.json()) as MarginAnalyticsResponse;
@@ -214,7 +258,7 @@ export function useMarginAnalytics(period: AnalyticsPeriod) {
 
     load();
     return () => controller.abort();
-  }, [period]);
+  }, [dateRange, period]);
 
   return { data, loading, error };
 }

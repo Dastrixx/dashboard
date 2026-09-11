@@ -1,4 +1,4 @@
-import { compactMoney, money, number } from "./format";
+import { compactMoney, money } from "./format";
 import type { MarginAnalytics } from "../sales/types";
 import type { OwnerOverviewAnalytics } from "./types";
 
@@ -16,24 +16,24 @@ export function RevenueComparison({
   marginError: string;
 }) {
   const maximum = Math.max(
-    ...analytics.comparison.flatMap((bucket) => [
-      bucket.value,
-      bucket.previousValue,
-    ]),
+    ...analytics.comparison.map((bucket) => bucket.value),
     1,
   );
+  const activeMargin =
+    margin?.current?.dataAvailable === true ? margin.current : null;
+  const hasMargin = activeMargin !== null;
+  const efficiencyPercent = activeMargin?.efficiencyPercent ?? 0;
 
   return (
     <article className="panel owner-revenue-panel">
       <div className="owner-panel-head">
         <div>
-          <span className="onec-source-kicker">Сравнительный анализ</span>
+          <span className="onec-source-kicker">Продажи за период</span>
           <h2>Динамика выручки</h2>
-          <p>Период {periodCaption} относительно предыдущего такой же длины</p>
+          <p>Изменение выручки внутри периода {periodCaption}</p>
         </div>
         <div className="owner-chart-legend" aria-label="Легенда графика">
           <span><i className="current" />Текущий</span>
-          <span><i className="previous" />Предыдущий</span>
         </div>
       </div>
 
@@ -41,16 +41,7 @@ export function RevenueComparison({
         <div>
           <span>Текущий период</span>
           <strong>{money.format(analytics.period.revenue)}</strong>
-          <small>
-            {analytics.period.revenueGrowth === null
-              ? "Нет базы для сравнения"
-              : `${analytics.period.revenueGrowth >= 0 ? "+" : ""}${analytics.period.revenueGrowth.toFixed(1)}% к предыдущему`}
-          </small>
-        </div>
-        <div>
-          <span>Предыдущий период</span>
-          <strong>{money.format(analytics.period.previousRevenue)}</strong>
-          <small>{number.format(analytics.period.previousSold)} ед. продано</small>
+          <small>Только выбранный диапазон дат</small>
         </div>
       </div>
 
@@ -60,27 +51,21 @@ export function RevenueComparison({
           <strong>
             {marginLoading
               ? "…"
-              : margin
-                ? `${margin.current.marginPercent.toFixed(1)}%`
+              : hasMargin
+                ? `${activeMargin.marginPercent.toFixed(1)}%`
                 : "—"}
           </strong>
           <small>
-            {margin
-              ? `валовая прибыль ${money.format(margin.current.profit)}`
-              : marginError || "Себестоимость из регистра продаж 1С"}
-          </small>
-        </div>
-        <div>
-          <span>Предыдущий период</span>
-          <strong>
-            {margin ? `${margin.previous.marginPercent.toFixed(1)}%` : "—"}
-          </strong>
-          <small>
-            {margin
-              ? `${margin.current.marginPercent - margin.previous.marginPercent >= 0 ? "+" : ""}${(
-                  margin.current.marginPercent - margin.previous.marginPercent
-                ).toFixed(1)} п.п. динамика маржи`
-              : "нет базы для сравнения"}
+            {hasMargin
+              ? [
+                  `валовая прибыль ${money.format(activeMargin.profit)}`,
+                  `вычет себестоимости −${money.format(activeMargin.cost)}`,
+                  `эффективность продаж ${efficiencyPercent.toFixed(1)}%`,
+                  `скидки −${money.format(activeMargin.discounts)}`,
+                ].join(" · ")
+              : margin
+                ? "1С не вернула себестоимость за период"
+                : marginError || "Себестоимость из регистра продаж 1С"}
           </small>
         </div>
       </div>
@@ -99,11 +84,12 @@ export function RevenueComparison({
                 <div className="owner-chart-bars">
                   <i
                     className="current"
-                    style={{ height: `${Math.max((bucket.value / maximum) * 100, bucket.value ? 4 : 0)}%` }}
-                  />
-                  <i
-                    className="previous"
-                    style={{ height: `${Math.max((bucket.previousValue / maximum) * 100, bucket.previousValue ? 4 : 0)}%` }}
+                    style={{
+                      height: `${Math.max(
+                        (bucket.value / maximum) * 100,
+                        bucket.value ? 4 : 0,
+                      )}%`,
+                    }}
                   />
                 </div>
               </div>

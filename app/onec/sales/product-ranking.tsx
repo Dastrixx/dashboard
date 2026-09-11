@@ -8,22 +8,40 @@ import type {
   OnecCategoryReference,
   OnecProductReference,
   OnecRetailReport,
+  SalesDateRange,
 } from "./types";
 
 type Props = {
   reports: OnecRetailReport[];
   products: OnecProductReference[];
   categories: OnecCategoryReference[];
+  anchorTimestamp: number;
+  dateRange?: SalesDateRange | null;
 };
 
-export function ProductRanking({ reports, products, categories }: Props) {
+export function ProductRanking({
+  reports,
+  products,
+  categories,
+  anchorTimestamp,
+  dateRange,
+}: Props) {
   const [period, setPeriod] = useState<AnalyticsPeriod>("month");
   const [category, setCategory] = useState("");
+  const [subcategory, setSubcategory] = useState("");
   const [topLimit, setTopLimit] = useState(10);
   const [antiLimit, setAntiLimit] = useState(10);
   const rows = useMemo(
-    () => buildRankingRows(reports, products, categories, period),
-    [categories, period, products, reports],
+    () =>
+      buildRankingRows(
+        reports,
+        products,
+        categories,
+        period,
+        anchorTimestamp,
+        dateRange,
+      ),
+    [anchorTimestamp, categories, dateRange, period, products, reports],
   );
   const availableCategories = useMemo(
     () =>
@@ -32,9 +50,29 @@ export function ProductRanking({ reports, products, categories }: Props) {
         .filter((item) => rows.some((row) => row.category === item)),
     [categories, rows],
   );
+  const availableSubcategories = useMemo(() => {
+    const options = new Map<string, string>();
+
+    rows
+      .filter((row) => row.category === category)
+      .forEach((row) => {
+        if (row.subcategoryKey) {
+          options.set(row.subcategoryKey, row.subcategory);
+        }
+      });
+
+    return [...options.entries()].sort((left, right) =>
+      left[1].localeCompare(right[1], "ru"),
+    );
+  }, [category, rows]);
   const filteredRows = useMemo(
-    () => rows.filter((row) => !category || row.category === category),
-    [category, rows],
+    () =>
+      rows.filter(
+        (row) =>
+          (!category || row.category === category) &&
+          (!subcategory || row.subcategoryKey === subcategory),
+      ),
+    [category, rows, subcategory],
   );
   const topRows = filteredRows.slice(0, topLimit);
   const lowDemandRows = useMemo(
@@ -58,14 +96,21 @@ export function ProductRanking({ reports, products, categories }: Props) {
         <div>
           <span className="onec-source-kicker">Аналитика спроса</span>
           <h2>Рейтинг товаров</h2>
-          <p>Выручка и количество продаж {PERIODS[period].caption}</p>
+          <p>
+            Выручка и количество продаж{" "}
+            {dateRange
+              ? `за ${dateRange.from} — ${dateRange.to}`
+              : PERIODS[period].caption}
+          </p>
         </div>
         <div className="onec-ranking-filters">
           <label className="select-control">
             <select
+              aria-label="Категория товаров"
               value={category}
               onChange={(event) => {
                 setCategory(event.target.value);
+                setSubcategory("");
                 resetLimits();
               }}
             >
@@ -77,26 +122,47 @@ export function ProductRanking({ reports, products, categories }: Props) {
               ))}
             </select>
           </label>
-          <div
-            className="period-switch"
-            role="group"
-            aria-label="Период рейтинга товаров"
-          >
-            {(Object.keys(PERIODS) as AnalyticsPeriod[]).map((key) => (
-              <button
-                type="button"
-                key={key}
-                className={period === key ? "active" : ""}
-                onClick={() => {
-                  setPeriod(key);
-                  setCategory("");
-                  resetLimits();
-                }}
-              >
-                {PERIODS[key].label}
-              </button>
-            ))}
-          </div>
+          <label className="select-control">
+            <select
+              aria-label="Подкатегория товаров"
+              value={subcategory}
+              disabled={!category || !availableSubcategories.length}
+              onChange={(event) => {
+                setSubcategory(event.target.value);
+                resetLimits();
+              }}
+            >
+              <option value="">Все подкатегории</option>
+              {availableSubcategories.map(([key, name]) => (
+                <option value={key} key={key}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {!dateRange && (
+            <div
+              className="period-switch"
+              role="group"
+              aria-label="Период рейтинга товаров"
+            >
+              {(Object.keys(PERIODS) as AnalyticsPeriod[]).map((key) => (
+                <button
+                  type="button"
+                  key={key}
+                  className={period === key ? "active" : ""}
+                  onClick={() => {
+                    setPeriod(key);
+                    setCategory("");
+                    setSubcategory("");
+                    resetLimits();
+                  }}
+                >
+                  {PERIODS[key].label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </header>
 
@@ -129,14 +195,17 @@ export function ProductRanking({ reports, products, categories }: Props) {
                 <div>
                   <strong>{row.name}</strong>
                   <span>
-                    {row.article} · {number.format(row.sold)} ед.
+                    {row.category} · {row.subcategory} ·{" "}
+                    {number.format(row.sold)} ед.
                   </span>
                 </div>
                 <em>{money.format(row.revenue)}</em>
               </div>
             ))}
             {!topRows.length && (
-              <p className="onec-no-data">Нет продаж за выбранный период</p>
+              <p className="onec-no-data">
+                Нет продаж за выбранный период
+              </p>
             )}
           </div>
 
@@ -185,14 +254,17 @@ export function ProductRanking({ reports, products, categories }: Props) {
                 <div>
                   <strong>{row.name}</strong>
                   <span>
-                    {row.article} · {money.format(row.revenue)}
+                    {row.category} · {row.subcategory} ·{" "}
+                    {money.format(row.revenue)}
                   </span>
                 </div>
                 <em>{number.format(row.sold)} продаж</em>
               </div>
             ))}
             {!antiRows.length && (
-              <p className="onec-no-data">Нет продаж за выбранный период</p>
+              <p className="onec-no-data">
+                Нет продаж за выбранный период
+              </p>
             )}
           </div>
 
@@ -212,8 +284,9 @@ export function ProductRanking({ reports, products, categories }: Props) {
       </div>
 
       <p className="onec-ranking-note">
-        Антитоп рассчитан по фактическому количеству продаж. После подключения
-        регистра остатков 1С сюда добавятся товары с нулевым спросом, но
+        Антитоп рассчитан по фактическому количеству продаж. После
+        подключения регистра остатков 1С сюда добавятся товары с нулевым
+        спросом, но
         фактическим наличием на складе.
       </p>
     </section>
