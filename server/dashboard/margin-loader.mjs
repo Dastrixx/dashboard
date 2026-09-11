@@ -200,16 +200,22 @@ export async function loadMarginPeriod(
   channel = "all",
 ) {
   const dimensions = [
-    ...(storeKey === "all" ? [] : ["Магазин"]),
+    "Магазин",
+    "Склад",
+    "Номенклатура",
+    "Характеристика",
     ...(channel === "all" ? [] : ["ЗаказПокупателя"]),
   ];
   const rows = await onecTurnovers(SALES_REGISTER, {
     startPeriod: startDate,
     endPeriod: endDate,
     dimensions: dimensions.join(","),
-    top: 10_000,
+    top: MAX_GROUPED_ROWS,
     select: [
-      ...(storeKey === "all" ? [] : ["Магазин_Key"]),
+      "Магазин_Key",
+      "Склад_Key",
+      "Номенклатура_Key",
+      "Характеристика_Key",
       ...(channel === "all" ? [] : ["ЗаказПокупателя_Key"]),
       "СтоимостьTurnover",
       "СтоимостьБезСкидокTurnover",
