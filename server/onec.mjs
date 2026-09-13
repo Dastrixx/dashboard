@@ -175,18 +175,26 @@ export function onecTurnovers(register, options = {}) {
   });
 }
 
-export function onecSliceLast(register, options = {}) {
+export function buildOnecSliceLastPath(register, options = {}) {
   if (!/^InformationRegister_[\p{L}\p{N}_]+$/u.test(register)) {
     throw new Error("Недопустимое имя регистра сведений 1С");
   }
 
   const period = toOdataDateTime(new Date(options.period).getTime());
   const condition = quoteOdataString(options.condition || "");
-  const path = [
-    `${register}/SliceLast(`,
+  const recordType = register.endsWith("_RecordType")
+    ? register
+    : `${register}_RecordType`;
+
+  return [
+    `${recordType}/SliceLast(`,
     `Condition=${condition},`,
     `Period=datetime'${period}')`,
   ].join("");
+}
+
+export function onecSliceLast(register, options = {}) {
+  const path = buildOnecSliceLastPath(register, options);
 
   return onecRequest(path, {
     $format: "json",

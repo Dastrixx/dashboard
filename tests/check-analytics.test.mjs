@@ -5,6 +5,7 @@ import {
   buildCheckAnalytics,
   checkReportFilter,
   isCompletedCheck,
+  summarizeCashShifts,
 } from "../server/dashboard/checks.mjs";
 import { summarizeSalesDocuments } from "../server/dashboard/sales-register.mjs";
 import { parseOnecDateTime } from "../server/dashboard/utils.mjs";
@@ -44,6 +45,32 @@ test("completed check filter keeps archived receipts", () => {
     true,
   );
   assert.equal(isCompletedCheck({ Posted: false }), true);
+});
+
+test("cash shifts restore the number of archived checks", () => {
+  const result = summarizeCashShifts([
+    {
+      Date: "2026-08-10T20:00:00",
+      Posted: true,
+      DeletionMark: false,
+      КоличествоЧеков: 120,
+    },
+    {
+      Date: "2026-08-11T20:00:00",
+      Posted: true,
+      DeletionMark: false,
+      КоличествоЧеков: 80,
+    },
+    {
+      Date: "2026-08-12T20:00:00",
+      Posted: false,
+      DeletionMark: false,
+      КоличествоЧеков: 50,
+    },
+  ]);
+
+  assert.equal(result.checks, 200);
+  assert.equal(result.latestDate, "2026-08-11T20:00:00");
 });
 
 test("check analytics includes discounts, returns and gift certificates", () => {

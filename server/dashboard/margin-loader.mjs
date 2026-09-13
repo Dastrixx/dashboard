@@ -42,6 +42,18 @@ function summaryWithSource(summary, costSource) {
   return { ...summary, costSource };
 }
 
+async function tryMarginSource(source, load) {
+  try {
+    return await load();
+  } catch (error) {
+    console.warn(
+      `Не удалось рассчитать маржу из источника ${source}:`,
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
+}
+
 export function summarizeMarginWithSnapshotCosts(
   salesRows,
   costRows,
@@ -229,45 +241,53 @@ export async function loadMarginPeriod(
     return summaryWithSource(summary, "sales-turnovers");
   }
 
-  try {
-    const documentResult = await loadSalesDocuments({
-      startDate,
-      endDate,
-      includeSalesChannel: channel !== "all",
-    });
-    const documentRows = filterRows(
-      documentResult.rows,
-      storeKey,
-      channel,
-    );
-    const documentSummary = summarizeMarginRows(documentRows);
-
-    if (documentSummary.dataAvailable) {
-      return summaryWithSource(documentSummary, "sales-documents");
-    }
-
-    const calculatedSummary = await calculateCostFromSnapshot({
-      startDate,
-      endDate,
-      storeKey,
-      channel,
-      marginSummary: summary,
-    });
-    if (calculatedSummary?.dataAvailable) {
-      return summaryWithSource(calculatedSummary, "cost-snapshot");
-    }
-
-    const rawRows = await loadRawMarginRows(startDate, endDate);
-    const rawSummary = summarizeMarginRows(
-      filterRows(rawRows, storeKey, channel),
-    );
+  const rawSummary = await tryMarginSource(
+    "движения регистра Продажи",
+    async () => {
+      const rawRows = await loadRawMarginRows(startDate, endDate);
+      return summarizeMarginRows(
+        filterRows(rawRows, storeKey, channel),
+      );
+    },
+  );
+  if (rawSummary?.dataAvailable) {
     return summaryWithSource(rawSummary, "raw-sales-movements");
-  } catch (error) {
-    console.warn(
-      "Не удалось загрузить движения " +
-        "для расчёта себестоимости:",
-      error instanceof Error ? error.message : error,
-    );
-    return summaryWithSource(summary, "unavailable");
   }
+
+  const documentSummary = await tryMarginSource(
+    "обороты по документам продаж",
+    async () => {
+      const documentResult = await loadSalesDocuments({
+        startDate,
+        endDate,
+        includeSalesChannel: channel !== "all",
+      });
+      const documentRows = filterRows(
+        documentResult.rows,
+        storeKey,
+        channel,
+      );
+      return summarizeMarginRows(documentRows);
+    },
+  );
+  if (documentSummary?.dataAvailable) {
+    return summaryWithSource(documentSummary, "sales-documents");
+  }
+
+  const calculatedSummary = await tryMarginSource(
+    "срез последних цен себестоимости",
+    () =>
+      calculateCostFromSnapshot({
+        startDate,
+        endDate,
+        storeKey,
+        channel,
+        marginSummary: summary,
+      }),
+  );
+  if (calculatedSummary?.dataAvailable) {
+    return summaryWithSource(calculatedSummary, "cost-snapshot");
+  }
+
+  return summaryWithSource(summary, "unavailable");
 }

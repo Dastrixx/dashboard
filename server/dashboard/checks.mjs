@@ -13,6 +13,7 @@ import {
 
 const DAY_MS = 86_400_000;
 const CHECK_ENTITY = "Document_ЧекККМ";
+const CASH_SHIFT_ENTITY = "Document_КассоваяСмена";
 const GUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CHECK_SELECT = [
@@ -126,6 +127,100 @@ function summarizeChecks(checks, certificatePaymentKeys = new Set()) {
       : 0,
     certificatePayments,
     certificatesUsed,
+  };
+}
+
+export function summarizeCashShifts(shifts) {
+  return shifts
+    .filter((shift) => shift.Posted && !shift.DeletionMark)
+    .reduce(
+      (summary, shift) => ({
+        checks: summary.checks + Number(shift.КоличествоЧеков || 0),
+        latestDate:
+          parseOnecDateTime(shift.Date) > summary.latestTimestamp
+            ? shift.Date
+            : summary.latestDate,
+        latestTimestamp: Math.max(
+          summary.latestTimestamp,
+          parseOnecDateTime(shift.Date),
+        ),
+      }),
+      {
+        checks: 0,
+        latestDate: null,
+        latestTimestamp: Number.NEGATIVE_INFINITY,
+      },
+    );
+}
+
+async function loadCashShiftsForRange(startDate, endDate, limit) {
+  const pageSize = Math.min(
+    Math.max(Number(process.env.ONEC_PAGE_SIZE || 25), 1),
+    100,
+  );
+  const filter = [
+    "Posted eq true",
+    `Date ge datetime'${toOdataDateTime(startDate.getTime())}'`,
+    `Date lt datetime'${toOdataDateTime(endDate.getTime())}'`,
+  ].join(" and ");
+  const shifts = [];
+
+  while (shifts.length < limit) {
+    const currentPageSize = Math.min(pageSize, limit - shifts.length);
+    const page = await onecGet(CASH_SHIFT_ENTITY, {
+      $top: currentPageSize,
+      $skip: shifts.length,
+      $select: "Ref_Key,Date,DeletionMark,Posted,КоличествоЧеков",
+      $filter: filter,
+      $orderby: "Date desc",
+    });
+    shifts.push(...page);
+    if (page.length < currentPageSize) break;
+  }
+
+  return {
+    ...summarizeCashShifts(shifts),
+    truncated: shifts.length >= limit,
+  };
+}
+
+function summarizeRetailReports(reports, checks) {
+  const revenue = reports.reduce(
+    (sum, report) => sum + Number(report.СуммаДокумента || 0),
+    0,
+  );
+  const returnsAmount = reports.reduce(
+    (sum, report) => sum + Number(report.СуммаВозвратов || 0),
+    0,
+  );
+  const grossRevenue = reports.reduce(
+    (sum, report) =>
+      sum +
+      (report.Товары || []).reduce(
+        (lineSum, line) =>
+          lineSum +
+          Number(line.Цена || 0) * Number(line.Количество || 0),
+        0,
+      ),
+    0,
+  );
+  const discounts = Math.max(grossRevenue - revenue, 0);
+
+  return {
+    totalChecks: checks,
+    checks,
+    revenue,
+    netRevenue: revenue - returnsAmount,
+    averageCheck: checks ? revenue / checks : 0,
+    returns: 0,
+    returnsAmount,
+    grossRevenue: Math.max(grossRevenue, revenue),
+    discounts,
+    discountShare: grossRevenue > 0
+      ? (discounts / grossRevenue) * 100
+      : 0,
+    certificatePayments: 0,
+    certificatesUsed: 0,
   };
 }
 
@@ -419,11 +514,20 @@ async function computeCheckAnalyticsRange({
   let loaded = { checks: [], truncated: false };
   let registerSummary = null;
   let registerTruncated = false;
+  let cashShiftSummary = null;
   const registerPromise = loadSalesDocuments({
     startDate: new Date(currentFrom),
     endDate: new Date(currentTo + 1),
     limit,
   }).then(
+    (result) => ({ result, error: null }),
+    (error) => ({ result: null, error }),
+  );
+  const cashShiftPromise = loadCashShiftsForRange(
+    new Date(currentFrom),
+    new Date(currentTo + 1),
+    limit,
+  ).then(
     (result) => ({ result, error: null }),
     (error) => ({ result: null, error }),
   );
@@ -458,6 +562,19 @@ async function computeCheckAnalyticsRange({
     );
   }
 
+  const cashShiftLoad = await cashShiftPromise;
+  if (cashShiftLoad.result) {
+    cashShiftSummary = cashShiftLoad.result;
+  } else {
+    loadError ||= cashShiftLoad.error;
+    console.warn(
+      "Не удалось восстановить количество чеков из кассовых смен:",
+      cashShiftLoad.error instanceof Error
+        ? cashShiftLoad.error.message
+        : cashShiftLoad.error,
+    );
+  }
+
   const certificatePaymentKeys = await loadCertificatePaymentKeys();
 
   const current = loaded.checks.filter((check) => {
@@ -474,6 +591,8 @@ async function computeCheckAnalyticsRange({
 
   const documentSummary = summarizeChecks(current, certificatePaymentKeys);
   const usedRegisterFallback = Boolean(registerSummary?.totalChecks);
+  const usedCashShiftFallback =
+    !usedRegisterFallback && Number(cashShiftSummary?.checks) > 0;
   const documentDetailsAvailable = usedRegisterFallback
     ? documentSummary.totalChecks === registerSummary.totalChecks &&
       !loaded.truncated
@@ -488,7 +607,9 @@ async function computeCheckAnalyticsRange({
           ? documentSummary.certificatesUsed
           : 0,
       }
-    : documentSummary;
+    : usedCashShiftFallback
+      ? summarizeRetailReports(reportRecords, cashShiftSummary.checks)
+      : documentSummary;
   const latestCheckTimestamp = current.length
     ? Math.max(
         ...current.map((check) => parseOnecDateTime(check.Date)),
@@ -506,18 +627,26 @@ async function computeCheckAnalyticsRange({
     latestDate: latestCheckTimestamp
       ? new Date(latestCheckTimestamp).toISOString()
       : null,
-    loaded: usedRegisterFallback
+    loaded: usedRegisterFallback || usedCashShiftFallback
       ? currentSummary.totalChecks
       : loaded.checks.length,
-    truncated: loaded.truncated || registerTruncated,
+    truncated:
+      loaded.truncated ||
+      registerTruncated ||
+      Boolean(cashShiftSummary?.truncated),
     dataAvailable:
-      !hasRetailReports || current.length > 0 || usedRegisterFallback,
+      !hasRetailReports ||
+      current.length > 0 ||
+      usedRegisterFallback ||
+      usedCashShiftFallback,
     seriesAvailable: documentDetailsAvailable,
     documentDetailsAvailable,
     source: usedRegisterFallback
       ? documentDetailsAvailable
         ? "AccumulationRegister_Продажи + Document_ЧекККМ"
         : "AccumulationRegister_Продажи.ДокументПродажи"
+      : usedCashShiftFallback
+        ? "Document_КассоваяСмена + Document_ОтчетОРозничныхПродажах"
       : hasRetailReports
         ? "Document_ЧекККМ.ОтчетОРозничныхПродажах_Key"
         : "Document_ЧекККМ",
