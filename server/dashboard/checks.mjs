@@ -54,7 +54,6 @@ export function checkReportFilter(reportKey) {
 
 const checkAnalyticsCache = new Map();
 let paymentKindsCache = null;
-let latestPublishedCheckCache = null;
 
 function isReturnCheck(check) {
   return /возврат/i.test(String(check?.ВидОперации || ""));
@@ -327,39 +326,6 @@ async function loadCertificatePaymentKeys() {
   }
 }
 
-async function canLoadPublishedChecks(currentFrom) {
-  const now = Date.now();
-
-  if (latestPublishedCheckCache?.expiresAt > now) {
-    return latestPublishedCheckCache.timestamp >= currentFrom;
-  }
-
-  try {
-    const checks = await onecGet(CHECK_ENTITY, {
-      $top: 20,
-      $select: "Date,DeletionMark,Posted,СтатусЧекаККМ",
-      $orderby: "Date desc",
-    });
-    const latestTimestamp = checks
-      .filter(isCompletedCheck)
-      .map((check) => parseOnecDateTime(check.Date))
-      .find(Number.isFinite) ?? Number.NEGATIVE_INFINITY;
-
-    latestPublishedCheckCache = {
-      timestamp: latestTimestamp,
-      expiresAt: now + 30_000,
-    };
-    return latestTimestamp >= currentFrom;
-  } catch (error) {
-    console.warn(
-      "Не удалось определить последний " +
-        "опубликованный чек:",
-      error instanceof Error ? error.message : error,
-    );
-    return true;
-  }
-}
-
 async function loadChecks({ days, limit, includePrevious = true }) {
   const latestChecks = await onecGet(CHECK_ENTITY, {
     $top: 100,
@@ -533,10 +499,7 @@ async function computeCheckAnalyticsRange({
   );
 
   try {
-    const publishedChecksAvailable =
-      hasRetailReports && (await canLoadPublishedChecks(currentFrom));
-
-    if (publishedChecksAvailable) {
+    if (hasRetailReports) {
       loaded = await loadChecksByReports(reportRecords, limit);
     }
   } catch (error) {
