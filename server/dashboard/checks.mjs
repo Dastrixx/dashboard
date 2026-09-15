@@ -194,8 +194,8 @@ async function loadCashShiftsForRange(startDate, endDate, limit) {
   };
 }
 
-function summarizeRetailReports(reports, checks) {
-  const revenue = reports.reduce(
+export function summarizeRetailReports(reports, checks) {
+  const netRevenue = reports.reduce(
     (sum, report) => sum + Number(report.СуммаДокумента || 0),
     0,
   );
@@ -203,6 +203,7 @@ function summarizeRetailReports(reports, checks) {
     (sum, report) => sum + Number(report.СуммаВозвратов || 0),
     0,
   );
+  const revenue = netRevenue + returnsAmount;
   const grossRevenue = reports.reduce(
     (sum, report) =>
       sum +
@@ -214,13 +215,13 @@ function summarizeRetailReports(reports, checks) {
       ),
     0,
   );
-  const discounts = Math.max(grossRevenue - revenue, 0);
+  const discounts = Math.max(grossRevenue - netRevenue, 0);
 
   return {
     totalChecks: checks,
     checks,
     revenue,
-    netRevenue: revenue - returnsAmount,
+    netRevenue,
     averageCheck: checks ? revenue / checks : 0,
     returns: 0,
     returnsAmount,
@@ -659,6 +660,9 @@ async function computeCheckAnalyticsRange({
   const days = Math.max(Math.round(duration / DAY_MS), 1);
 
   const documentSummary = summarizeChecks(current, certificatePaymentKeys);
+  const reportSummary = hasRetailReports
+    ? summarizeRetailReports(reportRecords, documentSummary.checks)
+    : null;
   const usedRegisterFallback =
     documentSummary.totalChecks === 0 &&
     Boolean(registerSummary?.totalChecks);
@@ -671,12 +675,19 @@ async function computeCheckAnalyticsRange({
   const currentSummary = documentSummary.totalChecks > 0
     ? {
         ...documentSummary,
-        grossRevenue:
-          registerSummary?.grossRevenue || documentSummary.grossRevenue,
-        discounts:
-          registerSummary?.discounts || documentSummary.discounts,
-        discountShare:
-          registerSummary?.discountShare || documentSummary.discountShare,
+        ...(reportSummary
+          ? {
+              revenue: reportSummary.revenue,
+              netRevenue: reportSummary.netRevenue,
+              returnsAmount: reportSummary.returnsAmount,
+              averageCheck: documentSummary.checks
+                ? reportSummary.revenue / documentSummary.checks
+                : 0,
+              grossRevenue: reportSummary.grossRevenue,
+              discounts: reportSummary.discounts,
+              discountShare: reportSummary.discountShare,
+            }
+          : {}),
       }
     : usedRegisterFallback
     ? {

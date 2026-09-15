@@ -114,8 +114,9 @@ export function SalesSummary({
           </div>
           <strong>{money.format(analytics.revenue)}</strong>
           <p>
-            После скидок {money.format(analytics.grossRevenue)} · возвраты −
-            {money.format(analytics.returns)}
+            Продажи {money.format(analytics.grossRevenue)} − возвраты {" "}
+            {money.format(analytics.returns)} = чистые продажи {" "}
+            {money.format(analytics.revenue)}
             {margin && (
               <> · скидки −{money.format(margin.current.discounts)}</>
             )}

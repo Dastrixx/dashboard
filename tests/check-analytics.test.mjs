@@ -6,6 +6,7 @@ import {
   checkReportFilter,
   isCompletedCheck,
   summarizeCashShifts,
+  summarizeRetailReports,
 } from "../server/dashboard/checks.mjs";
 import { summarizeSalesDocuments } from "../server/dashboard/sales-register.mjs";
 import { parseOnecDateTime } from "../server/dashboard/utils.mjs";
@@ -71,6 +72,29 @@ test("cash shifts restore the number of archived checks", () => {
 
   assert.equal(result.checks, 200);
   assert.equal(result.latestDate, "2026-08-11T20:00:00");
+});
+
+test("retail report is the single financial source for check cards", () => {
+  const result = summarizeRetailReports(
+    [
+      {
+        СуммаДокумента: 17_015_724.8,
+        СуммаВозвратов: 331_120,
+        Товары: [
+          {
+            Цена: 23_112_632,
+            Количество: 1,
+          },
+        ],
+      },
+    ],
+    6_197,
+  );
+
+  assert.equal(result.revenue, 17_346_844.8);
+  assert.equal(result.netRevenue, 17_015_724.8);
+  assert.equal(result.returnsAmount, 331_120);
+  assert.ok(Math.abs(result.discounts - 6_096_907.2) < 0.001);
 });
 
 test("check analytics includes discounts, returns and gift certificates", () => {

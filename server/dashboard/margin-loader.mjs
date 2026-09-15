@@ -241,19 +241,6 @@ export async function loadMarginPeriod(
     return summaryWithSource(summary, "sales-turnovers");
   }
 
-  const rawSummary = await tryMarginSource(
-    "движения регистра Продажи",
-    async () => {
-      const rawRows = await loadRawMarginRows(startDate, endDate);
-      return summarizeMarginRows(
-        filterRows(rawRows, storeKey, channel),
-      );
-    },
-  );
-  if (rawSummary?.dataAvailable) {
-    return summaryWithSource(rawSummary, "raw-sales-movements");
-  }
-
   const documentSummary = await tryMarginSource(
     "обороты по документам продаж",
     async () => {
@@ -287,6 +274,21 @@ export async function loadMarginPeriod(
   );
   if (calculatedSummary?.dataAvailable) {
     return summaryWithSource(calculatedSummary, "cost-snapshot");
+  }
+
+  if (process.env.ONEC_ENABLE_RAW_MARGIN_SCAN === "true") {
+    const rawSummary = await tryMarginSource(
+      "движения регистра Продажи",
+      async () => {
+        const rawRows = await loadRawMarginRows(startDate, endDate);
+        return summarizeMarginRows(
+          filterRows(rawRows, storeKey, channel),
+        );
+      },
+    );
+    if (rawSummary?.dataAvailable) {
+      return summaryWithSource(rawSummary, "raw-sales-movements");
+    }
   }
 
   return summaryWithSource(summary, "unavailable");
