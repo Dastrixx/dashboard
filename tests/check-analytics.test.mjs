@@ -172,7 +172,7 @@ test("archived checks are restored from sales register documents", () => {
   assert.equal(result.discounts, 200);
 });
 
-test("sales register counts documents when 1C returns a localized type", () => {
+test("sales register counts checks when 1C returns a localized type", () => {
   const result = summarizeSalesDocuments([
     {
       ДокументПродажи: "sale-1",
@@ -186,6 +186,21 @@ test("sales register counts documents when 1C returns a localized type", () => {
   assert.equal(result.checks, 1);
   assert.equal(result.revenue, 1_000);
   assert.deepEqual(result.documentTypes, ["ДокументСсылка.ЧекККМ"]);
+});
+
+test("sales register does not count retail reports as checks", () => {
+  const result = summarizeSalesDocuments([
+    {
+      ДокументПродажи: "report-1",
+      ДокументПродажи_Type:
+        "StandardODATA.Document_ОтчетОРозничныхПродажах",
+      КоличествоTurnover: 10,
+      СтоимостьTurnover: 10_000,
+      СтоимостьБезСкидокTurnover: 12_000,
+    },
+  ]);
+
+  assert.equal(result.totalChecks, 0);
 });
 test("day period uses calendar date instead of rolling 24 hours", () => {
   const latestTimestamp = parseOnecDateTime("2025-12-25T19:49:13");

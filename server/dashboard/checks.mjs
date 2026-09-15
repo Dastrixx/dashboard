@@ -30,6 +30,17 @@ const CHECK_SELECT = [
   "Оплата",
   "ПогашениеПодарочныхСертификатов",
 ].join(",");
+const CHECK_HEADER_SELECT = [
+  "Ref_Key",
+  "Number",
+  "Date",
+  "DeletionMark",
+  "Posted",
+  "ОтчетОРозничныхПродажах_Key",
+  "СтатусЧекаККМ",
+  "ВидОперации",
+  "СуммаДокумента",
+].join(",");
 
 export function isCompletedCheck(check) {
   const status = String(check?.СтатусЧекаККМ || "").toLocaleLowerCase(
@@ -472,6 +483,69 @@ async function loadChecksByReports(reportRecords, limit) {
   };
 }
 
+async function scanCheckHeaders({
+  reportRecords,
+  currentFrom,
+  currentTo,
+  limit,
+}) {
+  const reportKeys = new Set(
+    reportRecords.map((report) => report.Ref_Key).filter(Boolean),
+  );
+  const reportDates = new Map(
+    reportRecords
+      .filter((report) => report.Ref_Key && report.Date)
+      .map((report) => [report.Ref_Key, report.Date]),
+  );
+  const pageSize = Math.min(
+    Math.max(Number(process.env.ONEC_CHECK_SCAN_PAGE_SIZE || 500), 1),
+    1_000,
+  );
+  const scanLimit = Math.max(
+    Number(process.env.ONEC_CHECK_SCAN_LIMIT || 100_000),
+    limit,
+  );
+  const matched = new Map();
+  let scanned = 0;
+
+  while (scanned < scanLimit && matched.size < limit) {
+    const page = await onecGet(CHECK_ENTITY, {
+      $top: Math.min(pageSize, scanLimit - scanned),
+      $skip: scanned,
+      $select: CHECK_HEADER_SELECT,
+      $orderby: "Date desc",
+    });
+    if (!page.length) break;
+
+    page.forEach((check) => {
+      const timestamp = parseOnecDateTime(check.Date);
+      const matchesDate =
+        timestamp >= currentFrom && timestamp <= currentTo;
+      const matchesReport = reportKeys.has(
+        check.ОтчетОРозничныхПродажах_Key,
+      );
+
+      if ((matchesDate || matchesReport) && isCompletedCheck(check)) {
+        matched.set(check.Ref_Key, {
+          ...check,
+          Date: matchesReport
+            ? reportDates.get(check.ОтчетОРозничныхПродажах_Key) ||
+              check.Date
+            : check.Date,
+        });
+      }
+    });
+    scanned += page.length;
+    if (page.length < pageSize) break;
+  }
+
+  return {
+    checks: [...matched.values()],
+    scanned,
+    truncated: scanned >= scanLimit,
+  };
+}
+
 async function computeCheckAnalyticsRange({
   from,
   to,
@@ -500,6 +574,7 @@ async function computeCheckAnalyticsRange({
     truncated: false,
     matchedReports: 0,
     failedReports: 0,
+    scanned: 0,
   };
   let registerSummary = null;
   let registerTruncated = false;
@@ -521,11 +596,17 @@ async function computeCheckAnalyticsRange({
     (error) => ({ result: null, error }),
   );
 
-  const loadLinkedChecks = process.env.ONEC_LOAD_LINKED_CHECKS === "true";
-
-  if (hasRetailReports && loadLinkedChecks) {
+  if (hasRetailReports) {
     try {
-      loaded = await loadChecksByReports(reportRecords, limit);
+      loaded = {
+        ...loaded,
+        ...(await scanCheckHeaders({
+          reportRecords,
+          currentFrom,
+          currentTo,
+          limit,
+        })),
+      };
     } catch (error) {
       loadError = error;
       console.warn(
@@ -578,14 +659,26 @@ async function computeCheckAnalyticsRange({
   const days = Math.max(Math.round(duration / DAY_MS), 1);
 
   const documentSummary = summarizeChecks(current, certificatePaymentKeys);
-  const usedRegisterFallback = Boolean(registerSummary?.totalChecks);
+  const usedRegisterFallback =
+    documentSummary.totalChecks === 0 &&
+    Boolean(registerSummary?.totalChecks);
   const usedCashShiftFallback =
     !usedRegisterFallback && Number(cashShiftSummary?.checks) > 0;
   const documentDetailsAvailable = usedRegisterFallback
     ? documentSummary.totalChecks === registerSummary.totalChecks &&
       !loaded.truncated
     : documentSummary.totalChecks > 0;
-  const currentSummary = usedRegisterFallback
+  const currentSummary = documentSummary.totalChecks > 0
+    ? {
+        ...documentSummary,
+        grossRevenue:
+          registerSummary?.grossRevenue || documentSummary.grossRevenue,
+        discounts:
+          registerSummary?.discounts || documentSummary.discounts,
+        discountShare:
+          registerSummary?.discountShare || documentSummary.discountShare,
+      }
+    : usedRegisterFallback
     ? {
         ...registerSummary,
         certificatePayments: documentDetailsAvailable
@@ -633,6 +726,7 @@ async function computeCheckAnalyticsRange({
     matchedReports: loaded.matchedReports,
     failedReports: loaded.failedReports,
     documentTypes: registerSummary?.documentTypes || [],
+    scannedChecks: loaded.scanned,
     source: usedRegisterFallback
       ? documentDetailsAvailable
         ? "AccumulationRegister_Продажи + Document_ЧекККМ"

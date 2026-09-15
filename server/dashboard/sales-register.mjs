@@ -72,12 +72,17 @@ function documentIdentity(row) {
   return String(row.ДокументПродажи || "").trim();
 }
 
+function isCheckDocument(row) {
+  const type = String(row.ДокументПродажи_Type || "");
+  return !type || /ЧекККМ/i.test(type);
+}
+
 export function summarizeSalesDocuments(rows) {
   const documents = new Map();
 
   rows.forEach((row) => {
     const key = documentIdentity(row);
-    if (!key) return;
+    if (!key || !isCheckDocument(row)) return;
 
     const current = documents.get(key) || {
       quantity: 0,
