@@ -424,7 +424,9 @@ async function loadChecksForReport(report, limit) {
 
 async function loadChecksByReports(reportRecords, limit) {
   const result = [];
-  const concurrency = 5;
+  const concurrency = 3;
+  let matchedReports = 0;
+  let failedReports = 0;
 
   for (
     let offset = 0;
@@ -432,12 +434,26 @@ async function loadChecksByReports(reportRecords, limit) {
     offset += concurrency
   ) {
     const batch = reportRecords.slice(offset, offset + concurrency);
-    const pages = await Promise.all(
+    const pages = await Promise.allSettled(
       batch.map((report) =>
         loadChecksForReport(report, Math.max(limit - result.length, 1)),
       ),
     );
-    result.push(...pages.flat());
+    pages.forEach((page) => {
+      if (page.status === "fulfilled") {
+        if (page.value.length) matchedReports += 1;
+        result.push(...page.value);
+        return;
+      }
+
+      failedReports += 1;
+      console.warn(
+        "Не удалось загрузить чеки одного розничного отчёта:",
+        page.reason instanceof Error
+          ? page.reason.message
+          : page.reason,
+      );
+    });
   }
 
   const seen = new Set();
@@ -451,6 +467,8 @@ async function loadChecksByReports(reportRecords, limit) {
   return {
     checks: checks.slice(0, limit).filter(isCompletedCheck),
     truncated: checks.length > limit,
+    matchedReports,
+    failedReports,
   };
 }
 
@@ -477,7 +495,12 @@ async function computeCheckAnalyticsRange({
   const previousFrom = previousTo - duration + 1;
   const hasRetailReports = reportRecords.length > 0;
   let loadError = null;
-  let loaded = { checks: [], truncated: false };
+  let loaded = {
+    checks: [],
+    truncated: false,
+    matchedReports: 0,
+    failedReports: 0,
+  };
   let registerSummary = null;
   let registerTruncated = false;
   let cashShiftSummary = null;
@@ -604,6 +627,9 @@ async function computeCheckAnalyticsRange({
       usedCashShiftFallback,
     seriesAvailable: documentDetailsAvailable,
     documentDetailsAvailable,
+    requestedReports: reportRecords.length,
+    matchedReports: loaded.matchedReports,
+    failedReports: loaded.failedReports,
     source: usedRegisterFallback
       ? documentDetailsAvailable
         ? "AccumulationRegister_Продажи + Document_ЧекККМ"
