@@ -72,17 +72,12 @@ function documentIdentity(row) {
   return String(row.ДокументПродажи || "").trim();
 }
 
-function isCheckDocument(row) {
-  const type = String(row.ДокументПродажи_Type || "");
-  return !type || type.includes("Document_ЧекККМ");
-}
-
 export function summarizeSalesDocuments(rows) {
   const documents = new Map();
 
   rows.forEach((row) => {
     const key = documentIdentity(row);
-    if (!key || !isCheckDocument(row)) return;
+    if (!key) return;
 
     const current = documents.get(key) || {
       quantity: 0,
@@ -141,5 +136,12 @@ export function summarizeSalesDocuments(rows) {
     discountShare: grossRevenue > 0 ? (discounts / grossRevenue) * 100 : 0,
     certificatePayments: 0,
     certificatesUsed: 0,
+    documentTypes: [
+      ...new Set(
+        rows
+          .map((row) => String(row.ДокументПродажи_Type || ""))
+          .filter(Boolean),
+      ),
+    ],
   };
 }

@@ -171,6 +171,22 @@ test("archived checks are restored from sales register documents", () => {
   assert.equal(result.averageCheck, 1_900);
   assert.equal(result.discounts, 200);
 });
+
+test("sales register counts documents when 1C returns a localized type", () => {
+  const result = summarizeSalesDocuments([
+    {
+      ДокументПродажи: "sale-1",
+      ДокументПродажи_Type: "ДокументСсылка.ЧекККМ",
+      КоличествоTurnover: 1,
+      СтоимостьTurnover: 1_000,
+      СтоимостьБезСкидокTurnover: 1_200,
+    },
+  ]);
+
+  assert.equal(result.checks, 1);
+  assert.equal(result.revenue, 1_000);
+  assert.deepEqual(result.documentTypes, ["ДокументСсылка.ЧекККМ"]);
+});
 test("day period uses calendar date instead of rolling 24 hours", () => {
   const latestTimestamp = parseOnecDateTime("2025-12-25T19:49:13");
   const checks = [

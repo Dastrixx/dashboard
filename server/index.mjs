@@ -1869,6 +1869,7 @@ app.get("/api/dashboard/onec-check-analytics", async (request, response) => {
         requestedReports: analytics.requestedReports,
         matchedReports: analytics.matchedReports,
         failedReports: analytics.failedReports,
+        documentTypes: analytics.documentTypes,
       },
     });
   } catch (error) {

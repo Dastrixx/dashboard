@@ -521,17 +521,19 @@ async function computeCheckAnalyticsRange({
     (error) => ({ result: null, error }),
   );
 
-  try {
-    if (hasRetailReports) {
+  const loadLinkedChecks = process.env.ONEC_LOAD_LINKED_CHECKS === "true";
+
+  if (hasRetailReports && loadLinkedChecks) {
+    try {
       loaded = await loadChecksByReports(reportRecords, limit);
+    } catch (error) {
+      loadError = error;
+      console.warn(
+        "Не удалось загрузить чеки, связанные " +
+          "с розничными отчётами:",
+        error instanceof Error ? error.message : error,
+      );
     }
-  } catch (error) {
-    loadError = error;
-    console.warn(
-      "Не удалось загрузить чеки, связанные " +
-        "с розничными отчётами:",
-      error instanceof Error ? error.message : error,
-    );
   }
 
   const registerLoad = await registerPromise;
@@ -630,6 +632,7 @@ async function computeCheckAnalyticsRange({
     requestedReports: reportRecords.length,
     matchedReports: loaded.matchedReports,
     failedReports: loaded.failedReports,
+    documentTypes: registerSummary?.documentTypes || [],
     source: usedRegisterFallback
       ? documentDetailsAvailable
         ? "AccumulationRegister_Продажи + Document_ЧекККМ"
