@@ -33,6 +33,21 @@ export function dateRangeQuery(range: SalesDateRange) {
   }).toString();
 }
 
+export function previousDateRange(range: SalesDateRange): SalesDateRange {
+  const from = new Date(`${range.from}T00:00:00Z`);
+  const to = new Date(`${range.to}T00:00:00Z`);
+  const durationDays = Math.floor((to.getTime() - from.getTime()) / DAY_MS) + 1;
+  const previousTo = new Date(from.getTime() - DAY_MS);
+  const previousFrom = new Date(
+    previousTo.getTime() - (durationDays - 1) * DAY_MS,
+  );
+
+  return {
+    from: previousFrom.toISOString().slice(0, 10),
+    to: previousTo.toISOString().slice(0, 10),
+  };
+}
+
 export const PERIODS: Record<
   AnalyticsPeriod,
   { label: string; days: number; caption: string }

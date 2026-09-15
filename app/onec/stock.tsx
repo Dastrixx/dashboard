@@ -63,7 +63,7 @@ export function OnecStock() {
             : "Не удалось получить остатки из 1С",
         );
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     }
 
