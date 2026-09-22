@@ -3,6 +3,19 @@ import test from "node:test";
 
 import { summarizeMarginWithSnapshotCosts } from "../server/dashboard/margin-loader.mjs";
 import { summarizeMarginRows } from "../server/dashboard/margin.mjs";
+import { buildOnecSliceLastPath } from "../server/onec.mjs";
+
+test("SliceLast вызывается у RecordType регистра сведений", () => {
+  const path = buildOnecSliceLastPath(
+    "InformationRegister_СебестоимостьНоменклатуры",
+    { period: "2026-09-01T00:00:00.000Z" },
+  );
+
+  assert.match(
+    path,
+    /^InformationRegister_СебестоимостьНоменклатуры_RecordType\/SliceLast\(/,
+  );
+});
 
 test("margin uses every turnover row", () => {
   const result = summarizeMarginRows([

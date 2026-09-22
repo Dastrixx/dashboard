@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { API_URL } from "../shared";
 import { loadCheckAnalytics } from "../sales/check-api";
+import { previousDateRange } from "../sales/config";
 import type {
   CheckAnalytics,
   OnecCategoryReference,
@@ -85,17 +86,24 @@ export function useOwnerOverview(
       try {
         setReportsLoading(true);
         setReportsError("");
-        const reportQuery = new URLSearchParams({
-          from: effectiveRange.from,
-          to: effectiveRange.to,
-        });
-        const response = await fetch(
-          `${API_URL}/api/dashboard/onec-reports?top=5000&${reportQuery}&references=false`,
-          { credentials: "include" },
-        );
-        const payload = await readJson<OwnerReportsResponse>(response);
+        const loadRange = async (range: OwnerDateRange) => {
+          const reportQuery = new URLSearchParams(range);
+          const response = await fetch(
+            `${API_URL}/api/dashboard/onec-reports?${reportQuery}&references=false`,
+            { credentials: "include", signal: controller.signal },
+          );
+          return readJson<OwnerReportsResponse>(response);
+        };
+        const [current, previous] = await Promise.all([
+          loadRange(effectiveRange),
+          loadRange(previousDateRange(effectiveRange)),
+        ]);
         if (controller.signal.aborted) return;
-        setReports(Array.isArray(payload.items) ? payload.items : []);
+        const reportsByKey = new Map<string, OnecRetailReport>();
+        [...(current.items || []), ...(previous.items || [])].forEach(
+          (report) => reportsByKey.set(report.Ref_Key, report),
+        );
+        setReports([...reportsByKey.values()]);
       } catch (error) {
         if (isAbortError(error)) return;
         setReportsError(
@@ -117,8 +125,8 @@ export function useOwnerOverview(
           to: effectiveRange.to,
         });
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-reports?top=5000&${reportQuery}&references=only`,
-          { credentials: "include" },
+          `${API_URL}/api/dashboard/onec-reports?${reportQuery}&references=only`,
+          { credentials: "include", signal: controller.signal },
         );
         const payload = await readJson<OwnerReportsResponse>(response);
         if (controller.signal.aborted) return;
@@ -217,7 +225,7 @@ export function useOwnerOverview(
       controller.abort();
       if (refreshTimer) window.clearTimeout(refreshTimer);
     };
-  }, [effectiveRange.from, effectiveRange.to, refreshedAt]);
+  }, [effectiveRange]);
 
   const analytics = useMemo(
     () =>

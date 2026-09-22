@@ -74,7 +74,7 @@ function documentIdentity(row) {
 
 function isCheckDocument(row) {
   const type = String(row.ДокументПродажи_Type || "");
-  return !type || type.includes("Document_ЧекККМ");
+  return !type || /ЧекККМ/i.test(type);
 }
 
 export function summarizeSalesDocuments(rows) {
@@ -141,5 +141,12 @@ export function summarizeSalesDocuments(rows) {
     discountShare: grossRevenue > 0 ? (discounts / grossRevenue) * 100 : 0,
     certificatePayments: 0,
     certificatesUsed: 0,
+    documentTypes: [
+      ...new Set(
+        rows
+          .map((row) => String(row.ДокументПродажи_Type || ""))
+          .filter(Boolean),
+      ),
+    ],
   };
 }

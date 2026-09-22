@@ -5,6 +5,8 @@ import {
   buildCheckAnalytics,
   checkReportFilter,
   isCompletedCheck,
+  summarizeCashShifts,
+  summarizeRetailReports,
 } from "../server/dashboard/checks.mjs";
 import { summarizeSalesDocuments } from "../server/dashboard/sales-register.mjs";
 import { parseOnecDateTime } from "../server/dashboard/utils.mjs";
@@ -44,6 +46,55 @@ test("completed check filter keeps archived receipts", () => {
     true,
   );
   assert.equal(isCompletedCheck({ Posted: false }), true);
+});
+
+test("cash shifts restore the number of archived checks", () => {
+  const result = summarizeCashShifts([
+    {
+      Date: "2026-08-10T20:00:00",
+      Posted: true,
+      DeletionMark: false,
+      КоличествоЧеков: 120,
+    },
+    {
+      Date: "2026-08-11T20:00:00",
+      Posted: true,
+      DeletionMark: false,
+      КоличествоЧеков: 80,
+    },
+    {
+      Date: "2026-08-12T20:00:00",
+      Posted: false,
+      DeletionMark: false,
+      КоличествоЧеков: 50,
+    },
+  ]);
+
+  assert.equal(result.checks, 200);
+  assert.equal(result.latestDate, "2026-08-11T20:00:00");
+});
+
+test("retail report is the single financial source for check cards", () => {
+  const result = summarizeRetailReports(
+    [
+      {
+        СуммаДокумента: 17_015_724.8,
+        СуммаВозвратов: 331_120,
+        Товары: [
+          {
+            Цена: 23_112_632,
+            Количество: 1,
+          },
+        ],
+      },
+    ],
+    6_197,
+  );
+
+  assert.equal(result.revenue, 17_346_844.8);
+  assert.equal(result.netRevenue, 17_015_724.8);
+  assert.equal(result.returnsAmount, 331_120);
+  assert.ok(Math.abs(result.discounts - 6_096_907.2) < 0.001);
 });
 
 test("check analytics includes discounts, returns and gift certificates", () => {
@@ -143,6 +194,37 @@ test("archived checks are restored from sales register documents", () => {
   assert.equal(result.netRevenue, 3_300);
   assert.equal(result.averageCheck, 1_900);
   assert.equal(result.discounts, 200);
+});
+
+test("sales register counts checks when 1C returns a localized type", () => {
+  const result = summarizeSalesDocuments([
+    {
+      ДокументПродажи: "sale-1",
+      ДокументПродажи_Type: "ДокументСсылка.ЧекККМ",
+      КоличествоTurnover: 1,
+      СтоимостьTurnover: 1_000,
+      СтоимостьБезСкидокTurnover: 1_200,
+    },
+  ]);
+
+  assert.equal(result.checks, 1);
+  assert.equal(result.revenue, 1_000);
+  assert.deepEqual(result.documentTypes, ["ДокументСсылка.ЧекККМ"]);
+});
+
+test("sales register does not count retail reports as checks", () => {
+  const result = summarizeSalesDocuments([
+    {
+      ДокументПродажи: "report-1",
+      ДокументПродажи_Type:
+        "StandardODATA.Document_ОтчетОРозничныхПродажах",
+      КоличествоTurnover: 10,
+      СтоимостьTurnover: 10_000,
+      СтоимостьБезСкидокTurnover: 12_000,
+    },
+  ]);
+
+  assert.equal(result.totalChecks, 0);
 });
 test("day period uses calendar date instead of rolling 24 hours", () => {
   const latestTimestamp = parseOnecDateTime("2025-12-25T19:49:13");

@@ -5,6 +5,7 @@ import {
   API_URL,
   dateRangeQuery,
   PERIODS,
+  previousDateRange,
   rollingDateRange,
 } from "./config";
 import { loadCheckAnalytics } from "./check-api";
@@ -25,10 +26,8 @@ import type {
 const SALES_HISTORY_DAYS = 30;
 const SALES_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
-function salesHistoryQuery(dateRange?: SalesDateRange | null) {
-  const range = dateRange || rollingDateRange(SALES_HISTORY_DAYS);
+function salesHistoryQuery(range: SalesDateRange) {
   const query = new URLSearchParams(dateRangeQuery(range));
-  query.set("top", "5000");
 
   return query.toString();
 }
@@ -51,9 +50,11 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
-    let active = true;
+    const controller = new AbortController();
     let refreshTimer: number | undefined;
-    const query = salesHistoryQuery(dateRange);
+    const currentRange = dateRange || rollingDateRange(SALES_HISTORY_DAYS);
+    const currentQuery = salesHistoryQuery(currentRange);
+    const previousQuery = salesHistoryQuery(previousDateRange(currentRange));
 
     async function loadReferences() {
       setReferencesLoading(true);
@@ -61,10 +62,11 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
 
       try {
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-reports?${query}&references=only`,
+          `${API_URL}/api/dashboard/onec-reports?${currentQuery}&references=only`,
           {
             credentials: "include",
             cache: "no-store",
+            signal: controller.signal,
           },
         );
         const data = (await response.json()) as Partial<OnecSalesResponse>;
@@ -73,7 +75,7 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
           throw new Error(data.message || `Ошибка HTTP ${response.status}`);
         }
 
-        if (!active) return;
+        if (controller.signal.aborted) return;
 
         setProducts(
           Array.isArray(data.references?.products)
@@ -92,7 +94,7 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
         );
         setLoadMeta(data.meta);
       } catch (loadError) {
-        if (!active || isAbortError(loadError)) return;
+        if (controller.signal.aborted || isAbortError(loadError)) return;
 
         setReferenceError(
           loadError instanceof Error
@@ -100,7 +102,7 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
             : "Не удалось получить названия товаров",
         );
       } finally {
-        if (active) setReferencesLoading(false);
+        if (!controller.signal.aborted) setReferencesLoading(false);
       }
     }
 
@@ -108,32 +110,39 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
       try {
         setLoading(true);
         setError("");
-        const response = await fetch(
-          `${API_URL}/api/dashboard/onec-reports?${query}&references=false`,
-          {
-            credentials: "include",
-            cache: "no-store",
-          },
-        );
-        const data = (await response.json()) as Partial<OnecSalesResponse>;
+        const loadRange = async (query: string) => {
+          const response = await fetch(
+            `${API_URL}/api/dashboard/onec-reports?${query}&references=false`,
+            {
+              credentials: "include",
+              cache: "no-store",
+              signal: controller.signal,
+            },
+          );
+          const data = (await response.json()) as Partial<OnecSalesResponse>;
+          if (!response.ok) {
+            throw new Error(data.message || `Ошибка HTTP ${response.status}`);
+          }
+          return data;
+        };
+        const [current, previous] = await Promise.all([
+          loadRange(currentQuery),
+          loadRange(previousQuery),
+        ]);
 
-        if (!response.ok) {
-          throw new Error(data.message || `Ошибка HTTP ${response.status}`);
-        }
+        if (controller.signal.aborted) return;
 
-        if (!active) return;
-
-        setReports(
-          Array.isArray(data.items)
-            ? data.items.filter((report) => report.Posted)
-            : [],
-        );
-        setLoadMeta(data.meta);
+        const reportsByKey = new Map<string, OnecRetailReport>();
+        [...(current.items || []), ...(previous.items || [])]
+          .filter((report) => report.Posted)
+          .forEach((report) => reportsByKey.set(report.Ref_Key, report));
+        setReports([...reportsByKey.values()]);
+        setLoadMeta(current.meta);
         setAnalysisTimestamp(Date.now());
         setLoading(false);
         await loadReferences();
       } catch (loadError) {
-        if (!active || isAbortError(loadError)) return;
+        if (controller.signal.aborted || isAbortError(loadError)) return;
 
         setError(
           loadError instanceof Error
@@ -141,7 +150,7 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
             : "Не удалось загрузить данные 1С",
         );
       } finally {
-        if (active) {
+        if (!controller.signal.aborted) {
           setLoading(false);
           refreshTimer = window.setTimeout(
             () => setRefreshKey((value) => value + 1),
@@ -153,7 +162,7 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
 
     loadReports();
     return () => {
-      active = false;
+      controller.abort();
       if (refreshTimer) window.clearTimeout(refreshTimer);
     };
   }, [dateRange, refreshKey]);

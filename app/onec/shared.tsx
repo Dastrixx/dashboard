@@ -52,7 +52,7 @@ export function useOnecReports(period: Period | 10 = 10) {
         setError("");
 
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-reports?top=5000&days=${period}&references=false`,
+          `${API_URL}/api/dashboard/onec-reports?days=${period}&references=false`,
           { signal: controller.signal, credentials: "include" },
         );
         const data = (await response.json()) as OnecPayload;
@@ -76,7 +76,7 @@ export function useOnecReports(period: Period | 10 = 10) {
             : "Не удалось получить данные 1С",
         );
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     }
 
