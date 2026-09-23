@@ -75,6 +75,9 @@ function SellerRankingRow({
       </span>
       <span className="team-rank-result">
         <strong>{money.format(seller.revenue)}</strong>
+        {seller.discounts > 0 && (
+          <small>скидки: {money.format(seller.discounts)}</small>
+        )}
         <small>{result}</small>
       </span>
     </button>

@@ -398,3 +398,19 @@ export function downloadRankingCsv(filename: string, rows: ProductRow[]) {
   link.click();
   URL.revokeObjectURL(url);
 }
+
+export function downloadAbcCsv(filename: string, rows: ProductRow[]) {
+  const escape = (value: string | number) =>
+    `"${String(value).replaceAll('"', '""')}"`;
+  const csv = [
+    ["Артикул", "Товар", "Категория", "Подкатегория", "Выручка, сом", "Продано", "Доля, %", "ABC"],
+    ...rows.map((row) => [row.article, row.name, row.category, row.subcategory,
+      row.revenue.toFixed(0), row.sold, row.share.toFixed(2), row.abc]),
+  ].map((line) => line.map(escape).join(";")).join("\n");
+  const url = URL.createObjectURL(new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}

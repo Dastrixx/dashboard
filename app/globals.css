@@ -850,6 +850,12 @@ body{overflow-x:hidden}
   display:block;height:100%;border-radius:999px;
   background:linear-gradient(90deg,var(--green2),#28a879);
 }
+.onec-check-chart-outer{display:flex;align-items:stretch;min-width:680px}
+.onec-check-y-axis{display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end;flex:none;width:40px;padding:20px 6px 24px 0;border-right:1px solid #e0eae5;color:var(--muted);font-size:9px}
+.onec-check-chart-outer .onec-check-chart{flex:1;min-width:0}
+.abc-row-a{background:rgba(34,197,94,.08)}
+.abc-row-b{background:rgba(249,115,22,.08)}
+.abc-row-c{background:rgba(239,68,68,.06)}
 .onec-subcategories{
   margin-top:10px;padding-top:9px;border-top:1px solid #edf2ef;
 }

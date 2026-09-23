@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { summarizeAbc } from "./analytics";
+import { downloadAbcCsv, summarizeAbc } from "./analytics";
 import { money, number, TABLE_PAGE_SIZE } from "./config";
 import type {
   AnalyticsPeriod,
@@ -107,6 +107,11 @@ export function AbcAnalysis({ rows, categories, period }: Props) {
             </p>
           </div>
           <div className="onec-category-filters">
+            <button type="button" className="ranking-export"
+              disabled={!visibleRows.length}
+              onClick={() => downloadAbcCsv(`abc-analysis-${period}.csv`, visibleRows)}>
+              ↓ Выгрузить CSV
+            </button>
             <label className="select-control">
               <select
                 aria-label="Категория ABC-анализа"
@@ -176,7 +181,7 @@ export function AbcAnalysis({ rows, categories, period }: Props) {
             </thead>
             <tbody>
               {tableRows.map((row) => (
-                <tr key={row.key}>
+                <tr key={row.key} className={`abc-row-${row.abc.toLowerCase()}`}>
                   <td>
                     <code>{row.article}</code>
                   </td>

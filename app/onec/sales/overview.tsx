@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { makeChartPoints } from "./analytics";
 import { compactNumber, money, number, PERIODS } from "./config";
 import type {
@@ -198,6 +199,7 @@ export function RevenueAnalysis({
   period: AnalyticsPeriod;
   dateRange?: SalesDateRange | null;
 }) {
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const hasPreviousPeriod = analytics.previousBuckets.some(
     (item) => item.value !== 0,
   );
@@ -213,6 +215,8 @@ export function RevenueAnalysis({
   const chartWidth = 760;
   const chartHeight = 270;
   const chartPadding = 18;
+  const xLabelStep = Math.max(1, Math.ceil(currentPoints.length / 8));
+  const rotateLabels = currentPoints.length > 14;
 
   return (
     <section className="charts-grid onec-real-analysis-grid">
@@ -252,9 +256,10 @@ export function RevenueAnalysis({
             <span>0</span>
           </div>
           <svg
-            viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+            viewBox={`0 0 ${chartWidth} ${chartHeight + 30}`}
             role="img"
             aria-label="Динамика выручки за выбранный период"
+            onMouseLeave={() => setHoveredIdx(null)}
           >
             {[18, 96, 174, 252].map((y) => (
               <line
@@ -266,6 +271,14 @@ export function RevenueAnalysis({
                 y2={y}
               />
             ))}
+            {currentPoints.map((point, index) =>
+              index % xLabelStep === 0 ? (
+                <text key={`date-${index}`} x={point.x} y={chartHeight + 14}
+                  textAnchor="middle" fontSize="10" fill="var(--muted)">
+                  {point.label}
+                </text>
+              ) : null,
+            )}
             {hasPreviousPeriod && (
               <polyline
                 className="onec-revenue-line previous"
@@ -280,25 +293,23 @@ export function RevenueAnalysis({
                 .map((point) => `${point.x},${point.y}`)
                 .join(" ")}
             />
-            {currentPoints.map((point) => (
-              <circle
-                key={point.label}
-                className="onec-revenue-point"
-                cx={point.x}
-                cy={point.y}
-                r="3"
-              >
-                <title>
-                  {point.label}: {money.format(point.value)}
-                </title>
-              </circle>
+            {currentPoints.map((point, index) => (
+              <g key={`point-${index}`} onMouseEnter={() => setHoveredIdx(index)}>
+                <circle cx={point.x} cy={point.y} r="10" fill="transparent" />
+                <circle className="onec-revenue-point" cx={point.x} cy={point.y}
+                  r={hoveredIdx === index ? 5 : 3} />
+                {point.value > 0 && (
+                  <text x={point.x} y={point.y - 11} textAnchor={rotateLabels ? "end" : "middle"}
+                    fontSize="9" fill="var(--muted)"
+                    transform={rotateLabels ? `rotate(-45 ${point.x} ${point.y - 11})` : undefined}
+                    style={{ pointerEvents: "none" }}>
+                    {compactNumber.format(point.value)}
+                  </text>
+                )}
+                <title>{point.label}: {money.format(point.value)}</title>
+              </g>
             ))}
           </svg>
-          <div className="onec-chart-x-axis" aria-hidden="true">
-            <span>Начало</span>
-            <span>Середина</span>
-            <span>{dateRange ? "Конец периода" : "Сегодня"}</span>
-          </div>
         </div>
       </article>
 
