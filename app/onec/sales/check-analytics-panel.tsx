@@ -188,12 +188,18 @@ export function CheckAnalyticsPanel({
                 недоступна.
               </p>
             ) : analytics.series.some((item) => item.checks > 0) ? (
-              <div
-                className="onec-check-chart"
-                style={{
-                  gridTemplateColumns: `repeat(${analytics.series.length}, minmax(34px, 1fr))`,
-                }}
-              >
+              <div className="onec-check-chart-outer">
+                <div className="onec-check-y-axis" aria-hidden="true">
+                  <span>{chartMaximum}</span>
+                  <span>{Math.round(chartMaximum / 2)}</span>
+                  <span>0</span>
+                </div>
+                <div
+                  className="onec-check-chart"
+                  style={{
+                    gridTemplateColumns: `repeat(${analytics.series.length}, minmax(34px, 1fr))`,
+                  }}
+                >
                 {analytics.series.map((item, index) => (
                   <div
                     className="onec-check-column"
@@ -216,6 +222,7 @@ export function CheckAnalyticsPanel({
                     </em>
                   </div>
                 ))}
+                </div>
               </div>
             ) : (
               <p className="onec-no-data">
