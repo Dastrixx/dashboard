@@ -140,6 +140,7 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
         setLoadMeta(current.meta);
         setAnalysisTimestamp(Date.now());
         setLoading(false);
+        await loadReferences();
       } catch (loadError) {
         if (controller.signal.aborted || isAbortError(loadError)) return;
 
@@ -160,7 +161,6 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
     }
 
     void loadReports();
-    void loadReferences();
     return () => {
       controller.abort();
       if (refreshTimer) window.clearTimeout(refreshTimer);
