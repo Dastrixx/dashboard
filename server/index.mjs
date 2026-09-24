@@ -1,5 +1,8 @@
 import cors from "cors";
 import express from "express";
+import { createHash } from "node:crypto";
+import { resolve } from "node:path";
+import { LocalAnalytics, normalizeAnalyticsQuery } from "./dashboard/local-analytics.mjs";
 import {
   authenticateRequest,
   authStore,
@@ -176,6 +179,67 @@ app.get("/api/onec/metadata", async (_request, response) => {
 const referenceCache = new Map();
 const reportCache = new Map();
 let productKindsCache = null;
+
+const localAnalytics = process.env.ONEC_LOCAL_ANALYTICS !== "false"
+  ? new LocalAnalytics({
+      databasePath: resolve(process.env.ONEC_ANALYTICS_DB_PATH || "data/analytics.sqlite"),
+      namespace: createHash("sha256").update([
+        "v1", process.env.ONEC_ODATA_URL || "", process.env.ONEC_USER || "",
+        process.env.ONEC_TIMEZONE_OFFSET_MINUTES || "360",
+      ].join("|")).digest("hex"),
+      loaders: { reports: buildReportsPayload, margin: buildMarginPayload },
+      refreshMs: Math.max(Number(process.env.ONEC_SYNC_INTERVAL_MS) || 300_000, 60_000),
+    })
+  : null;
+
+function analyticsHandler(kind) {
+  return async (request, response) => {
+    let query;
+    try {
+      query = normalizeAnalyticsQuery(kind, request.query);
+    } catch (error) {
+      return response.status(400).json({ message: error.message });
+    }
+    try {
+      if (!localAnalytics) {
+        const loader = kind === "reports" ? buildReportsPayload : buildMarginPayload;
+        return response.json(await loader(query));
+      }
+      const { payload, sync } = localAnalytics.read(kind, query);
+      if (!payload) {
+        response.set("Retry-After", "10");
+        return response.status(503).json({
+          code: "ANALYTICS_SYNC_PENDING",
+          message: sync.error
+            ? "Не удалось обновить локальные данные: " + sync.error
+            : "Период загружается из 1С в локальную базу. Повторная загрузка страницы не требуется.",
+          meta: { localSync: sync },
+        });
+      }
+      return response.json({ ...payload, meta: { ...payload.meta, localSync: sync } });
+    } catch (error) {
+      console.error(`Ошибка аналитики ${kind}:`, error);
+      return response.status(502).json({ message: error instanceof Error ? error.message : "Ошибка аналитики" });
+    }
+  };
+}
+
+app.get("/api/dashboard/sync-status", (_request, response) => {
+  response.json(localAnalytics?.status() || { enabled: false });
+});
+
+function warmLocalAnalytics() {
+  if (!localAnalytics || !process.env.ONEC_ODATA_URL || !process.env.ONEC_USER || !process.env.ONEC_PASSWORD) return;
+  const today = toOdataDateTime(Date.now()).slice(0, 10);
+  const dateAt = (offset) => new Date(Date.parse(today) + offset * 86_400_000).toISOString().slice(0, 10);
+  const current = { from: dateAt(-29), to: today };
+  const previous = { from: dateAt(-59), to: dateAt(-30) };
+  for (const range of [current, previous]) {
+    localAnalytics.read("reports", normalizeAnalyticsQuery("reports", { ...range, references: "false" }));
+  }
+  localAnalytics.read("margin", normalizeAnalyticsQuery("margin", { ...current, includePrevious: "false" }));
+  localAnalytics.read("reports", normalizeAnalyticsQuery("reports", { ...current, references: "only" }));
+}
 
 function uniqueReports(reports) {
   const seen = new Set();
@@ -1441,97 +1505,89 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
   }
 });
 
-app.get("/api/dashboard/onec-margin", async (request, response) => {
-  try {
-    const from = typeof request.query.from === "string" ? request.query.from : "";
-    const to = typeof request.query.to === "string" ? request.query.to : "";
-    const hasCustomRange =
-      /^\d{4}-\d{2}-\d{2}$/.test(from) &&
-      /^\d{4}-\d{2}-\d{2}$/.test(to);
-    const days = [1, 7, 30, 90].includes(Number(request.query.days))
-      ? Number(request.query.days)
-      : 30;
-    const storeKey = typeof request.query.storeKey === "string"
-      ? request.query.storeKey
-      : "all";
-    const channel = parseSalesChannel(request.query.channel);
-    const includePrevious = request.query.includePrevious !== "false";
+async function buildMarginPayload(query) {
+  const from = typeof query.from === "string" ? query.from : "";
+  const to = typeof query.to === "string" ? query.to : "";
+  const hasCustomRange =
+    /^\d{4}-\d{2}-\d{2}$/.test(from) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(to);
+  const days = [1, 7, 30, 90].includes(Number(query.days))
+    ? Number(query.days)
+    : 30;
+  const storeKey = typeof query.storeKey === "string"
+    ? query.storeKey
+    : "all";
+  const channel = parseSalesChannel(query.channel);
+  const includePrevious = query.includePrevious !== "false";
 
-    let currentFrom;
-    let currentTo;
+  let currentFrom;
+  let currentTo;
 
-    if (hasCustomRange) {
-      currentFrom = new Date(parseOnecDateTime(`${from}T00:00:00`));
-      currentTo = new Date(parseOnecDateTime(`${to}T23:59:59`) + 1000);
-    } else {
-      const latest = await onecGet("AccumulationRegister_Продажи_RecordType", {
-        $top: 20,
-        $select: "Period",
-        $filter: "Active eq true",
-        $orderby: "Period desc",
+  if (hasCustomRange) {
+    currentFrom = new Date(parseOnecDateTime(`${from}T00:00:00`));
+    currentTo = new Date(parseOnecDateTime(`${to}T23:59:59`) + 1000);
+  } else {
+    const latest = await onecGet("AccumulationRegister_Продажи_RecordType", {
+      $top: 20,
+      $select: "Period",
+      $filter: "Active eq true",
+      $orderby: "Period desc",
+    });
+    if (!latest.length) {
+      return ({
+        items: {
+          current: summarizeMarginRows([]),
+          previous: summarizeMarginRows([]),
+        },
+        meta: { source: "AccumulationRegister_Продажи/Turnovers" },
       });
-      if (!latest.length) {
-        return response.json({
-          items: {
-            current: summarizeMarginRows([]),
-            previous: summarizeMarginRows([]),
-          },
-          meta: { source: "AccumulationRegister_Продажи/Turnovers" },
-        });
-      }
-      const activity = resolveActivityAnchor(latest, "Period");
-      const anchor = activity.anchorDate;
-      const dayStart = startOfOnecDay(anchor);
-      currentFrom = new Date(dayStart - (days - 1) * 86_400_000);
-      currentTo = new Date(dayStart + 86_400_000);
     }
+    const activity = resolveActivityAnchor(latest, "Period");
+    const anchor = activity.anchorDate;
+    const dayStart = startOfOnecDay(anchor);
+    currentFrom = new Date(dayStart - (days - 1) * 86_400_000);
+    currentTo = new Date(dayStart + 86_400_000);
+  }
 
-    const duration = currentTo.getTime() - currentFrom.getTime();
-    const previousTo = new Date(currentFrom.getTime());
-    const previousFrom = new Date(previousTo.getTime() - duration);
+  const duration = currentTo.getTime() - currentFrom.getTime();
+  const previousTo = new Date(currentFrom.getTime());
+  const previousFrom = new Date(previousTo.getTime() - duration);
 
-    const currentPromise = loadMarginPeriod(
-      currentFrom,
-      currentTo,
+  const currentPromise = loadMarginPeriod(
+    currentFrom,
+    currentTo,
+    storeKey,
+    channel,
+  );
+  const previousPromise = includePrevious
+    ? loadMarginPeriod(previousFrom, previousTo, storeKey, channel)
+    : Promise.resolve(summarizeMarginRows([]));
+  const [current, previous] = await Promise.all([
+    currentPromise,
+    previousPromise,
+  ]);
+
+  return ({
+    items: { current, previous },
+    meta: {
+      source: "AccumulationRegister_Продажи/Turnovers",
+      revenueField: "СтоимостьTurnover",
+      revenueBeforeDiscountField: "СтоимостьБезСкидокTurnover",
+      costSource: current.costSource,
+      previousCostSource: previous.costSource,
+      calculation:
+        "profit = revenue - cost; " +
+        "marginPercent = profit / revenue * 100; " +
+        "efficiencyPercent = profit / cost * 100",
       storeKey,
       channel,
-    );
-    const previousPromise = includePrevious
-      ? loadMarginPeriod(previousFrom, previousTo, storeKey, channel)
-      : Promise.resolve(summarizeMarginRows([]));
-    const [current, previous] = await Promise.all([
-      currentPromise,
-      previousPromise,
-    ]);
+      periodStart: currentFrom.toISOString(),
+      periodEnd: currentTo.toISOString(),
+    },
+  });
+}
 
-    response.json({
-      items: { current, previous },
-      meta: {
-        source: "AccumulationRegister_Продажи/Turnovers",
-        revenueField: "СтоимостьTurnover",
-        revenueBeforeDiscountField: "СтоимостьБезСкидокTurnover",
-        costSource: current.costSource,
-        previousCostSource: previous.costSource,
-        calculation:
-          "profit = revenue - cost; " +
-          "marginPercent = profit / revenue * 100; " +
-          "efficiencyPercent = profit / cost * 100",
-        storeKey,
-        channel,
-        periodStart: currentFrom.toISOString(),
-        periodEnd: currentTo.toISOString(),
-      },
-    });
-  } catch (error) {
-    console.error("Ошибка расчёта маржи 1С:", error);
-    response.status(502).json({
-      message:
-        error instanceof Error
-          ? error.message
-          : "Не удалось получить маржу из 1С",
-    });
-  }
-});
+app.get("/api/dashboard/onec-margin", analyticsHandler("margin"));
 
 app.get("/api/dashboard/onec-stock", async (request, response) => {
   try {
@@ -1753,153 +1809,144 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
   }
 });
 
-app.get("/api/dashboard/onec-reports", async (request, response) => {
-  try {
-    const maxTop = Math.min(
-      Math.max(Number(process.env.ONEC_REPORT_MAX_TOP) || 5000, 1),
-      10000,
-    );
-    const requestedTop = Math.min(
-      Math.max(Number(request.query.top) || 1, 1),
-      maxTop,
-    );
-    const days = Math.min(
-      Math.max(Number(request.query.days) || 60, 1),
-      365,
-    );
-    const from = typeof request.query.from === "string" ? request.query.from : "";
-    const to = typeof request.query.to === "string" ? request.query.to : "";
-    const hasCustomRange =
-      /^\d{4}-\d{2}-\d{2}$/.test(from) &&
-      /^\d{4}-\d{2}-\d{2}$/.test(to);
+async function buildReportsPayload(query) {
+  const maxTop = Math.min(
+    Math.max(Number(process.env.ONEC_REPORT_MAX_TOP) || 5000, 1),
+    10000,
+  );
+  const requestedTop = Math.min(
+    Math.max(Number(query.top) || 1, 1),
+    maxTop,
+  );
+  const days = Math.min(
+    Math.max(Number(query.days) || 60, 1),
+    365,
+  );
+  const from = typeof query.from === "string" ? query.from : "";
+  const to = typeof query.to === "string" ? query.to : "";
+  const hasCustomRange =
+    /^\d{4}-\d{2}-\d{2}$/.test(from) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(to);
 
-    const startedAt = Date.now();
-    const reportResult = hasCustomRange
-      ? await loadReportPagesByRangeCached({
-          limit: null,
-          from,
-          to,
-        })
-      : await loadReportPagesCached({
-          limit: requestedTop + 1,
-          days,
-        });
-    const reportLoadMs = Date.now() - startedAt;
-    const uniqueItems = uniqueReports(reportResult.items);
-    const truncated = hasCustomRange
-      ? false
-      : reportResult.items.length > requestedTop;
-    const items = uniqueItems
-      .slice(0, hasCustomRange ? undefined : requestedTop)
-      .map((report) => ({
-        ...report,
-        Date: normalizeOnecDateTime(report.Date),
-      }));
-    const latestDate = items[0]?.Date || null;
-    const commonMeta = {
-      loaded: items.length,
-      uniqueDocuments: uniqueItems.length,
-      duplicatesRemoved: reportResult.items.length - uniqueItems.length,
-      days: hasCustomRange ? undefined : days,
-      from: hasCustomRange ? from : undefined,
-      to: hasCustomRange ? to : undefined,
-      latestDate,
-      freshness: describeDataFreshness(latestDate),
-      truncated,
-      cache: reportResult.cache,
-      durationMs: Date.now() - startedAt,
-      reportLoadMs,
-    };
-
-    if (request.query.references === "false") {
-      return response.json({
-        items,
-        references: {
-          products: [],
-          warehouses: [],
-          categories: [],
-        },
-        meta: {
-          ...commonMeta,
-          referencesLoaded: false,
-        },
+  const startedAt = Date.now();
+  const reportResult = hasCustomRange
+    ? await loadReportPagesByRangeCached({
+        limit: null,
+        from,
+        to,
+      })
+    : await loadReportPagesCached({
+        limit: requestedTop + 1,
+        days,
       });
-    }
+  const reportLoadMs = Date.now() - startedAt;
+  const uniqueItems = uniqueReports(reportResult.items);
+  const truncated = hasCustomRange
+    ? false
+    : reportResult.items.length > requestedTop;
+  const items = uniqueItems
+    .slice(0, hasCustomRange ? undefined : requestedTop)
+    .map((report) => ({
+      ...report,
+      Date: normalizeOnecDateTime(report.Date),
+    }));
+  const latestDate = items[0]?.Date || null;
+  const commonMeta = {
+    loaded: items.length,
+    uniqueDocuments: uniqueItems.length,
+    duplicatesRemoved: reportResult.items.length - uniqueItems.length,
+    days: hasCustomRange ? undefined : days,
+    from: hasCustomRange ? from : undefined,
+    to: hasCustomRange ? to : undefined,
+    latestDate,
+    freshness: describeDataFreshness(latestDate),
+    truncated,
+    cache: reportResult.cache,
+    durationMs: Date.now() - startedAt,
+    reportLoadMs,
+  };
 
-    const productKeys = items.flatMap((report) =>
-      [...(report.Товары || []), ...(report.ВозвращенныеТовары || [])].map(
-        (line) => line.Номенклатура_Key,
-      ),
-    );
-    const warehouseKeys = items.flatMap((report) =>
-      [...(report.Товары || []), ...(report.ВозвращенныеТовары || [])].map(
-        (line) => line.Склад_Key,
-      ),
-    );
-
-    const [rawProducts, warehouses, productKinds] = await Promise.all([
-      loadReferencesByKeys(
-        "Catalog_Номенклатура",
-        productKeys,
-        [
-          "Ref_Key",
-          "Code",
-          "Description",
-          "НаименованиеПолное",
-          "Артикул",
-          "Parent_Key",
-          "ВидНоменклатуры_Key",
-        ].join(","),
-      ),
-      loadReferencesByKeys(
-        "Catalog_Склады",
-        warehouseKeys,
-        [
-          "Ref_Key",
-          "Code",
-          "Description",
-          "ТипСклада",
-          "Магазин_Key",
-        ].join(","),
-      ),
-      loadProductKindsCatalog(),
-    ]);
-    const productSubcategories = await loadProductSubcategories(rawProducts);
-    const products = enrichProductsWithBusinessCategories(
-      rawProducts,
-      productKinds,
-      productSubcategories,
-    );
-    const referenceLoadMs = Date.now() - startedAt - reportLoadMs;
-    const categories = publicBusinessCategories();
-
-    response.json({
-      items: request.query.references === "only" ? [] : items,
+  if (query.references === "false") {
+    return ({
+      items,
       references: {
-        products,
-        warehouses,
-        categories,
-        productKinds,
-        subcategories: productSubcategories,
+        products: [],
+        warehouses: [],
+        categories: [],
       },
       meta: {
         ...commonMeta,
-        referencesLoaded: true,
-        referenceLoadMs,
-        durationMs: Date.now() - startedAt,
+        referencesLoaded: false,
       },
     });
-  } catch (error) {
-    console.error("Ошибка загрузки отчётов 1С:", error);
-
-    response.status(502).json({
-      message:
-        error instanceof Error
-          ? error.message
-          : "Не удалось получить отчёты 1С",
-    });
   }
-});
+
+  const productKeys = items.flatMap((report) =>
+    [...(report.Товары || []), ...(report.ВозвращенныеТовары || [])].map(
+      (line) => line.Номенклатура_Key,
+    ),
+  );
+  const warehouseKeys = items.flatMap((report) =>
+    [...(report.Товары || []), ...(report.ВозвращенныеТовары || [])].map(
+      (line) => line.Склад_Key,
+    ),
+  );
+
+  const [rawProducts, warehouses, productKinds] = await Promise.all([
+    loadReferencesByKeys(
+      "Catalog_Номенклатура",
+      productKeys,
+      [
+        "Ref_Key",
+        "Code",
+        "Description",
+        "НаименованиеПолное",
+        "Артикул",
+        "Parent_Key",
+        "ВидНоменклатуры_Key",
+      ].join(","),
+    ),
+    loadReferencesByKeys(
+      "Catalog_Склады",
+      warehouseKeys,
+      [
+        "Ref_Key",
+        "Code",
+        "Description",
+        "ТипСклада",
+        "Магазин_Key",
+      ].join(","),
+    ),
+    loadProductKindsCatalog(),
+  ]);
+  const productSubcategories = await loadProductSubcategories(rawProducts);
+  const products = enrichProductsWithBusinessCategories(
+    rawProducts,
+    productKinds,
+    productSubcategories,
+  );
+  const referenceLoadMs = Date.now() - startedAt - reportLoadMs;
+  const categories = publicBusinessCategories();
+
+  return ({
+    items: query.references === "only" ? [] : items,
+    references: {
+      products,
+      warehouses,
+      categories,
+      productKinds,
+      subcategories: productSubcategories,
+    },
+    meta: {
+      ...commonMeta,
+      referencesLoaded: true,
+      referenceLoadMs,
+      durationMs: Date.now() - startedAt,
+    },
+  });
+}
+
+app.get("/api/dashboard/onec-reports", analyticsHandler("reports"));
 
 app.get("/api/dashboard/onec-check-analytics", async (request, response) => {
   try {
@@ -2004,4 +2051,12 @@ if (authStore.countUsers() === 0) {
 
 app.listen(port, () => {
   console.log(`3КВАДРАТА API: http://localhost:${port}`);
+  warmLocalAnalytics();
+  if (localAnalytics) {
+    const timer = setInterval(() => {
+      warmLocalAnalytics();
+      localAnalytics.refreshRecent();
+    }, localAnalytics.refreshMs);
+    timer.unref();
+  }
 });

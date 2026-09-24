@@ -1,3 +1,4 @@
+import { fetchLocalAnalytics } from "../local-api";
 import { API_URL } from "../shared";
 import type { MarginAnalyticsResponse } from "../sales/types";
 import type { SalesDateRange } from "../sales/types";
@@ -67,7 +68,7 @@ export async function fetchTeamMargin(
     ...(query.dateRange ?? {}),
   });
 
-  const marginResponse = await fetch(marginUrl, requestOptions(signal));
+  const marginResponse = await fetchLocalAnalytics(marginUrl, requestOptions(signal));
   const marginPayload = await readJson<MarginAnalyticsResponse>(marginResponse);
 
   return {

@@ -1,5 +1,7 @@
 "use client";
 
+import { fetchLocalAnalytics } from "../local-api";
+
 import { useEffect, useMemo, useState } from "react";
 import { API_URL } from "../shared";
 import { loadCheckAnalytics } from "../sales/check-api";
@@ -88,7 +90,7 @@ export function useOwnerOverview(
         setReportsError("");
         const loadRange = async (range: OwnerDateRange) => {
           const reportQuery = new URLSearchParams(range);
-          const response = await fetch(
+          const response = await fetchLocalAnalytics(
             `${API_URL}/api/dashboard/onec-reports?${reportQuery}&references=false`,
             { credentials: "include", signal: controller.signal },
           );
@@ -124,7 +126,7 @@ export function useOwnerOverview(
           from: effectiveRange.from,
           to: effectiveRange.to,
         });
-        const response = await fetch(
+        const response = await fetchLocalAnalytics(
           `${API_URL}/api/dashboard/onec-reports?${reportQuery}&references=only`,
           { credentials: "include", signal: controller.signal },
         );
@@ -161,7 +163,7 @@ export function useOwnerOverview(
           to: effectiveRange.to,
           includePrevious: "false",
         });
-        const response = await fetch(
+        const response = await fetchLocalAnalytics(
           `${API_URL}/api/dashboard/onec-margin?${query}`,
           { signal: controller.signal, credentials: "include" },
         );

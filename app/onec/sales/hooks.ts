@@ -1,5 +1,7 @@
 "use client";
 
+import { fetchLocalAnalytics } from "../local-api";
+
 import { useEffect, useState } from "react";
 import {
   API_URL,
@@ -61,7 +63,7 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
       setReferenceError("");
 
       try {
-        const response = await fetch(
+        const response = await fetchLocalAnalytics(
           `${API_URL}/api/dashboard/onec-reports?${currentQuery}&references=only`,
           {
             credentials: "include",
@@ -111,7 +113,7 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
         setLoading(true);
         setError("");
         const loadRange = async (query: string) => {
-          const response = await fetch(
+          const response = await fetchLocalAnalytics(
             `${API_URL}/api/dashboard/onec-reports?${query}&references=false`,
             {
               credentials: "include",
@@ -243,7 +245,7 @@ export function useMarginAnalytics(
         const range = dateRange || rollingDateRange(PERIODS[period].days);
         const query = new URLSearchParams(dateRangeQuery(range));
         query.set("includePrevious", "false");
-        const response = await fetch(
+        const response = await fetchLocalAnalytics(
           `${API_URL}/api/dashboard/onec-margin?${query}`,
           { signal: controller.signal, credentials: "include" },
         );

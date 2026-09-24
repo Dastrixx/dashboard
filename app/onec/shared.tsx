@@ -1,5 +1,7 @@
 "use client";
 
+import { fetchLocalAnalytics } from "./local-api";
+
 import { useEffect, useState } from "react";
 import type { OnecPayload, OnecReport, Period } from "./types";
 
@@ -51,7 +53,7 @@ export function useOnecReports(period: Period | 10 = 10) {
         setLoading(true);
         setError("");
 
-        const response = await fetch(
+        const response = await fetchLocalAnalytics(
           `${API_URL}/api/dashboard/onec-reports?days=${period}&references=false`,
           { signal: controller.signal, credentials: "include" },
         );
