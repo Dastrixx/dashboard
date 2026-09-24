@@ -40,6 +40,7 @@ import {
   loadCheckAnalyticsRange,
 } from "./dashboard/checks.mjs";
 import { loadMarginPeriod } from "./dashboard/margin-loader.mjs";
+import { scanReportsByRange } from "./dashboard/report-range.mjs";
 import { summarizeMarginRows } from "./dashboard/margin.mjs";
 import {
   parseSalesChannel,
@@ -272,33 +273,24 @@ async function loadReportPagesByRange({ limit, from, to }) {
     throw new Error("Некорректный диапазон дат");
   }
 
-  const filter = [
-    "Posted eq true",
-    `Date ge datetime'${toOdataDateTime(fromTimestamp)}'`,
-    `Date le datetime'${toOdataDateTime(toTimestamp)}'`,
-  ].join(" and ");
-  const result = [];
-
-  while (limit === null || result.length < limit) {
-    const currentPageSize =
-      limit === null ? pageSize : Math.min(pageSize, limit - result.length);
-    const page = await onecGet(RETAIL_REPORT_ENTITY, {
-      $top: currentPageSize,
-      $skip: result.length,
-      $select: RETAIL_REPORT_SELECT,
-      $filter: filter,
-      $orderby: "Date desc",
-    });
-    result.push(...page);
-    if (page.length < currentPageSize) break;
-  }
-
-  return filterByPeriod(
-    result,
-    "Date",
-    new Date(fromTimestamp),
-    new Date(toTimestamp),
+  const maxScanned = Math.min(
+    Math.max(Number(process.env.ONEC_REPORT_MAX_SCAN) || 5_000, 100),
+    100_000,
   );
+  return scanReportsByRange({
+    fromTimestamp,
+    toTimestamp,
+    pageSize,
+    limit,
+    maxScanned,
+    getPage: (top, skip) => onecGet(RETAIL_REPORT_ENTITY, {
+      $top: top,
+      $skip: skip,
+      $select: RETAIL_REPORT_SELECT,
+      $filter: "Posted eq true",
+      $orderby: "Date desc",
+    }),
+  });
 }
 
 async function loadReportPagesByRangeCached({ limit, from, to }) {
@@ -1444,19 +1436,15 @@ app.get("/api/dashboard/onec-margin", async (request, response) => {
     const previousTo = new Date(currentFrom.getTime());
     const previousFrom = new Date(previousTo.getTime() - duration);
 
-    const currentPromise = loadMarginPeriod(
+    const current = await loadMarginPeriod(
       currentFrom,
       currentTo,
       storeKey,
       channel,
     );
-    const previousPromise = includePrevious
-      ? loadMarginPeriod(previousFrom, previousTo, storeKey, channel)
-      : Promise.resolve(summarizeMarginRows([]));
-    const [current, previous] = await Promise.all([
-      currentPromise,
-      previousPromise,
-    ]);
+    const previous = includePrevious
+      ? await loadMarginPeriod(previousFrom, previousTo, storeKey, channel)
+      : summarizeMarginRows([]);
 
     response.json({
       items: { current, previous },
