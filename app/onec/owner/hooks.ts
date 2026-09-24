@@ -207,12 +207,11 @@ export function useOwnerOverview(
       }
     }
 
-    void Promise.allSettled([
-      loadReports(),
-      loadReferences(),
-      loadChecks(),
-      loadMargin(),
-    ]).then(() => {
+    // Не отправляем четыре тяжёлых запроса в OData одновременно.
+    // Каждый блок обновляется независимо, одновременно идут максимум два.
+    void Promise.allSettled([loadReports(), loadChecks()]).then(() =>
+      Promise.allSettled([loadReferences(), loadMargin()]),
+    ).then(() => {
       if (controller.signal.aborted) return;
 
       refreshTimer = window.setTimeout(
