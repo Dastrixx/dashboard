@@ -100,12 +100,16 @@ export function OnecTeam() {
         onSellerChange={setSelectedKey}
       />
 
-      {showPlan && <TeamPlanPanel
+      <TeamPlanPanel
         view={view}
         storeKey={storeKey}
         channel={channel}
         plan={teamPlan.plan}
         planPercent={planPercent}
+        comparable={showPlan}
+        salesPeriod={data.payload.meta?.periodStart && data.payload.meta?.periodEnd
+          ? `${data.payload.meta.periodStart.slice(0, 10)} — ${data.payload.meta.periodEnd.slice(0, 10)}`
+          : undefined}
         planInput={teamPlan.planInput}
         planLoading={teamPlan.loading}
         planSaving={teamPlan.saving}
@@ -113,7 +117,7 @@ export function OnecTeam() {
         source={data.payload.meta?.source}
         onPlanInputChange={teamPlan.setPlanInput}
         onSave={teamPlan.save}
-      />}
+      />
     </div>
   );
 }

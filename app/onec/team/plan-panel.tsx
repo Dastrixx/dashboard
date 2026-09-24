@@ -9,6 +9,8 @@ type Props = {
   channel: SalesChannel;
   plan: number;
   planPercent: number;
+  comparable?: boolean;
+  salesPeriod?: string;
   planInput: string;
   planLoading: boolean;
   planSaving: boolean;
@@ -24,6 +26,8 @@ export function TeamPlanPanel({
   channel,
   plan,
   planPercent,
+  comparable = true,
+  salesPeriod,
   planInput,
   planLoading,
   planSaving,
@@ -56,13 +60,20 @@ export function TeamPlanPanel({
 
       {planMessage && <p className="team-plan-message">{planMessage}</p>}
 
-      <PlanSummary view={view} plan={plan} percent={planPercent} />
-      <div className="team-plan-progress large">
+      {!comparable && (
+        <p className="team-plan-message" role="status">
+          Факт из доступных розничных отчётов{salesPeriod ? ` за ${salesPeriod}` : ""}.
+          Период плана может отличаться, поэтому выполнение и остаток не рассчитаны.
+        </p>
+      )}
+
+      <PlanSummary view={view} plan={plan} percent={planPercent} comparable={comparable} />
+      {comparable && <div className="team-plan-progress large">
         <i style={{ width: `${Math.min(planPercent, 100)}%` }} />
-      </div>
+      </div>}
 
       <div className="team-contribution-head">
-        <h3>Вклад продавцов в план команды</h3>
+        <h3>{comparable ? "Вклад продавцов в план команды" : "Продажи продавцов"}</h3>
         <span>{view.rows.length} продавцов</span>
       </div>
       <div className="team-contribution-list">
@@ -70,6 +81,7 @@ export function TeamPlanPanel({
           <ContributionRow
             seller={seller}
             plan={plan}
+            comparable={comparable}
             maxRevenue={maxRevenue}
             key={seller.key}
           />
@@ -149,10 +161,12 @@ function PlanSummary({
   view,
   plan,
   percent,
+  comparable,
 }: {
   view: TeamView;
   plan: number;
   percent: number;
+  comparable: boolean;
 }) {
   return (
     <div className="team-plan-summary-grid">
@@ -160,11 +174,11 @@ function PlanSummary({
       <MiniKpi label="Факт" value={money.format(view.revenue)} />
       <MiniKpi
         label="Выполнение"
-        value={plan ? `${number.format(percent)}%` : "—"}
+        value={comparable && plan ? `${number.format(percent)}%` : "—"}
       />
       <MiniKpi
         label="Осталось"
-        value={plan ? money.format(Math.max(plan - view.revenue, 0)) : "—"}
+        value={comparable && plan ? money.format(Math.max(plan - view.revenue, 0)) : "—"}
       />
     </div>
   );
@@ -173,17 +187,19 @@ function PlanSummary({
 function ContributionRow({
   seller,
   plan,
+  comparable,
   maxRevenue,
 }: {
   seller: SellerRow;
   plan: number;
+  comparable: boolean;
   maxRevenue: number;
 }) {
   const width = Math.max(
     (seller.revenue / maxRevenue) * 100,
     seller.revenue ? 2 : 0,
   );
-  const result = plan
+  const result = comparable && plan
     ? `${number.format((seller.revenue / plan) * 100)}% плана`
     : `${number.format(seller.share)}% команды`;
 
