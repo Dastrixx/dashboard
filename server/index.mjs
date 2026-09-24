@@ -857,11 +857,10 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       const reportResult = customRange
         ? await loadReportPagesByRangeCached({ limit: null, from, to })
         : await loadConsultantReportPagesLegacyCached({ limit: 500, days });
-      reports = customRange
-        ? reportResult.items
-        : filterByPeriod(reportResult.items, "Date",
-          new Date(startOfOnecDay(reportResult.items[0]?.Date) - (days - 1) * 86_400_000),
-          new Date(startOfOnecDay(reportResult.items[0]?.Date) + 86_400_000 - 1));
+      // Совместимый источник уже применяет период на стороне 1С, а при отказе
+      // фильтра 1С возвращает доступные отчёты целиком. Повторная локальная
+      // фильтрация исключала старые строки с заполненными продавцами.
+      reports = reportResult.items;
       cache = reportResult.cache;
       latestDate = reports[0]?.Date || latestDate;
       source = "Document_ОтчетОРозничныхПродажах.Товары.Продавец_Key";
@@ -899,6 +898,9 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     })).sort(
       (left, right) => right.СтоимостьTurnover - left.СтоимостьTurnover,
     );
+    const fallbackDates = !customRange && reports.length
+      ? items.flatMap((item) => Object.keys(item.ПродажиПоДатам || {})).sort()
+      : [];
     const consultants = await loadReferencesByKeysBatched(
       "Catalog_ФизическиеЛица",
       items.map((item) => item.Продавец_Key),
@@ -918,8 +920,9 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       references: { sellers: consultants, stores },
       meta: {
         days,
-        periodStart: customRange ? new Date(rangeStart).toISOString() : null,
-        periodEnd: customRange ? new Date(rangeEnd).toISOString() : null,
+        periodStart: customRange ? new Date(rangeStart).toISOString() : fallbackDates[0] || null,
+        periodEnd: customRange ? new Date(rangeEnd).toISOString() : fallbackDates.at(-1) || null,
+        scope: fallbackDates.length ? "all" : "period",
         channel,
         loaded: items.length,
         latestDate: latestDate ? normalizeOnecDateTime(latestDate) : null,

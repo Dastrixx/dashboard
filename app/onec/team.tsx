@@ -33,7 +33,9 @@ export function OnecTeam() {
   const selected =
     view.rows.find((seller) => seller.key === selectedKey) ?? view.rows[0];
   const chart = useMemo(() => buildSellerChart(selected), [selected]);
-  const planPercent = !dateRange && teamPlan.plan
+  const fallbackScope = data.payload.meta?.scope === "all";
+  const showPlan = !dateRange && !fallbackScope;
+  const planPercent = showPlan && teamPlan.plan
     ? (view.revenue / teamPlan.plan) * 100
     : 0;
 
@@ -68,11 +70,21 @@ export function OnecTeam() {
         onChannelChange={setChannel}
       />
 
+      {fallbackScope && (
+        <div className="onec-reference-warning" role="status">
+          Продажи взяты из доступных розничных отчётов 1С: в чеках продавец не указан.
+          {data.payload.meta?.periodStart && data.payload.meta?.periodEnd && (
+            <> Даты продаж: {data.payload.meta.periodStart.slice(0, 10)} — {data.payload.meta.periodEnd.slice(0, 10)}.</>
+          )}
+          {" "}Период сверху может не совпадать с датами этой выборки.
+        </div>
+      )}
+
       <TeamSummary
         view={view}
         channel={channel}
-        plan={dateRange ? 0 : teamPlan.plan}
-        showPlan={!dateRange}
+        plan={showPlan ? teamPlan.plan : 0}
+        showPlan={showPlan}
         planPercent={planPercent}
         margin={data.margin}
         marginError={data.marginError}
@@ -84,11 +96,11 @@ export function OnecTeam() {
         selectedKey={selected?.key ?? ""}
         chart={chart}
         channel={channel}
-        plan={dateRange ? 0 : teamPlan.plan}
+        plan={showPlan ? teamPlan.plan : 0}
         onSellerChange={setSelectedKey}
       />
 
-      {!dateRange && <TeamPlanPanel
+      {showPlan && <TeamPlanPanel
         view={view}
         storeKey={storeKey}
         channel={channel}
