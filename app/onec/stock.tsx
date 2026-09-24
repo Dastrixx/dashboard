@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { API_URL, DataState, number } from "./shared";
+import { rollingDateRange, dateRangeQuery } from "./sales/config";
+import { SalesDateFilter } from "./sales/date-filter";
+import type { SalesDateRange } from "./sales/types";
 import type { StockOperation, StockPayload } from "./types";
 
 function uniqueSubcategories(
@@ -21,6 +24,9 @@ function uniqueSubcategories(
 }
 
 export function OnecStock() {
+  const [dateFrom, setDateFrom] = useState(() => rollingDateRange(30).from);
+  const [dateTo, setDateTo] = useState(() => rollingDateRange(30).to);
+  const [dateRange, setDateRange] = useState<SalesDateRange | null>(null);
   const [payload, setPayload] = useState<StockPayload>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -42,7 +48,7 @@ export function OnecStock() {
         setLoading(true);
         setError("");
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-stock?top=5000`,
+          `${API_URL}/api/dashboard/onec-stock?top=5000${dateRange ? `&${dateRangeQuery(dateRange)}` : ""}`,
           { signal: controller.signal, credentials: "include" },
         );
         const data = (await response.json()) as StockPayload;
@@ -69,7 +75,7 @@ export function OnecStock() {
 
     load();
     return () => controller.abort();
-  }, []);
+  }, [dateRange]);
 
   const view = useMemo(() => {
     const balances = payload.items || [];
@@ -196,6 +202,10 @@ export function OnecStock() {
     const receipts = (payload.operations?.receipts || []).filter(
       operationMatches,
     );
+    const transfers = (payload.operations?.transfers || []).filter((document) =>
+      matchesWarehouse(document.СкладПолучатель_Key || ""),
+    );
+    const incoming = receipts.length ? receipts : transfers;
     const writeOffs = (payload.operations?.writeOffs || []).filter(
       operationMatches,
     );
@@ -203,16 +213,19 @@ export function OnecStock() {
       operationMatches,
     );
     const latestReceiptTime = Math.max(
-      ...receipts.map((item) => new Date(item.Date).getTime()),
+      ...incoming.map((item) => new Date(item.Date).getTime()),
       0,
     );
     const receiptWeeks = Array.from({ length: 8 }, (_, index) => ({
-      label: index === 7 ? "текущая" : `нед. −${7 - index}`,
+      label: latestReceiptTime
+        ? new Date(latestReceiptTime - (7 - index) * 7 * 86_400_000)
+            .toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })
+        : "—",
       sku: new Set<string>(),
       units: 0,
     }));
     if (latestReceiptTime) {
-      receipts.forEach((document) => {
+      incoming.forEach((document) => {
         const distance = Math.floor(
           (latestReceiptTime - new Date(document.Date).getTime()) /
             (7 * 86_400_000),
@@ -293,7 +306,9 @@ export function OnecStock() {
         ),
       receiptChart,
       maxReceiptSku,
-      recentReceipts: receipts.slice(0, 5).map((document) => ({
+      recentReceipts: [...receipts].sort((left, right) =>
+        new Date(right.Date).getTime() - new Date(left.Date).getTime(),
+      ).slice(0, 5).map((document) => ({
         ...document,
         supplier:
           suppliers.get(document.Контрагент_Key || "")?.НаименованиеПолное ||
@@ -308,6 +323,15 @@ export function OnecStock() {
             .filter(Boolean),
         ).size,
       })),
+      recentTransfers: [...transfers].sort((left, right) =>
+        new Date(right.Date).getTime() - new Date(left.Date).getTime(),
+      ).slice(0, 5).map((document) => ({
+        ...document,
+        supplier: warehouses.get(document.СкладОтправитель_Key || "")?.Description || "Склад не указан",
+        warehouse: warehouses.get(document.СкладПолучатель_Key || "")?.Description || "Склад не указан",
+        sku: new Set((document.Товары || []).map((line) => line.Номенклатура_Key).filter(Boolean)).size,
+      })),
+      hasReceipts: receipts.length > 0,
       writeOffRows,
       recountRows,
     };
@@ -321,13 +345,24 @@ export function OnecStock() {
     search,
   ]);
 
-  if (loading || error || !(payload.items || []).length) {
+  const dateControl = (
+    <section className="panel stock-date-panel">
+      <div className="panel-head"><div><h2>Период складских операций</h2><p>Остатки на конец выбранного периода, документы за выбранные даты</p></div></div>
+      <SalesDateFilter from={dateFrom} to={dateTo} appliedRange={dateRange}
+        canApply={Boolean(dateFrom && dateTo && dateFrom <= dateTo)}
+        onFromChange={setDateFrom} onToChange={setDateTo}
+        onApply={() => setDateRange({ from: dateFrom, to: dateTo })} />
+    </section>
+  );
+
+  if (loading || error) {
     return (
       <div className="page-stack">
+        {dateControl}
         <DataState
           loading={loading}
           error={error}
-          empty={!loading && !error && !(payload.items || []).length}
+          empty={false}
         />
       </div>
     );
@@ -362,6 +397,7 @@ export function OnecStock() {
 
   return (
     <div className="page-stack onec-stock-workspace">
+      {dateControl}
       <section className="onec-source-panel">
         <div>
           <span className="onec-source-kicker">Фактические данные 1С</span>
@@ -612,8 +648,8 @@ export function OnecStock() {
         <article className="panel stock-operation-card">
           <div className="panel-head">
             <div>
-              <h2>SKU в приходе по неделям</h2>
-              <p>Частота и объём фактических поставок</p>
+              <h2>SKU во входящих документах по неделям</h2>
+              <p>{view.hasReceipts ? "Поступления от поставщиков" : "Внутренние перемещения на склад"}</p>
             </div>
           </div>
           {view.receiptChart.some((item) => item.sku || item.units) ? (
@@ -638,10 +674,10 @@ export function OnecStock() {
             </div>
           ) : (
             <div className="stock-operation-empty">
-              <strong>Нет проведённых поступлений</strong>
+              <strong>Нет входящих документов за выбранный период</strong>
               <span>
                 {payload.meta?.operationErrors?.receipts ||
-                  "1С не вернула документы поступления для выбранного склада."}
+                  payload.meta?.operationErrors?.transfers || "1С не вернула поступления и перемещения для выбранного склада."}
               </span>
             </div>
           )}
@@ -650,23 +686,28 @@ export function OnecStock() {
         <article className="panel stock-operation-card">
           <div className="panel-head">
             <div>
-              <h2>Последние поставки</h2>
-              <p>Документы «Поступление товаров» из 1С</p>
+              <h2>{view.hasReceipts ? "Последние поставки" : "Последние перемещения"}</h2>
+              <p>{view.hasReceipts ? "Документы «Поступление товаров» из 1С" : "Документы «Перемещение товаров» из 1С; это не поставки от поставщика"}</p>
             </div>
           </div>
-          {view.recentReceipts.length ? (
+          {!view.hasReceipts && payload.meta?.operationErrors?.receipts && (
+            <p className="onec-check-limit-warning" role="status">
+              Источник поступлений недоступен: {payload.meta.operationErrors.receipts}
+            </p>
+          )}
+          {(view.hasReceipts ? view.recentReceipts : view.recentTransfers).length ? (
             <div className="stock-compact-table-wrap">
               <table className="stock-compact-table">
                 <thead>
                   <tr>
                     <th>Дата</th>
-                    <th>Поставщик</th>
+                    <th>{view.hasReceipts ? "Поставщик" : "Откуда"}</th>
                     <th>Склад</th>
                     <th>SKU</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {view.recentReceipts.map((document) => (
+                  {(view.hasReceipts ? view.recentReceipts : view.recentTransfers).map((document) => (
                     <tr key={document.Ref_Key}>
                       <td>
                         {new Date(document.Date).toLocaleDateString("ru-RU")}

@@ -659,6 +659,19 @@ app.get("/api/dashboard/onec-product-categories", async (request, response) => {
 
 app.get("/api/dashboard/onec-consultants", async (request, response) => {
   try {
+    const from = typeof request.query.from === "string" ? request.query.from : "";
+    const to = typeof request.query.to === "string" ? request.query.to : "";
+    const customRange = Boolean(from || to);
+    if (customRange && (!/^\d{4}-\d{2}-\d{2}$/.test(from) ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to)) {
+      return response.status(400).json({ message: "Некорректный диапазон дат продавцов" });
+    }
+    const rangeStart = customRange ? parseOnecDateTime(`${from}T00:00:00`) : null;
+    const rangeEnd = customRange ? parseOnecDateTime(`${to}T00:00:00`) + 86_400_000 : null;
+    if (customRange && (!Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd) ||
+      rangeEnd - rangeStart > 366 * 86_400_000)) {
+      return response.status(400).json({ message: "Некорректный диапазон дат продавцов" });
+    }
     const days = [1, 7, 30].includes(Number(request.query.days))
       ? Number(request.query.days)
       : 30;
@@ -754,9 +767,12 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
 
     if (latestChecks.length) {
       latestDate = latestChecks[0].Date;
-      const checkStartDate = new Date(
-        parseOnecDateTime(latestDate) - days * 86_400_000,
-      );
+      const checkStartDate = new Date(customRange
+        ? rangeStart
+        : startOfOnecDay(latestDate) - (days - 1) * 86_400_000);
+      const checkEndDate = new Date(customRange
+        ? rangeEnd
+        : startOfOnecDay(latestDate) + 86_400_000);
       const checkQuery = {
         $top: 1000,
         $select: [
@@ -774,24 +790,46 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       let checks;
 
       try {
-        checks = await onecGet("Document_ЧекККМ", {
-          ...checkQuery,
-          $filter: [
+        const filter = [
             "Posted eq true",
             `Date ge datetime'${toOdataDateTime(checkStartDate)}'`,
-          ].join(" and "),
-        });
+            `Date lt datetime'${toOdataDateTime(checkEndDate)}'`,
+          ].join(" and ");
+        if (customRange) {
+          checks = [];
+          const pageSize = 100;
+          while (checks.length < 1000) {
+            const page = await onecGet("Document_ЧекККМ", {
+              ...checkQuery, $top: pageSize, $skip: checks.length, $filter: filter,
+            });
+            checks.push(...page);
+            if (page.length < pageSize) break;
+          }
+          if (checks.length >= 1000) {
+            throw new Error("Лимит 1000 чеков за выбранный период; аналитика продавцов может быть неполной");
+          }
+        } else {
+          checks = await onecGet("Document_ЧекККМ", {
+            ...checkQuery, $filter: filter,
+          });
+        }
       } catch (error) {
+        if (/Лимит 1000 чеков/.test(String(error?.message || ""))) throw error;
         console.warn(
           "1С не приняла период консультантов по чекам, загружаем последние чеки:",
           error instanceof Error ? error.message : error,
         );
-        checks = await onecGet("Document_ЧекККМ", {
-          ...checkQuery,
-          $filter: "Posted eq true",
-        });
+        checks = customRange
+          ? []
+          : await onecGet("Document_ЧекККМ", {
+              ...checkQuery,
+              $filter: "Posted eq true",
+            });
       }
+      checks = filterByPeriod(checks, "Date", checkStartDate,
+        new Date(checkEndDate.getTime() - 1));
       scannedChecks = checks.length;
+      if (customRange) latestDate = checks[0]?.Date || null;
 
       checks.forEach((check) => {
         const sign = /возврат/i.test(String(check.ВидОперации || ""))
@@ -816,11 +854,14 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     // В некоторых базах консультант переносится из чеков только при закрытии
     // смены. Тогда ищем его в строках отчёта о розничных продажах.
     if (!grouped.size) {
-      const reportResult = await loadConsultantReportPagesLegacyCached({
-        limit: 500,
-        days,
-      });
-      reports = reportResult.items;
+      const reportResult = customRange
+        ? await loadReportPagesByRangeCached({ limit: null, from, to })
+        : await loadConsultantReportPagesLegacyCached({ limit: 500, days });
+      reports = customRange
+        ? reportResult.items
+        : filterByPeriod(reportResult.items, "Date",
+          new Date(startOfOnecDay(reportResult.items[0]?.Date) - (days - 1) * 86_400_000),
+          new Date(startOfOnecDay(reportResult.items[0]?.Date) + 86_400_000 - 1));
       cache = reportResult.cache;
       latestDate = reports[0]?.Date || latestDate;
       source = "Document_ОтчетОРозничныхПродажах.Товары.Продавец_Key";
@@ -877,6 +918,8 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       references: { sellers: consultants, stores },
       meta: {
         days,
+        periodStart: customRange ? new Date(rangeStart).toISOString() : null,
+        periodEnd: customRange ? new Date(rangeEnd).toISOString() : null,
         channel,
         loaded: items.length,
         latestDate: latestDate ? normalizeOnecDateTime(latestDate) : null,
@@ -1489,14 +1532,30 @@ app.get("/api/dashboard/onec-margin", async (request, response) => {
 
 app.get("/api/dashboard/onec-stock", async (request, response) => {
   try {
+    const operationsOnly = request.query.operationsOnly === "true";
+    const from = typeof request.query.from === "string" ? request.query.from : "";
+    const to = typeof request.query.to === "string" ? request.query.to : "";
+    const hasRange = Boolean(from || to);
+    if (hasRange && (!/^\d{4}-\d{2}-\d{2}$/.test(from) ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to)) {
+      return response.status(400).json({ message: "Некорректный диапазон дат склада" });
+    }
+    const rangeFrom = hasRange ? parseOnecDateTime(`${from}T00:00:00`) : null;
+    const rangeTo = hasRange ? parseOnecDateTime(`${to}T00:00:00`) + 86_400_000 : null;
+    if (hasRange && (!Number.isFinite(rangeFrom) || !Number.isFinite(rangeTo) ||
+      rangeTo - rangeFrom > 366 * 86_400_000)) {
+      return response.status(400).json({ message: "Некорректный диапазон дат склада" });
+    }
     const top = Math.min(
       Math.max(Number(request.query.top) || 5000, 1),
       10000,
     );
-    const balancePeriod = request.query.period
+    const balancePeriod = hasRange
+      ? new Date(rangeTo - 1)
+      : request.query.period
       ? new Date(String(request.query.period))
       : new Date();
-    const balances = await onecBalance(
+    const balances = operationsOnly ? [] : await onecBalance(
       "AccumulationRegister_ТоварыНаСкладах",
       {
         period: balancePeriod,
@@ -1512,56 +1571,68 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
       },
     );
 
+    const loadOperation = async (entity, select, top) => {
+      const dateFilter = [
+        "Posted eq true",
+        `Date ge datetime'${toOdataDateTime(rangeFrom)}'`,
+        `Date lt datetime'${toOdataDateTime(rangeTo)}'`,
+      ].join(" and ");
+      const query = (filter, pageTop, skip = 0) => onecGet(entity, {
+        $top: pageTop,
+        $skip: skip,
+        $select: select.join(","),
+        $filter: filter,
+        $orderby: "Date desc",
+      });
+      if (!hasRange) return query("Posted eq true", top);
+
+      async function loadPages(filter) {
+        const items = [];
+        const pageSize = 100;
+        const maxRows = 500;
+        while (items.length < maxRows) {
+          const page = await query(filter, pageSize, items.length);
+          items.push(...page);
+          if (page.length < pageSize) return items;
+        }
+        if ((await query(filter, 1, items.length)).length) {
+          throw new Error(`Слишком много документов ${entity}: выборка превышает 500 записей`);
+        }
+        return items;
+      }
+
+      let items;
+      try {
+        items = await loadPages(dateFilter);
+      } catch (error) {
+        if (!/WHERE|Date|ORDER BY|datetime/i.test(String(error?.message || ""))) throw error;
+        console.warn(`1С не приняла фильтр дат для ${entity}; проверяем документы локально`);
+        items = await loadPages("Posted eq true");
+      }
+      return filterByPeriod(items, "Date", new Date(rangeFrom), new Date(rangeTo - 1));
+    };
     const operationRequests = await Promise.allSettled([
-      onecGet("Document_ПоступлениеТоваров", {
-        $top: 60,
-        $select: [
-          "Ref_Key",
-          "Number",
-          "Date",
-          "Posted",
-          "Контрагент_Key",
-          "Склад_Key",
-          "СуммаДокумента",
-          "Товары",
-        ].join(","),
-        $filter: "Posted eq true",
-        $orderby: "Date desc",
-      }),
-      onecGet("Document_СписаниеТоваров", {
-        $top: 30,
-        $select: [
-          "Ref_Key",
-          "Number",
-          "Date",
-          "Posted",
-          "Склад_Key",
-          "ОснованиеСписания",
-          "Комментарий",
-          "Товары",
-        ].join(","),
-        $filter: "Posted eq true",
-        $orderby: "Date desc",
-      }),
-      onecGet("Document_ПересчетТоваров", {
-        $top: 30,
-        $select: [
-          "Ref_Key",
-          "Number",
-          "Date",
-          "Posted",
-          "Склад_Key",
-          "Статус",
-          "Товары",
-        ].join(","),
-        $filter: "Posted eq true",
-        $orderby: "Date desc",
-      }),
+      loadOperation("Document_ПоступлениеТоваров", [
+          "Ref_Key", "Number", "Date", "Posted", "Контрагент_Key",
+          "Склад_Key", "СуммаДокумента", "Товары",
+        ], 60),
+      loadOperation("Document_СписаниеТоваров", [
+          "Ref_Key", "Number", "Date", "Posted", "Склад_Key",
+          "ОснованиеСписания", "Комментарий", "Товары",
+        ], 30),
+      loadOperation("Document_ПересчетТоваров", [
+          "Ref_Key", "Number", "Date", "Posted", "Склад_Key", "Статус", "Товары",
+        ], 30),
+      loadOperation("Document_ПеремещениеТоваров", [
+          "Ref_Key", "Number", "Date", "Posted", "СкладОтправитель_Key",
+          "СкладПолучатель_Key", "Товары",
+        ], 60),
     ]);
-    const [receiptResult, writeOffResult, recountResult] = operationRequests;
+    const [receiptResult, writeOffResult, recountResult, transferResult] = operationRequests;
     const receipts = receiptResult.status === "fulfilled" ? receiptResult.value : [];
     const writeOffs = writeOffResult.status === "fulfilled" ? writeOffResult.value : [];
     const recounts = recountResult.status === "fulfilled" ? recountResult.value : [];
+    const transfers = transferResult.status === "fulfilled" ? transferResult.value : [];
     const operationErrors = {
       receipts:
         receiptResult.status === "rejected"
@@ -1575,12 +1646,16 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
         recountResult.status === "rejected"
           ? recountResult.reason?.message || "Источник недоступен"
           : "",
+      transfers:
+        transferResult.status === "rejected"
+          ? transferResult.reason?.message || "Источник недоступен"
+          : "",
     };
 
-    const operationLines = [...receipts, ...writeOffs, ...recounts].flatMap(
+    const operationLines = [...receipts, ...writeOffs, ...recounts, ...transfers].flatMap(
       (document) => document.Товары || [],
     );
-    const productKeys = [
+    const productKeys = operationsOnly ? [] : [
       ...balances.map((item) => item.Номенклатура_Key),
       ...operationLines.map((item) => item.Номенклатура_Key),
     ];
@@ -1589,6 +1664,9 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
       ...[...receipts, ...writeOffs, ...recounts].map(
         (document) => document.Склад_Key,
       ),
+      ...transfers.flatMap((document) => [
+        document.СкладОтправитель_Key, document.СкладПолучатель_Key,
+      ]),
     );
     const [rawProducts, warehouses, suppliers, productKinds] = await Promise.all([
       loadReferencesByKeysBatched(
@@ -1613,10 +1691,14 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
         "Catalog_Контрагенты",
         receipts.map((item) => item.Контрагент_Key),
         "Ref_Key,Code,Description,НаименованиеПолное",
-      ),
-      loadProductKindsCatalog(),
+      ).catch((error) => {
+        if (!operationsOnly) throw error;
+        console.warn("Не удалось загрузить контрагентов для документов склада:", error);
+        return [];
+      }),
+      operationsOnly ? Promise.resolve([]) : loadProductKindsCatalog(),
     ]);
-    const productSubcategories = await loadProductSubcategories(rawProducts);
+    const productSubcategories = operationsOnly ? [] : await loadProductSubcategories(rawProducts);
     const products = enrichProductsWithBusinessCategories(
       rawProducts,
       productKinds,
@@ -1624,7 +1706,7 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
     );
     const categories = publicBusinessCategories();
     const latestOperationTimestamp = Math.max(
-      ...[...receipts, ...writeOffs, ...recounts]
+      ...[...receipts, ...writeOffs, ...recounts, ...transfers]
         .map((document) => parseOnecDateTime(document.Date))
         .filter(Number.isFinite),
       0,
@@ -1643,7 +1725,7 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
         subcategories: productSubcategories,
         suppliers,
       },
-      operations: { receipts, writeOffs, recounts },
+      operations: { receipts, writeOffs, recounts, transfers },
       meta: {
         loaded: balances.length,
         requestedAt: new Date().toISOString(),
@@ -1651,7 +1733,9 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
         balancePeriod: balancePeriod.toISOString(),
         latestOperationDate,
         operationFreshness: describeDataFreshness(latestOperationDate),
-        source: "AccumulationRegister_ТоварыНаСкладах/Balance",
+        source: operationsOnly
+          ? "Document_ПоступлениеТоваров, Document_ПеремещениеТоваров"
+          : "AccumulationRegister_ТоварыНаСкладах/Balance",
         operationErrors,
       },
     });

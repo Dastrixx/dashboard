@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { rollingDateRange } from "./sales/config";
+import type { SalesDateRange } from "./sales/types";
 import { DataState, MissingSource } from "./shared";
 import { buildSellerChart, buildTeamView } from "./team/analytics";
 import { TeamHeader } from "./team/header";
@@ -13,13 +15,16 @@ import type { SellerPayload } from "./types";
 
 export function OnecTeam() {
   const [period, setPeriod] = useState<Period>(30);
+  const [dateFrom, setDateFrom] = useState(() => rollingDateRange(30).from);
+  const [dateTo, setDateTo] = useState(() => rollingDateRange(30).to);
+  const [dateRange, setDateRange] = useState<SalesDateRange | null>(null);
   const [storeKey, setStoreKey] = useState("all");
   const [channel, setChannel] = useState<SalesChannel>("all");
   const [selectedKey, setSelectedKey] = useState("");
 
-  const query = { storeKey, period, channel };
+  const query = { storeKey, period, channel, dateRange };
   const data = useTeamData(query);
-  const teamPlan = useTeamPlan(query);
+  const teamPlan = useTeamPlan({ storeKey, period, channel });
 
   const view = useMemo(
     () => buildTeamView(data.payload, storeKey),
@@ -28,7 +33,7 @@ export function OnecTeam() {
   const selected =
     view.rows.find((seller) => seller.key === selectedKey) ?? view.rows[0];
   const chart = useMemo(() => buildSellerChart(selected), [selected]);
-  const planPercent = teamPlan.plan
+  const planPercent = !dateRange && teamPlan.plan
     ? (view.revenue / teamPlan.plan) * 100
     : 0;
 
@@ -48,16 +53,26 @@ export function OnecTeam() {
         stores={view.stores}
         storeKey={storeKey}
         period={period}
+        dateFilter={{
+          from: dateFrom,
+          to: dateTo,
+          appliedRange: dateRange,
+          canApply: Boolean(dateFrom && dateTo && dateFrom <= dateTo),
+          onFromChange: setDateFrom,
+          onToChange: setDateTo,
+          onApply: () => setDateRange({ from: dateFrom, to: dateTo }),
+        }}
         channel={channel}
         onStoreChange={setStoreKey}
-        onPeriodChange={setPeriod}
+        onPeriodChange={(value) => { setPeriod(value); setDateRange(null); }}
         onChannelChange={setChannel}
       />
 
       <TeamSummary
         view={view}
         channel={channel}
-        plan={teamPlan.plan}
+        plan={dateRange ? 0 : teamPlan.plan}
+        showPlan={!dateRange}
         planPercent={planPercent}
         margin={data.margin}
         marginError={data.marginError}
@@ -69,11 +84,11 @@ export function OnecTeam() {
         selectedKey={selected?.key ?? ""}
         chart={chart}
         channel={channel}
-        plan={teamPlan.plan}
+        plan={dateRange ? 0 : teamPlan.plan}
         onSellerChange={setSelectedKey}
       />
 
-      <TeamPlanPanel
+      {!dateRange && <TeamPlanPanel
         view={view}
         storeKey={storeKey}
         channel={channel}
@@ -86,7 +101,7 @@ export function OnecTeam() {
         source={data.payload.meta?.source}
         onPlanInputChange={teamPlan.setPlanInput}
         onSave={teamPlan.save}
-      />
+      />}
     </div>
   );
 }

@@ -38,15 +38,19 @@ tbody tr:hover{background:#f7faf8}
 
 /* UI direction: Quiet precision */
 :root{
-  --green:#075c41;
-  --green2:#0b7a55;
+  --brand-turquoise:#00b5be;
+  --brand-yellow:#f1b948;
+  --brand-yellow-text:#c99530;
+  --brand-light-turquoise:#9ee0e4;
+  --green:#006f77;
+  --green2:#008d96;
   --ink:#10231d;
   --muted:#66756f;
   --line:#e2e9e6;
   --bg:#f3f6f5;
-  --lime:#b9f227;
-  --pale:#e9f7f1;
-  --amber:#c78216;
+  --lime:var(--brand-yellow);
+  --pale:#e3f7f8;
+  --amber:var(--brand-yellow-text);
 }
 html,body{background:var(--bg);font-family:Inter,Manrope,"Segoe UI",Arial,sans-serif}
 .sidebar{
@@ -832,7 +836,7 @@ body{overflow-x:hidden}
   display:block;width:100%;min-height:0;border-radius:7px 7px 2px 2px;
 }
 .onec-comparison-bars i.current{
-  background:linear-gradient(180deg,#36aa80,var(--green2));
+  background:linear-gradient(180deg,var(--brand-turquoise),var(--green2));
 }
 .onec-comparison-bars i.previous{background:#dbe3df}
 .onec-comparison-group>span{color:var(--muted);font-size:9px}
@@ -848,7 +852,7 @@ body{overflow-x:hidden}
 }
 .onec-category-list>div>i>b{
   display:block;height:100%;border-radius:999px;
-  background:linear-gradient(90deg,var(--green2),#28a879);
+  background:linear-gradient(90deg,var(--green2),var(--brand-turquoise));
 }
 .onec-check-chart-outer{display:flex;align-items:stretch;min-width:680px}
 .onec-check-y-axis{display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end;flex:none;width:40px;padding:20px 6px 24px 0;border-right:1px solid #e0eae5;color:var(--muted);font-size:9px}
@@ -913,9 +917,9 @@ body{overflow-x:hidden}
 .onec-revenue-line{
   fill:none;stroke-linecap:round;stroke-linejoin:round;stroke-width:4;
 }
-.onec-revenue-line.current{stroke:var(--green2)}
+.onec-revenue-line.current{stroke:var(--brand-turquoise)}
 .onec-revenue-line.previous{stroke:#afbbb5;stroke-width:3;stroke-dasharray:8 8}
-.onec-revenue-point{fill:var(--green2);stroke:#fff;stroke-width:2;opacity:.72}
+.onec-revenue-point{fill:var(--brand-yellow);stroke:#fff;stroke-width:2;opacity:1}
 .onec-chart-maximum{
   position:absolute;right:8px;top:12px;display:flex;align-items:center;gap:11px;
   min-height:42px;padding:0 13px;border:1px solid #cce1d7;border-radius:11px;
@@ -1317,7 +1321,7 @@ body{overflow-x:hidden}
 .owner-chart-legend{display:flex;gap:14px;align-items:center;padding-top:6px}
 .owner-chart-legend span{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:9px;white-space:nowrap}
 .owner-chart-legend i{display:block;width:16px;height:6px;border-radius:8px}
-.owner-chart-legend .current{background:#149368}
+.owner-chart-legend .current{background:var(--brand-turquoise)}
 .owner-chart-legend .previous{background:#cbd6d0}
 .owner-comparison-summary{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px}
 .owner-comparison-summary>div{padding:12px 14px;border-radius:11px;background:#f6f9f7}
@@ -1332,7 +1336,7 @@ body{overflow-x:hidden}
 .owner-chart-value>b{font-size:8px;color:#527064;margin-bottom:5px;white-space:nowrap}
 .owner-chart-bars{width:100%;height:190px;display:flex;align-items:flex-end;justify-content:center;gap:3px;background:linear-gradient(to top,rgba(222,231,226,.65) 1px,transparent 1px);background-size:100% 33.333%}
 .owner-chart-bars i{display:block;width:min(14px,38%);border-radius:5px 5px 1px 1px;transition:height .25s ease}
-.owner-chart-bars .current{background:linear-gradient(#31ac7f,#0d835a)}
+.owner-chart-bars .current{background:linear-gradient(var(--brand-light-turquoise),var(--brand-turquoise))}
 .owner-chart-bars .previous{background:#d4ddd8}
 .owner-chart-column>span{height:18px;color:#8b9790;font-size:8px;white-space:nowrap}
 
@@ -1565,8 +1569,8 @@ body{overflow-x:hidden}
 .seller-mini-kpis span,.team-plan-summary-grid span{color:var(--muted);font-size:8px}.seller-mini-kpis strong,.team-plan-summary-grid strong{margin-top:6px;font-size:12px}
 .seller-chart-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
 .seller-chart-head h3{margin:0;font-size:14px}.seller-chart-head p{margin:5px 0 0;color:var(--muted);font-size:8px}
-.seller-sales-chart{width:100%;height:245px;margin-top:8px;overflow:hidden}.seller-sales-chart svg{display:block;width:100%;height:100%;overflow:visible}
-.seller-chart-label{fill:#8d9993;font-size:7px}.seller-chart-empty{height:220px;display:grid;place-items:center;margin-top:10px;padding:20px;border:1px dashed #d5dfda;border-radius:11px;background:#fafcfa;color:var(--muted);font-size:9px;text-align:center}
+.seller-sales-chart{width:100%;height:265px;margin-top:8px;overflow:hidden}.seller-sales-chart svg{display:block;width:100%;height:100%;overflow:visible}
+.seller-chart-label{fill:var(--muted);font-size:10px}.seller-chart-value{fill:var(--green);font-size:10px;font-weight:700;paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round}.seller-chart-empty{height:220px;display:grid;place-items:center;margin-top:10px;padding:20px;border:1px dashed #d5dfda;border-radius:11px;background:#fafcfa;color:var(--muted);font-size:9px;text-align:center}
 .team-plan-panel{padding:24px 26px}
 .team-plan-panel-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px}
 .team-plan-panel-head h2{margin:6px 0 4px;font-size:19px}.team-plan-panel-head p{margin:0;color:var(--muted);font-size:9px}

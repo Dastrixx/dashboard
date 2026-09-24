@@ -65,6 +65,8 @@ export type StockOperation = {
   Date: string;
   Posted?: boolean;
   Склад_Key?: string;
+  СкладОтправитель_Key?: string;
+  СкладПолучатель_Key?: string;
   Контрагент_Key?: string;
   СуммаДокумента?: number;
   ОснованиеСписания?: string;
@@ -86,6 +88,7 @@ export type StockPayload = {
     receipts?: StockOperation[];
     writeOffs?: StockOperation[];
     recounts?: StockOperation[];
+    transfers?: StockOperation[];
   };
   meta?: {
     loaded?: number;

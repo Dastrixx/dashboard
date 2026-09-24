@@ -216,7 +216,19 @@ export function RevenueAnalysis({
   const chartHeight = 270;
   const chartPadding = 18;
   const xLabelStep = Math.max(1, Math.ceil(currentPoints.length / 8));
-  const rotateLabels = currentPoints.length > 14;
+  const peakIndexes = new Set<number>();
+  currentPoints
+    .map((point, index) => ({ point, index }))
+    .filter(({ point, index }) => point.value > 0 &&
+      (index === 0 || point.value > currentPoints[index - 1].value) &&
+      (index === currentPoints.length - 1 || point.value >= currentPoints[index + 1].value))
+    .sort((left, right) => right.point.value - left.point.value)
+    .forEach(({ point, index }) => {
+      if (peakIndexes.size < 6 &&
+        [...peakIndexes].every((other) => Math.abs(point.x - currentPoints[other].x) >= 88)) {
+        peakIndexes.add(index);
+      }
+    });
 
   return (
     <section className="charts-grid onec-real-analysis-grid">
@@ -272,8 +284,8 @@ export function RevenueAnalysis({
               />
             ))}
             {currentPoints.map((point, index) =>
-              index % xLabelStep === 0 ? (
-                <text key={`date-${index}`} x={point.x} y={chartHeight + 14}
+              index % xLabelStep === 0 || index === currentPoints.length - 1 ? (
+                <text key={`date-${index}`} x={Math.max(30, Math.min(point.x, chartWidth - 30))} y={chartHeight + 14}
                   textAnchor="middle" fontSize="10" fill="var(--muted)">
                   {point.label}
                 </text>
@@ -298,10 +310,9 @@ export function RevenueAnalysis({
                 <circle cx={point.x} cy={point.y} r="10" fill="transparent" />
                 <circle className="onec-revenue-point" cx={point.x} cy={point.y}
                   r={hoveredIdx === index ? 5 : 3} />
-                {point.value > 0 && (
-                  <text x={point.x} y={point.y - 11} textAnchor={rotateLabels ? "end" : "middle"}
-                    fontSize="9" fill="var(--muted)"
-                    transform={rotateLabels ? `rotate(-45 ${point.x} ${point.y - 11})` : undefined}
+                {peakIndexes.has(index) && (
+                  <text x={Math.max(36, Math.min(point.x, chartWidth - 36))} y={Math.max(14, point.y - 12)} textAnchor="middle"
+                    fontSize="10" fontWeight="700" fill="var(--green)"
                     style={{ pointerEvents: "none" }}>
                     {compactNumber.format(point.value)}
                   </text>

@@ -1,5 +1,6 @@
 import { API_URL } from "../shared";
 import type { MarginAnalyticsResponse } from "../sales/types";
+import type { SalesDateRange } from "../sales/types";
 import type { SellerPayload } from "../types";
 import type { Period, SalesChannel } from "./types";
 
@@ -7,6 +8,7 @@ type TeamQuery = {
   storeKey: string;
   period: Period;
   channel: SalesChannel;
+  dateRange?: SalesDateRange | null;
 };
 
 type TeamPlanPayload = {
@@ -26,7 +28,11 @@ export async function fetchTeamPlan(
   query: TeamQuery,
   signal: AbortSignal,
 ) {
-  const response = await fetch(buildUrl("/api/dashboard/team-plan", query), {
+  const response = await fetch(buildUrl("/api/dashboard/team-plan", {
+    storeKey: query.storeKey,
+    period: query.period,
+    channel: query.channel,
+  }), {
     signal,
     credentials: "include",
     cache: "no-store",
@@ -43,11 +49,13 @@ export async function fetchTeamData(
   const sellerUrl = buildUrl("/api/dashboard/onec-consultants", {
     days: query.period,
     channel: query.channel,
+    ...(query.dateRange ?? {}),
   });
   const marginUrl = buildUrl("/api/dashboard/onec-margin", {
     days: query.period,
     storeKey: query.storeKey,
     channel: query.channel,
+    ...(query.dateRange ?? {}),
   });
 
   const [sellerResponse, marginResponse] = await Promise.all([
