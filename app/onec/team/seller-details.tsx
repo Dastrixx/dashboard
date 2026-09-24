@@ -122,8 +122,17 @@ function SellerSalesChart({
 }
 
 function ChartSvg({ chart }: { chart: SellerChart }) {
-  const labelStep = Math.max(1, Math.ceil(chart.points.length / 7));
   const lastIndex = chart.points.length - 1;
+  const dateIndexes = new Set<number>();
+  let lastDateX = -Infinity;
+  chart.points.forEach((point, index) => {
+    if (index === 0 || index === lastIndex ||
+      (point.x - lastDateX >= 100 &&
+        chart.points[lastIndex].x - point.x >= 80)) {
+      dateIndexes.add(index);
+      lastDateX = point.x;
+    }
+  });
   const peakIndexes = new Set<number>();
   chart.points
     .map((point, index) => ({ point, index }))
@@ -173,7 +182,7 @@ function ChartSvg({ chart }: { chart: SellerChart }) {
           <ChartPoint
             point={point}
             key={point.date}
-            showDate={index === 0 || index === lastIndex || index % labelStep === 0}
+            showDate={dateIndexes.has(index)}
             isPeak={peakIndexes.has(index)}
           />
         ))}

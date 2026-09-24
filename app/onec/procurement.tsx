@@ -58,6 +58,7 @@ export function OnecProcurement() {
             <OperationTable rows={receipts.map((item) => ({
               key: item.Ref_Key, date: item.Date, number: item.Number,
               origin: suppliers.get(item.Контрагент_Key || "") || "Поставщик не указан",
+              destination: stores.get(item.Склад_Key || "") || "Склад не указан",
               sku: new Set((item.Товары || []).map((line) => line.Номенклатура_Key)).size,
             }))} empty="Поступлений за выбранный период нет" />
           </section>

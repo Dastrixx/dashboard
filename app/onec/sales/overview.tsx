@@ -284,7 +284,9 @@ export function RevenueAnalysis({
               />
             ))}
             {currentPoints.map((point, index) =>
-              index % xLabelStep === 0 || index === currentPoints.length - 1 ? (
+              index === 0 || index === currentPoints.length - 1 ||
+              (index % xLabelStep === 0 &&
+                currentPoints[currentPoints.length - 1].x - point.x >= 65) ? (
                 <text key={`date-${index}`} x={Math.max(30, Math.min(point.x, chartWidth - 30))} y={chartHeight + 14}
                   textAnchor="middle" fontSize="10" fill="var(--muted)">
                   {point.label}

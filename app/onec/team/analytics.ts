@@ -56,6 +56,9 @@ export function buildTeamView(
 
 export function buildSellerChart(seller?: SellerRow): SellerChart {
   const dates = Object.keys(seller?.daily ?? {}).sort();
+  const timestamps = dates.map((date) => Date.parse(`${date}T00:00:00Z`));
+  const firstTimestamp = timestamps[0] ?? NaN;
+  const lastTimestamp = timestamps.at(-1) ?? NaN;
   const values = dates.map((date) =>
     Math.max(Number(seller?.daily[date] ?? 0), 0),
   );
@@ -64,7 +67,11 @@ export function buildSellerChart(seller?: SellerRow): SellerChart {
   const points = values.map((value, index) => ({
     date: dates[index],
     value,
-    x: chartX(index, dates.length),
+    x: Number.isFinite(firstTimestamp) && Number.isFinite(lastTimestamp) &&
+      lastTimestamp > firstTimestamp
+      ? CHART_LEFT + ((timestamps[index] - firstTimestamp) /
+          (lastTimestamp - firstTimestamp)) * (CHART_RIGHT - CHART_LEFT)
+      : chartX(index, dates.length),
     y: CHART_BASELINE - (value / maximum) * CHART_HEIGHT,
   }));
 
