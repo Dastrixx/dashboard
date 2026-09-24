@@ -4,6 +4,7 @@ import type { SalesDateRange } from "../sales/types";
 import type { SellerPayload } from "../types";
 import {
   fetchTeamData,
+  fetchTeamMargin,
   fetchTeamPlan,
   updateTeamPlan,
 } from "./api";
@@ -39,9 +40,7 @@ export function useTeamData({ storeKey, period, channel, dateRange }: TeamQuery)
           controller.signal,
         );
 
-        setPayload(result.payload);
-        setMargin(result.margin);
-        setMarginError(result.marginError);
+        if (!controller.signal.aborted) setPayload(result);
       } catch (cause) {
         if (!isAbortError(cause)) {
           setError(
@@ -55,7 +54,26 @@ export function useTeamData({ storeKey, period, channel, dateRange }: TeamQuery)
       }
     }
 
+    async function loadMargin() {
+      try {
+        setMargin(null);
+        const result = await fetchTeamMargin(
+          { storeKey, period, channel, dateRange },
+          controller.signal,
+        );
+        if (!controller.signal.aborted) {
+          setMargin(result.margin);
+          setMarginError(result.marginError);
+        }
+      } catch (cause) {
+        if (!isAbortError(cause) && !controller.signal.aborted) {
+          setMarginError(errorMessage(cause, "Не удалось получить маржу из 1С"));
+        }
+      }
+    }
+
     void load();
+    void loadMargin();
     return () => controller.abort();
   }, [channel, period, storeKey, dateRange]);
 

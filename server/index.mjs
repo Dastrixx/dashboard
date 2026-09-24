@@ -1784,6 +1784,7 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
           limit: requestedTop + 1,
           days,
         });
+    const reportLoadMs = Date.now() - startedAt;
     const uniqueItems = uniqueReports(reportResult.items);
     const truncated = hasCustomRange
       ? false
@@ -1807,6 +1808,7 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
       truncated,
       cache: reportResult.cache,
       durationMs: Date.now() - startedAt,
+      reportLoadMs,
     };
 
     if (request.query.references === "false") {
@@ -1868,6 +1870,7 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
       productKinds,
       productSubcategories,
     );
+    const referenceLoadMs = Date.now() - startedAt - reportLoadMs;
     const categories = publicBusinessCategories();
 
     response.json({
@@ -1882,6 +1885,8 @@ app.get("/api/dashboard/onec-reports", async (request, response) => {
       meta: {
         ...commonMeta,
         referencesLoaded: true,
+        referenceLoadMs,
+        durationMs: Date.now() - startedAt,
       },
     });
   } catch (error) {
