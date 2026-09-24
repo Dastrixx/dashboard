@@ -205,7 +205,11 @@ export function OnecStock() {
     const transfers = (payload.operations?.transfers || []).filter((document) =>
       matchesWarehouse(document.СкладПолучатель_Key || ""),
     );
-    const incoming = receipts.length ? receipts : transfers;
+    const newestReceipt = Math.max(...receipts.map((item) => new Date(item.Date).getTime()), 0);
+    const newestTransfer = Math.max(...transfers.map((item) => new Date(item.Date).getTime()), 0);
+    const useReceipts = receipts.length > 0 &&
+      (transfers.length === 0 || newestTransfer <= newestReceipt + 30 * 86_400_000);
+    const incoming = useReceipts ? receipts : transfers;
     const writeOffs = (payload.operations?.writeOffs || []).filter(
       operationMatches,
     );
@@ -331,7 +335,9 @@ export function OnecStock() {
         warehouse: warehouses.get(document.СкладПолучатель_Key || "")?.Description || "Склад не указан",
         sku: new Set((document.Товары || []).map((line) => line.Номенклатура_Key).filter(Boolean)).size,
       })),
-      hasReceipts: receipts.length > 0,
+      hasReceipts: useReceipts,
+      outdatedReceiptDate: !useReceipts && newestReceipt
+        ? new Date(newestReceipt).toLocaleDateString("ru-RU") : null,
       writeOffRows,
       recountRows,
     };
@@ -690,6 +696,9 @@ export function OnecStock() {
               <p>{view.hasReceipts ? "Документы «Поступление товаров» из 1С" : "Документы «Перемещение товаров» из 1С; это не поставки от поставщика"}</p>
             </div>
           </div>
+          {view.outdatedReceiptDate && (
+            <p className="onec-period-note">Последнее поступление от {view.outdatedReceiptDate}; более поздние операции — внутренние перемещения.</p>
+          )}
           {!view.hasReceipts && payload.meta?.operationErrors?.receipts && (
             <p className="onec-check-limit-warning" role="status">
               Источник поступлений недоступен: {payload.meta.operationErrors.receipts}
