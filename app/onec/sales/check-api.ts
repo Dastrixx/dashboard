@@ -1,4 +1,5 @@
 import { API_URL } from "./config";
+import { fetchLocalAnalytics } from "../local-api";
 import type { CheckAnalytics, CheckAnalyticsResponse } from "./types";
 
 const CHECK_CACHE_TTL_MS = 30_000;
@@ -18,7 +19,7 @@ export function loadCheckAnalytics(query: string) {
     return cached.promise;
   }
 
-  const promise = fetch(
+  const promise = fetchLocalAnalytics(
     `${API_URL}/api/dashboard/onec-check-analytics?${query}`,
     { credentials: "include" },
   )

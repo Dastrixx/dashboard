@@ -67,13 +67,14 @@ async function onecRequest(path, params = {}, accept = "application/json") {
       }
     } catch (error) {
       const retryable =
-        error?.name === "TimeoutError" || error instanceof TypeError;
+        error instanceof TypeError;
 
       if (!retryable || attempt === retries) {
         if (error?.name === "TimeoutError") {
           throw new Error(
-            `1С не ответила за ${Math.round(timeoutMs / 1000)} секунд. ` +
-              "Уменьшите ONEC_PAGE_SIZE или увеличьте ONEC_TIMEOUT_MS.",
+            `1С не ответила за ${Math.round(timeoutMs / 1000)} секунд: ` +
+              `${normalizedPath} (top=${params.$top ?? "—"}, ` +
+              `skip=${params.$skip ?? 0}).`,
           );
         }
 

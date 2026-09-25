@@ -1,5 +1,8 @@
 import cors from "cors";
 import express from "express";
+import { createHash } from "node:crypto";
+import { resolve } from "node:path";
+import { LocalAnalytics, normalizeAnalyticsQuery } from "./dashboard/local-analytics.mjs";
 import {
   authenticateRequest,
   authStore,
@@ -40,6 +43,7 @@ import {
   loadCheckAnalyticsRange,
 } from "./dashboard/checks.mjs";
 import { loadMarginPeriod } from "./dashboard/margin-loader.mjs";
+import { loadReportsByRange } from "./dashboard/report-range.mjs";
 import { summarizeMarginRows } from "./dashboard/margin.mjs";
 import {
   parseSalesChannel,
@@ -177,6 +181,54 @@ const referenceCache = new Map();
 const reportCache = new Map();
 let productKindsCache = null;
 
+const localAnalytics = process.env.ONEC_LOCAL_ANALYTICS !== "false"
+  ? new LocalAnalytics({
+      databasePath: resolve(process.env.ONEC_ANALYTICS_DB_PATH || "data/analytics.sqlite"),
+      namespace: createHash("sha256").update([
+        "v1", process.env.ONEC_ODATA_URL || "", process.env.ONEC_USER || "",
+        process.env.ONEC_TIMEZONE_OFFSET_MINUTES || "360",
+      ].join("|")).digest("hex"),
+      loaders: { reports: buildReportsPayload, margin: buildMarginPayload },
+      refreshMs: Math.max(Number(process.env.ONEC_SYNC_INTERVAL_MS) || 300_000, 60_000),
+    })
+  : null;
+
+function analyticsHandler(kind) {
+  return async (request, response) => {
+    let query;
+    try {
+      query = normalizeAnalyticsQuery(kind, request.query);
+    } catch (error) {
+      return response.status(400).json({ message: error.message });
+    }
+    try {
+      if (!localAnalytics) {
+        const loader = kind === "reports" ? buildReportsPayload : buildMarginPayload;
+        return response.json(await loader(query));
+      }
+      const { payload, sync } = localAnalytics.read(kind, query);
+      if (!payload) {
+        response.set("Retry-After", "10");
+        return response.status(503).json({
+          code: "ANALYTICS_SYNC_PENDING",
+          message: sync.error
+            ? "Не удалось обновить локальные данные: " + sync.error
+            : "Период загружается из 1С в локальную базу. Повторная загрузка страницы не требуется.",
+          meta: { localSync: sync },
+        });
+      }
+      return response.json({ ...payload, meta: { ...payload.meta, localSync: sync } });
+    } catch (error) {
+      console.error(`Ошибка аналитики ${kind}:`, error);
+      return response.status(502).json({ message: error instanceof Error ? error.message : "Ошибка аналитики" });
+    }
+  };
+}
+
+app.get("/api/dashboard/sync-status", (_request, response) => {
+  response.json(localAnalytics?.status() || { enabled: false });
+});
+
 function uniqueReports(reports) {
   const seen = new Set();
   return reports.filter((report) => {
@@ -262,43 +314,44 @@ async function loadReportPagesByRange({ limit, from, to }) {
   const configuredPageSize = Number(process.env.ONEC_PAGE_SIZE || 25);
   const pageSize = Math.min(Math.max(configuredPageSize, 1), 100);
   const fromTimestamp = parseOnecDateTime(`${from}T00:00:00`);
-  const toTimestamp = parseOnecDateTime(`${to}T23:59:59`);
+  const endExclusive = parseOnecDateTime(`${to}T00:00:00`) + 86_400_000;
 
   if (
     !Number.isFinite(fromTimestamp) ||
-    !Number.isFinite(toTimestamp) ||
-    fromTimestamp > toTimestamp
+    !Number.isFinite(endExclusive) ||
+    fromTimestamp >= endExclusive
   ) {
     throw new Error("Некорректный диапазон дат");
   }
 
-  const filter = [
-    "Posted eq true",
-    `Date ge datetime'${toOdataDateTime(fromTimestamp)}'`,
-    `Date le datetime'${toOdataDateTime(toTimestamp)}'`,
-  ].join(" and ");
-  const result = [];
-
-  while (limit === null || result.length < limit) {
-    const currentPageSize =
-      limit === null ? pageSize : Math.min(pageSize, limit - result.length);
-    const page = await onecGet(RETAIL_REPORT_ENTITY, {
-      $top: currentPageSize,
-      $skip: result.length,
+  const maxScanned = Math.min(
+    Math.max(Number(process.env.ONEC_REPORT_MAX_SCAN) || 10_000, 100),
+    100_000,
+  );
+  const reports = await loadReportsByRange({
+    fromTimestamp,
+    endExclusive,
+    pageSize,
+    maxScanned,
+    getPage: (filter, top, skip) => onecGet(RETAIL_REPORT_ENTITY, {
+      $top: top,
+      $skip: skip,
       $select: RETAIL_REPORT_SELECT,
       $filter: filter,
       $orderby: "Date desc",
-    });
-    result.push(...page);
-    if (page.length < currentPageSize) break;
-  }
-
-  return filterByPeriod(
-    result,
-    "Date",
-    new Date(fromTimestamp),
-    new Date(toTimestamp),
-  );
+    }),
+    getHeaderPage: (top, skip) => onecGet(RETAIL_REPORT_ENTITY, {
+      $top: top,
+      $skip: skip,
+      $select: "Ref_Key,Date,Posted",
+      $filter: "Posted eq true",
+      $orderby: "Date desc",
+    }),
+    getByKey: (key) => onecGetByKey(RETAIL_REPORT_ENTITY, key, {
+      $select: RETAIL_REPORT_SELECT,
+    }),
+  });
+  return limit === null ? reports : reports.slice(0, limit);
 }
 
 async function loadReportPagesByRangeCached({ limit, from, to }) {
@@ -659,6 +712,19 @@ app.get("/api/dashboard/onec-product-categories", async (request, response) => {
 
 app.get("/api/dashboard/onec-consultants", async (request, response) => {
   try {
+    const from = typeof request.query.from === "string" ? request.query.from : "";
+    const to = typeof request.query.to === "string" ? request.query.to : "";
+    const customRange = Boolean(from || to);
+    if (customRange && (!/^\d{4}-\d{2}-\d{2}$/.test(from) ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to)) {
+      return response.status(400).json({ message: "Некорректный диапазон дат продавцов" });
+    }
+    const rangeStart = customRange ? parseOnecDateTime(`${from}T00:00:00`) : null;
+    const rangeEnd = customRange ? parseOnecDateTime(`${to}T00:00:00`) + 86_400_000 : null;
+    if (customRange && (!Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd) ||
+      rangeEnd - rangeStart > 366 * 86_400_000)) {
+      return response.status(400).json({ message: "Некорректный диапазон дат продавцов" });
+    }
     const days = [1, 7, 30].includes(Number(request.query.days))
       ? Number(request.query.days)
       : 30;
@@ -754,9 +820,12 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
 
     if (latestChecks.length) {
       latestDate = latestChecks[0].Date;
-      const checkStartDate = new Date(
-        parseOnecDateTime(latestDate) - days * 86_400_000,
-      );
+      const checkStartDate = new Date(customRange
+        ? rangeStart
+        : startOfOnecDay(latestDate) - (days - 1) * 86_400_000);
+      const checkEndDate = new Date(customRange
+        ? rangeEnd
+        : startOfOnecDay(latestDate) + 86_400_000);
       const checkQuery = {
         $top: 1000,
         $select: [
@@ -772,26 +841,63 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
         $orderby: "Date desc",
       };
       let checks;
+      const maxChecks = Math.max(Number(process.env.ONEC_SELLER_CHECK_LIMIT) || 20_000, 1_000);
+      const pageSize = 100;
+
+      async function loadCheckPages(filter, scanWithoutDateFilter = false) {
+        const result = [];
+        let scanned = 0;
+        let reachedPastRange = false;
+        while (scanned < maxChecks && !reachedPastRange) {
+          const currentPageSize = Math.min(pageSize, maxChecks - scanned);
+          const page = await onecGet("Document_ЧекККМ", {
+            ...checkQuery, $top: currentPageSize,
+            $skip: scanned, $filter: filter,
+          });
+          scanned += page.length;
+          result.push(...page);
+          reachedPastRange = scanWithoutDateFilter && page.some((check) =>
+            parseOnecDateTime(check.Date) < checkStartDate.getTime());
+          if (page.length < currentPageSize) return result;
+        }
+        if (!reachedPastRange && (await onecGet("Document_ЧекККМ", {
+          ...checkQuery, $top: 1, $skip: scanned, $filter: filter,
+        })).length) {
+          throw new Error(`За выбранный период найдено больше ${maxChecks} чеков; увеличьте ONEC_SELLER_CHECK_LIMIT`);
+        }
+        return result;
+      }
 
       try {
-        checks = await onecGet("Document_ЧекККМ", {
-          ...checkQuery,
-          $filter: [
+        const filter = [
             "Posted eq true",
             `Date ge datetime'${toOdataDateTime(checkStartDate)}'`,
-          ].join(" and "),
-        });
+            `Date lt datetime'${toOdataDateTime(checkEndDate)}'`,
+          ].join(" and ");
+        if (customRange) {
+          checks = await loadCheckPages(filter);
+        } else {
+          checks = await onecGet("Document_ЧекККМ", {
+            ...checkQuery, $filter: filter,
+          });
+        }
       } catch (error) {
+        if (!/HTTP (400|500)/.test(String(error?.message || ""))) throw error;
         console.warn(
           "1С не приняла период консультантов по чекам, загружаем последние чеки:",
           error instanceof Error ? error.message : error,
         );
-        checks = await onecGet("Document_ЧекККМ", {
-          ...checkQuery,
-          $filter: "Posted eq true",
-        });
+        checks = customRange
+          ? await loadCheckPages("Posted eq true", true)
+          : await onecGet("Document_ЧекККМ", {
+              ...checkQuery,
+              $filter: "Posted eq true",
+            });
       }
+      checks = filterByPeriod(checks, "Date", checkStartDate,
+        new Date(checkEndDate.getTime() - 1));
       scannedChecks = checks.length;
+      if (customRange) latestDate = checks[0]?.Date || null;
 
       checks.forEach((check) => {
         const sign = /возврат/i.test(String(check.ВидОперации || ""))
@@ -816,10 +922,19 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     // В некоторых базах консультант переносится из чеков только при закрытии
     // смены. Тогда ищем его в строках отчёта о розничных продажах.
     if (!grouped.size) {
-      const reportResult = await loadConsultantReportPagesLegacyCached({
-        limit: 500,
-        days,
-      });
+      const savedReports = customRange && localAnalytics
+        ? localAnalytics.read("reports", normalizeAnalyticsQuery("reports", {
+            from, to, references: "false",
+          }), { refresh: false }).payload
+        : null;
+      const reportResult = savedReports
+        ? { items: savedReports.items, cache: "local" }
+        : customRange
+          ? await loadReportPagesByRangeCached({ limit: null, from, to })
+          : await loadConsultantReportPagesLegacyCached({ limit: 500, days });
+      // Совместимый источник уже применяет период на стороне 1С, а при отказе
+      // фильтра 1С возвращает доступные отчёты целиком. Повторная локальная
+      // фильтрация исключала старые строки с заполненными продавцами.
       reports = reportResult.items;
       cache = reportResult.cache;
       latestDate = reports[0]?.Date || latestDate;
@@ -858,6 +973,9 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     })).sort(
       (left, right) => right.СтоимостьTurnover - left.СтоимостьTurnover,
     );
+    const fallbackDates = !customRange && reports.length
+      ? items.flatMap((item) => Object.keys(item.ПродажиПоДатам || {})).sort()
+      : [];
     const consultants = await loadReferencesByKeysBatched(
       "Catalog_ФизическиеЛица",
       items.map((item) => item.Продавец_Key),
@@ -877,6 +995,9 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       references: { sellers: consultants, stores },
       meta: {
         days,
+        periodStart: customRange ? new Date(rangeStart).toISOString() : fallbackDates[0] || null,
+        periodEnd: customRange ? new Date(rangeEnd).toISOString() : fallbackDates.at(-1) || null,
+        scope: fallbackDates.length ? "all" : "period",
         channel,
         loaded: items.length,
         latestDate: latestDate ? normalizeOnecDateTime(latestDate) : null,
@@ -1395,108 +1516,116 @@ app.get("/api/dashboard/onec-sellers", async (request, response) => {
   }
 });
 
-app.get("/api/dashboard/onec-margin", async (request, response) => {
-  try {
-    const from = typeof request.query.from === "string" ? request.query.from : "";
-    const to = typeof request.query.to === "string" ? request.query.to : "";
-    const hasCustomRange =
-      /^\d{4}-\d{2}-\d{2}$/.test(from) &&
-      /^\d{4}-\d{2}-\d{2}$/.test(to);
-    const days = [1, 7, 30, 90].includes(Number(request.query.days))
-      ? Number(request.query.days)
-      : 30;
-    const storeKey = typeof request.query.storeKey === "string"
-      ? request.query.storeKey
-      : "all";
-    const channel = parseSalesChannel(request.query.channel);
-    const includePrevious = request.query.includePrevious !== "false";
+async function buildMarginPayload(query) {
+  const from = typeof query.from === "string" ? query.from : "";
+  const to = typeof query.to === "string" ? query.to : "";
+  const hasCustomRange =
+    /^\d{4}-\d{2}-\d{2}$/.test(from) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(to);
+  const days = [1, 7, 30, 90].includes(Number(query.days))
+    ? Number(query.days)
+    : 30;
+  const storeKey = typeof query.storeKey === "string"
+    ? query.storeKey
+    : "all";
+  const channel = parseSalesChannel(query.channel);
+  const includePrevious = query.includePrevious !== "false";
 
-    let currentFrom;
-    let currentTo;
+  let currentFrom;
+  let currentTo;
 
-    if (hasCustomRange) {
-      currentFrom = new Date(parseOnecDateTime(`${from}T00:00:00`));
-      currentTo = new Date(parseOnecDateTime(`${to}T23:59:59`) + 1000);
-    } else {
-      const latest = await onecGet("AccumulationRegister_Продажи_RecordType", {
-        $top: 20,
-        $select: "Period",
-        $filter: "Active eq true",
-        $orderby: "Period desc",
+  if (hasCustomRange) {
+    currentFrom = new Date(parseOnecDateTime(`${from}T00:00:00`));
+    currentTo = new Date(parseOnecDateTime(`${to}T23:59:59`) + 1000);
+  } else {
+    const latest = await onecGet("AccumulationRegister_Продажи_RecordType", {
+      $top: 20,
+      $select: "Period",
+      $filter: "Active eq true",
+      $orderby: "Period desc",
+    });
+    if (!latest.length) {
+      return ({
+        items: {
+          current: summarizeMarginRows([]),
+          previous: summarizeMarginRows([]),
+        },
+        meta: { source: "AccumulationRegister_Продажи/Turnovers" },
       });
-      if (!latest.length) {
-        return response.json({
-          items: {
-            current: summarizeMarginRows([]),
-            previous: summarizeMarginRows([]),
-          },
-          meta: { source: "AccumulationRegister_Продажи/Turnovers" },
-        });
-      }
-      const activity = resolveActivityAnchor(latest, "Period");
-      const anchor = activity.anchorDate;
-      const dayStart = startOfOnecDay(anchor);
-      currentFrom = new Date(dayStart - (days - 1) * 86_400_000);
-      currentTo = new Date(dayStart + 86_400_000);
     }
+    const activity = resolveActivityAnchor(latest, "Period");
+    const anchor = activity.anchorDate;
+    const dayStart = startOfOnecDay(anchor);
+    currentFrom = new Date(dayStart - (days - 1) * 86_400_000);
+    currentTo = new Date(dayStart + 86_400_000);
+  }
 
-    const duration = currentTo.getTime() - currentFrom.getTime();
-    const previousTo = new Date(currentFrom.getTime());
-    const previousFrom = new Date(previousTo.getTime() - duration);
+  const duration = currentTo.getTime() - currentFrom.getTime();
+  const previousTo = new Date(currentFrom.getTime());
+  const previousFrom = new Date(previousTo.getTime() - duration);
 
-    const currentPromise = loadMarginPeriod(
-      currentFrom,
-      currentTo,
+  const currentPromise = loadMarginPeriod(
+    currentFrom,
+    currentTo,
+    storeKey,
+    channel,
+  );
+  const previousPromise = includePrevious
+    ? loadMarginPeriod(previousFrom, previousTo, storeKey, channel)
+    : Promise.resolve(summarizeMarginRows([]));
+  const [current, previous] = await Promise.all([
+    currentPromise,
+    previousPromise,
+  ]);
+
+  return ({
+    items: { current, previous },
+    meta: {
+      source: "AccumulationRegister_Продажи/Turnovers",
+      revenueField: "СтоимостьTurnover",
+      revenueBeforeDiscountField: "СтоимостьБезСкидокTurnover",
+      costSource: current.costSource,
+      previousCostSource: previous.costSource,
+      calculation:
+        "profit = revenue - cost; " +
+        "marginPercent = profit / revenue * 100; " +
+        "efficiencyPercent = profit / cost * 100",
       storeKey,
       channel,
-    );
-    const previousPromise = includePrevious
-      ? loadMarginPeriod(previousFrom, previousTo, storeKey, channel)
-      : Promise.resolve(summarizeMarginRows([]));
-    const [current, previous] = await Promise.all([
-      currentPromise,
-      previousPromise,
-    ]);
+      periodStart: currentFrom.toISOString(),
+      periodEnd: currentTo.toISOString(),
+    },
+  });
+}
 
-    response.json({
-      items: { current, previous },
-      meta: {
-        source: "AccumulationRegister_Продажи/Turnovers",
-        revenueField: "СтоимостьTurnover",
-        revenueBeforeDiscountField: "СтоимостьБезСкидокTurnover",
-        costSource: current.costSource,
-        previousCostSource: previous.costSource,
-        calculation:
-          "profit = revenue - cost; " +
-          "marginPercent = profit / revenue * 100; " +
-          "efficiencyPercent = profit / cost * 100",
-        storeKey,
-        channel,
-        periodStart: currentFrom.toISOString(),
-        periodEnd: currentTo.toISOString(),
-      },
-    });
-  } catch (error) {
-    console.error("Ошибка расчёта маржи 1С:", error);
-    response.status(502).json({
-      message:
-        error instanceof Error
-          ? error.message
-          : "Не удалось получить маржу из 1С",
-    });
-  }
-});
+app.get("/api/dashboard/onec-margin", analyticsHandler("margin"));
 
 app.get("/api/dashboard/onec-stock", async (request, response) => {
   try {
+    const operationsOnly = request.query.operationsOnly === "true";
+    const from = typeof request.query.from === "string" ? request.query.from : "";
+    const to = typeof request.query.to === "string" ? request.query.to : "";
+    const hasRange = Boolean(from || to);
+    if (hasRange && (!/^\d{4}-\d{2}-\d{2}$/.test(from) ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to)) {
+      return response.status(400).json({ message: "Некорректный диапазон дат склада" });
+    }
+    const rangeFrom = hasRange ? parseOnecDateTime(`${from}T00:00:00`) : null;
+    const rangeTo = hasRange ? parseOnecDateTime(`${to}T00:00:00`) + 86_400_000 : null;
+    if (hasRange && (!Number.isFinite(rangeFrom) || !Number.isFinite(rangeTo) ||
+      rangeTo - rangeFrom > 366 * 86_400_000)) {
+      return response.status(400).json({ message: "Некорректный диапазон дат склада" });
+    }
     const top = Math.min(
       Math.max(Number(request.query.top) || 5000, 1),
       10000,
     );
-    const balancePeriod = request.query.period
+    const balancePeriod = hasRange
+      ? new Date(rangeTo - 1)
+      : request.query.period
       ? new Date(String(request.query.period))
       : new Date();
-    const balances = await onecBalance(
+    const balances = operationsOnly ? [] : await onecBalance(
       "AccumulationRegister_ТоварыНаСкладах",
       {
         period: balancePeriod,
@@ -1512,56 +1641,72 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
       },
     );
 
+    const loadOperation = async (entity, select, top) => {
+      const dateFilter = [
+        "Posted eq true",
+        `Date ge datetime'${toOdataDateTime(rangeFrom)}'`,
+        `Date lt datetime'${toOdataDateTime(rangeTo)}'`,
+      ].join(" and ");
+      const query = (filter, pageTop, skip = 0) => onecGet(entity, {
+        $top: pageTop,
+        $skip: skip,
+        $select: select.join(","),
+        $filter: filter,
+        $orderby: "Date desc",
+      });
+      if (!hasRange) return query("Posted eq true", top);
+
+      async function loadPages(filter) {
+        const items = [];
+        const pageSize = 100;
+        const maxRows = 500;
+        while (items.length < maxRows) {
+          const page = await query(filter, pageSize, items.length);
+          items.push(...page);
+          if (page.length < pageSize) return items;
+        }
+        if ((await query(filter, 1, items.length)).length) {
+          throw new Error(`Слишком много документов ${entity}: выборка превышает 500 записей`);
+        }
+        return items;
+      }
+
+      let items;
+      try {
+        items = await loadPages(dateFilter);
+      } catch (error) {
+        if (!/WHERE|Date|ORDER BY|datetime/i.test(String(error?.message || ""))) throw error;
+        console.warn(`1С не приняла фильтр дат для ${entity}; проверяем документы локально`);
+        items = await loadPages("Posted eq true");
+      }
+      return filterByPeriod(items, "Date", new Date(rangeFrom), new Date(rangeTo - 1));
+    };
     const operationRequests = await Promise.allSettled([
-      onecGet("Document_ПоступлениеТоваров", {
-        $top: 60,
-        $select: [
-          "Ref_Key",
-          "Number",
-          "Date",
-          "Posted",
-          "Контрагент_Key",
-          "Склад_Key",
-          "СуммаДокумента",
-          "Товары",
-        ].join(","),
-        $filter: "Posted eq true",
-        $orderby: "Date desc",
-      }),
-      onecGet("Document_СписаниеТоваров", {
-        $top: 30,
-        $select: [
-          "Ref_Key",
-          "Number",
-          "Date",
-          "Posted",
-          "Склад_Key",
-          "ОснованиеСписания",
-          "Комментарий",
-          "Товары",
-        ].join(","),
-        $filter: "Posted eq true",
-        $orderby: "Date desc",
-      }),
-      onecGet("Document_ПересчетТоваров", {
-        $top: 30,
-        $select: [
-          "Ref_Key",
-          "Number",
-          "Date",
-          "Posted",
-          "Склад_Key",
-          "Статус",
-          "Товары",
-        ].join(","),
-        $filter: "Posted eq true",
-        $orderby: "Date desc",
-      }),
+      loadOperation("Document_ПоступлениеТоваров", [
+          "Ref_Key", "Number", "Date", "Posted", "Контрагент_Key",
+          "Склад_Key", "СуммаДокумента", "Товары",
+        ], 60),
+      loadOperation("Document_СписаниеТоваров", [
+          "Ref_Key", "Number", "Date", "Posted", "Склад_Key",
+          "ОснованиеСписания", "Комментарий", "Товары",
+        ], 30),
+      loadOperation("Document_ПересчетТоваров", [
+          "Ref_Key", "Number", "Date", "Posted", "Склад_Key", "Статус", "Товары",
+        ], 30),
+      loadOperation("Document_ПеремещениеТоваров", [
+          "Ref_Key", "Number", "Date", "Posted", "СкладОтправитель_Key",
+          "СкладПолучатель_Key", "Товары",
+        ], 60),
     ]);
-    const [receiptResult, writeOffResult, recountResult] = operationRequests;
+    if (operationsOnly && operationRequests.every((result) => result.status === "rejected")) {
+      throw new Error("Не удалось загрузить документы склада из 1С: " +
+        operationRequests[0].reason?.message);
+    }
+    const [receiptResult, writeOffResult, recountResult, transferResult] = operationRequests;
     const receipts = receiptResult.status === "fulfilled" ? receiptResult.value : [];
     const writeOffs = writeOffResult.status === "fulfilled" ? writeOffResult.value : [];
     const recounts = recountResult.status === "fulfilled" ? recountResult.value : [];
+    const transfers = transferResult.status === "fulfilled" ? transferResult.value : [];
     const operationErrors = {
       receipts:
         receiptResult.status === "rejected"
@@ -1575,12 +1720,16 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
         recountResult.status === "rejected"
           ? recountResult.reason?.message || "Источник недоступен"
           : "",
+      transfers:
+        transferResult.status === "rejected"
+          ? transferResult.reason?.message || "Источник недоступен"
+          : "",
     };
 
-    const operationLines = [...receipts, ...writeOffs, ...recounts].flatMap(
+    const operationLines = [...receipts, ...writeOffs, ...recounts, ...transfers].flatMap(
       (document) => document.Товары || [],
     );
-    const productKeys = [
+    const productKeys = operationsOnly ? [] : [
       ...balances.map((item) => item.Номенклатура_Key),
       ...operationLines.map((item) => item.Номенклатура_Key),
     ];
@@ -1589,6 +1738,9 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
       ...[...receipts, ...writeOffs, ...recounts].map(
         (document) => document.Склад_Key,
       ),
+      ...transfers.flatMap((document) => [
+        document.СкладОтправитель_Key, document.СкладПолучатель_Key,
+      ]),
     );
     const [rawProducts, warehouses, suppliers, productKinds] = await Promise.all([
       loadReferencesByKeysBatched(
@@ -1613,10 +1765,14 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
         "Catalog_Контрагенты",
         receipts.map((item) => item.Контрагент_Key),
         "Ref_Key,Code,Description,НаименованиеПолное",
-      ),
-      loadProductKindsCatalog(),
+      ).catch((error) => {
+        if (!operationsOnly) throw error;
+        console.warn("Не удалось загрузить контрагентов для документов склада:", error);
+        return [];
+      }),
+      operationsOnly ? Promise.resolve([]) : loadProductKindsCatalog(),
     ]);
-    const productSubcategories = await loadProductSubcategories(rawProducts);
+    const productSubcategories = operationsOnly ? [] : await loadProductSubcategories(rawProducts);
     const products = enrichProductsWithBusinessCategories(
       rawProducts,
       productKinds,
@@ -1624,7 +1780,7 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
     );
     const categories = publicBusinessCategories();
     const latestOperationTimestamp = Math.max(
-      ...[...receipts, ...writeOffs, ...recounts]
+      ...[...receipts, ...writeOffs, ...recounts, ...transfers]
         .map((document) => parseOnecDateTime(document.Date))
         .filter(Number.isFinite),
       0,
@@ -1643,7 +1799,7 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
         subcategories: productSubcategories,
         suppliers,
       },
-      operations: { receipts, writeOffs, recounts },
+      operations: { receipts, writeOffs, recounts, transfers },
       meta: {
         loaded: balances.length,
         requestedAt: new Date().toISOString(),
@@ -1651,7 +1807,9 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
         balancePeriod: balancePeriod.toISOString(),
         latestOperationDate,
         operationFreshness: describeDataFreshness(latestOperationDate),
-        source: "AccumulationRegister_ТоварыНаСкладах/Balance",
+        source: operationsOnly
+          ? "Document_ПоступлениеТоваров, Document_ПеремещениеТоваров"
+          : "AccumulationRegister_ТоварыНаСкладах/Balance",
         operationErrors,
       },
     });
@@ -1666,148 +1824,144 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
   }
 });
 
-app.get("/api/dashboard/onec-reports", async (request, response) => {
-  try {
-    const maxTop = Math.min(
-      Math.max(Number(process.env.ONEC_REPORT_MAX_TOP) || 5000, 1),
-      10000,
-    );
-    const requestedTop = Math.min(
-      Math.max(Number(request.query.top) || 1, 1),
-      maxTop,
-    );
-    const days = Math.min(
-      Math.max(Number(request.query.days) || 60, 1),
-      365,
-    );
-    const from = typeof request.query.from === "string" ? request.query.from : "";
-    const to = typeof request.query.to === "string" ? request.query.to : "";
-    const hasCustomRange =
-      /^\d{4}-\d{2}-\d{2}$/.test(from) &&
-      /^\d{4}-\d{2}-\d{2}$/.test(to);
+async function buildReportsPayload(query) {
+  const maxTop = Math.min(
+    Math.max(Number(process.env.ONEC_REPORT_MAX_TOP) || 5000, 1),
+    10000,
+  );
+  const requestedTop = Math.min(
+    Math.max(Number(query.top) || 1, 1),
+    maxTop,
+  );
+  const days = Math.min(
+    Math.max(Number(query.days) || 60, 1),
+    365,
+  );
+  const from = typeof query.from === "string" ? query.from : "";
+  const to = typeof query.to === "string" ? query.to : "";
+  const hasCustomRange =
+    /^\d{4}-\d{2}-\d{2}$/.test(from) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(to);
 
-    const startedAt = Date.now();
-    const reportResult = hasCustomRange
-      ? await loadReportPagesByRangeCached({
-          limit: null,
-          from,
-          to,
-        })
-      : await loadReportPagesCached({
-          limit: requestedTop + 1,
-          days,
-        });
-    const uniqueItems = uniqueReports(reportResult.items);
-    const truncated = hasCustomRange
-      ? false
-      : reportResult.items.length > requestedTop;
-    const items = uniqueItems
-      .slice(0, hasCustomRange ? undefined : requestedTop)
-      .map((report) => ({
-        ...report,
-        Date: normalizeOnecDateTime(report.Date),
-      }));
-    const latestDate = items[0]?.Date || null;
-    const commonMeta = {
-      loaded: items.length,
-      uniqueDocuments: uniqueItems.length,
-      duplicatesRemoved: reportResult.items.length - uniqueItems.length,
-      days: hasCustomRange ? undefined : days,
-      from: hasCustomRange ? from : undefined,
-      to: hasCustomRange ? to : undefined,
-      latestDate,
-      freshness: describeDataFreshness(latestDate),
-      truncated,
-      cache: reportResult.cache,
-      durationMs: Date.now() - startedAt,
-    };
-
-    if (request.query.references === "false") {
-      return response.json({
-        items,
-        references: {
-          products: [],
-          warehouses: [],
-          categories: [],
-        },
-        meta: {
-          ...commonMeta,
-          referencesLoaded: false,
-        },
+  const startedAt = Date.now();
+  const reportResult = hasCustomRange
+    ? await loadReportPagesByRangeCached({
+        limit: null,
+        from,
+        to,
+      })
+    : await loadReportPagesCached({
+        limit: requestedTop + 1,
+        days,
       });
-    }
+  const reportLoadMs = Date.now() - startedAt;
+  const uniqueItems = uniqueReports(reportResult.items);
+  const truncated = hasCustomRange
+    ? false
+    : reportResult.items.length > requestedTop;
+  const items = uniqueItems
+    .slice(0, hasCustomRange ? undefined : requestedTop)
+    .map((report) => ({
+      ...report,
+      Date: normalizeOnecDateTime(report.Date),
+    }));
+  const latestDate = items[0]?.Date || null;
+  const commonMeta = {
+    loaded: items.length,
+    uniqueDocuments: uniqueItems.length,
+    duplicatesRemoved: reportResult.items.length - uniqueItems.length,
+    days: hasCustomRange ? undefined : days,
+    from: hasCustomRange ? from : undefined,
+    to: hasCustomRange ? to : undefined,
+    latestDate,
+    freshness: describeDataFreshness(latestDate),
+    truncated,
+    cache: reportResult.cache,
+    durationMs: Date.now() - startedAt,
+    reportLoadMs,
+  };
 
-    const productKeys = items.flatMap((report) =>
-      [...(report.Товары || []), ...(report.ВозвращенныеТовары || [])].map(
-        (line) => line.Номенклатура_Key,
-      ),
-    );
-    const warehouseKeys = items.flatMap((report) =>
-      [...(report.Товары || []), ...(report.ВозвращенныеТовары || [])].map(
-        (line) => line.Склад_Key,
-      ),
-    );
-
-    const [rawProducts, warehouses, productKinds] = await Promise.all([
-      loadReferencesByKeys(
-        "Catalog_Номенклатура",
-        productKeys,
-        [
-          "Ref_Key",
-          "Code",
-          "Description",
-          "НаименованиеПолное",
-          "Артикул",
-          "Parent_Key",
-          "ВидНоменклатуры_Key",
-        ].join(","),
-      ),
-      loadReferencesByKeys(
-        "Catalog_Склады",
-        warehouseKeys,
-        [
-          "Ref_Key",
-          "Code",
-          "Description",
-          "ТипСклада",
-          "Магазин_Key",
-        ].join(","),
-      ),
-      loadProductKindsCatalog(),
-    ]);
-    const productSubcategories = await loadProductSubcategories(rawProducts);
-    const products = enrichProductsWithBusinessCategories(
-      rawProducts,
-      productKinds,
-      productSubcategories,
-    );
-    const categories = publicBusinessCategories();
-
-    response.json({
-      items: request.query.references === "only" ? [] : items,
+  if (query.references === "false") {
+    return ({
+      items,
       references: {
-        products,
-        warehouses,
-        categories,
-        productKinds,
-        subcategories: productSubcategories,
+        products: [],
+        warehouses: [],
+        categories: [],
       },
       meta: {
         ...commonMeta,
-        referencesLoaded: true,
+        referencesLoaded: false,
       },
     });
-  } catch (error) {
-    console.error("Ошибка загрузки отчётов 1С:", error);
-
-    response.status(502).json({
-      message:
-        error instanceof Error
-          ? error.message
-          : "Не удалось получить отчёты 1С",
-    });
   }
-});
+
+  const productKeys = items.flatMap((report) =>
+    [...(report.Товары || []), ...(report.ВозвращенныеТовары || [])].map(
+      (line) => line.Номенклатура_Key,
+    ),
+  );
+  const warehouseKeys = items.flatMap((report) =>
+    [...(report.Товары || []), ...(report.ВозвращенныеТовары || [])].map(
+      (line) => line.Склад_Key,
+    ),
+  );
+
+  const [rawProducts, warehouses, productKinds] = await Promise.all([
+    loadReferencesByKeys(
+      "Catalog_Номенклатура",
+      productKeys,
+      [
+        "Ref_Key",
+        "Code",
+        "Description",
+        "НаименованиеПолное",
+        "Артикул",
+        "Parent_Key",
+        "ВидНоменклатуры_Key",
+      ].join(","),
+    ),
+    loadReferencesByKeys(
+      "Catalog_Склады",
+      warehouseKeys,
+      [
+        "Ref_Key",
+        "Code",
+        "Description",
+        "ТипСклада",
+        "Магазин_Key",
+      ].join(","),
+    ),
+    loadProductKindsCatalog(),
+  ]);
+  const productSubcategories = await loadProductSubcategories(rawProducts);
+  const products = enrichProductsWithBusinessCategories(
+    rawProducts,
+    productKinds,
+    productSubcategories,
+  );
+  const referenceLoadMs = Date.now() - startedAt - reportLoadMs;
+  const categories = publicBusinessCategories();
+
+  return ({
+    items: query.references === "only" ? [] : items,
+    references: {
+      products,
+      warehouses,
+      categories,
+      productKinds,
+      subcategories: productSubcategories,
+    },
+    meta: {
+      ...commonMeta,
+      referencesLoaded: true,
+      referenceLoadMs,
+      durationMs: Date.now() - startedAt,
+    },
+  });
+}
+
+app.get("/api/dashboard/onec-reports", analyticsHandler("reports"));
 
 app.get("/api/dashboard/onec-check-analytics", async (request, response) => {
   try {
@@ -1829,17 +1983,20 @@ app.get("/api/dashboard/onec-check-analytics", async (request, response) => {
       /^\d{4}-\d{2}-\d{2}$/.test(to);
     const includePrevious = request.query.includePrevious !== "false";
     const startedAt = Date.now();
-    const reportRecords = hasCustomRange
-      ? uniqueReports(
-          (
-            await loadReportPagesByRangeCached({
-              limit: null,
-              from,
-              to,
-            })
-          ).items,
-        )
-      : [];
+    // Existing reports can enrich archived checks, but their background sync
+    // must not block or trigger the direct Document_ЧекККМ request.
+    const reportSnapshot = hasCustomRange && localAnalytics
+      ? localAnalytics.read("reports", normalizeAnalyticsQuery("reports", {
+          from, to, references: "false",
+        }), { refresh: false })
+      : null;
+    const reportCacheEntry = hasCustomRange && !localAnalytics
+      ? reportCache.get(`range:all:${from}:${to}`)
+      : null;
+    const reportRecords = uniqueReports(
+      reportSnapshot?.payload?.items ||
+      (reportCacheEntry?.expiresAt > Date.now() ? reportCacheEntry.items : []) || [],
+    );
     const analytics = hasCustomRange
       ? await loadCheckAnalyticsRange({
           from,
@@ -1912,4 +2069,10 @@ if (authStore.countUsers() === 0) {
 
 app.listen(port, () => {
   console.log(`3КВАДРАТА API: http://localhost:${port}`);
+  if (localAnalytics) {
+    const timer = setInterval(() => {
+      localAnalytics.refreshRecent();
+    }, localAnalytics.refreshMs);
+    timer.unref();
+  }
 });

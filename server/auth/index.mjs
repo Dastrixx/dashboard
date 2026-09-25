@@ -118,6 +118,7 @@ export function authorizeDashboardApi(request, response, next) {
   if (request.auth.user.role === "manager") return next();
 
   const ownerGetRoutes = new Set([
+    "/api/dashboard/sync-status",
     "/api/dashboard/onec-reports",
     "/api/dashboard/onec-check-analytics",
     "/api/dashboard/onec-product-categories",

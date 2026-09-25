@@ -1,4 +1,5 @@
 import { buildProductRows, percentageChange } from "../sales/analytics";
+import { ONEC_OFFSET_MS, onecCalendarDate, onecRangeBounds } from "../date-range";
 import type {
   OnecCategoryReference,
   OnecProductReference,
@@ -48,9 +49,7 @@ function inRange(report: OnecRetailReport, from: number, to: number) {
 }
 
 function startOfCalendarDay(timestamp: number) {
-  const date = new Date(timestamp);
-  date.setHours(0, 0, 0, 0);
-  return date.getTime();
+  return Math.floor((timestamp + ONEC_OFFSET_MS) / DAY_MS) * DAY_MS - ONEC_OFFSET_MS;
 }
 
 function periodBounds(latestTimestamp: number, days: Period) {
@@ -75,9 +74,9 @@ function buildComparison(
   const duration = days * DAY_MS;
   const bucketSize = duration / bucketCount;
   const buckets = Array.from({ length: bucketCount }, (_, index) => ({
-    label: new Date(currentFrom + index * bucketSize).toLocaleDateString(
+    label: new Date(currentFrom + index * bucketSize + ONEC_OFFSET_MS).toLocaleDateString(
       "ru-RU",
-      { day: "2-digit", month: "2-digit" },
+      { day: "2-digit", month: "2-digit", timeZone: "UTC" },
     ),
     value: 0,
     previousValue: 0,
@@ -186,14 +185,10 @@ export function buildOwnerOverview(
   );
   if (!absoluteLatestTimestamp) return null;
 
-  const customFrom = dateRange
-    ? new Date(`${dateRange.from}T00:00:00`).getTime()
-    : null;
-  const customTo = dateRange
-    ? new Date(`${dateRange.to}T23:59:59.999`).getTime()
-    : null;
-  const customDuration =
-    customFrom !== null && customTo !== null ? customTo - customFrom + 1 : 0;
+  const customBounds = dateRange ? onecRangeBounds(dateRange) : null;
+  const customFrom = customBounds?.currentFrom ?? null;
+  const customTo = customBounds?.currentTo ?? null;
+  const customDuration = customBounds?.duration ?? 0;
   const bounds =
     customFrom !== null &&
     customTo !== null &&
@@ -220,16 +215,19 @@ export function buildOwnerOverview(
     ...current.map((report) => new Date(report.Date).getTime()),
   );
 
-  const activityDates = [...new Set(reports.map((report) => report.Date.slice(0, 10)))]
+  const activityDates = [...new Set(reports.map((report) =>
+    onecCalendarDate(new Date(report.Date).getTime()),
+  ))]
     .sort()
     .reverse();
   const latestDay = activityDates[0];
   const previousDay = activityDates[1];
   const todayReports = reports.filter((report) =>
-    report.Date.startsWith(latestDay),
+    onecCalendarDate(new Date(report.Date).getTime()) === latestDay,
   );
   const previousDayReports = previousDay
-    ? reports.filter((report) => report.Date.startsWith(previousDay))
+    ? reports.filter((report) =>
+        onecCalendarDate(new Date(report.Date).getTime()) === previousDay)
     : [];
   const revenue = reportRevenue(current);
   const previousRevenue = reportRevenue(previous);

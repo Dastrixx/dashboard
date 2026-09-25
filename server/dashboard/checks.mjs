@@ -173,24 +173,40 @@ async function loadCashShiftsForRange(startDate, endDate, limit) {
     `Date ge datetime'${toOdataDateTime(startDate.getTime())}'`,
     `Date lt datetime'${toOdataDateTime(endDate.getTime())}'`,
   ].join(" and ");
-  const shifts = [];
+  async function load(useDateFilter) {
+    const shifts = [];
+    let scanned = 0;
+    while (scanned < limit) {
+      const currentPageSize = Math.min(pageSize, limit - scanned);
+      const page = await onecGet(CASH_SHIFT_ENTITY, {
+        $top: currentPageSize,
+        $skip: scanned,
+        $select: "Ref_Key,Date,DeletionMark,Posted,КоличествоЧеков",
+        $filter: useDateFilter ? filter : "Posted eq true",
+        $orderby: "Date desc",
+      });
+      scanned += page.length;
+      shifts.push(...(useDateFilter ? page : filterByPeriod(
+        page, "Date", startDate, new Date(endDate.getTime() - 1),
+      )));
+      if (page.length < currentPageSize ||
+        (!useDateFilter && page.some((shift) =>
+          parseOnecDateTime(shift.Date) < startDate.getTime()))) break;
+    }
+    return { shifts, truncated: scanned >= limit };
+  }
 
-  while (shifts.length < limit) {
-    const currentPageSize = Math.min(pageSize, limit - shifts.length);
-    const page = await onecGet(CASH_SHIFT_ENTITY, {
-      $top: currentPageSize,
-      $skip: shifts.length,
-      $select: "Ref_Key,Date,DeletionMark,Posted,КоличествоЧеков",
-      $filter: filter,
-      $orderby: "Date desc",
-    });
-    shifts.push(...page);
-    if (page.length < currentPageSize) break;
+  let loaded;
+  try {
+    loaded = await load(true);
+  } catch (error) {
+    if (!/HTTP (400|500)/.test(String(error?.message))) throw error;
+    loaded = await load(false);
   }
 
   return {
-    ...summarizeCashShifts(shifts),
-    truncated: shifts.length >= limit,
+    ...summarizeCashShifts(loaded.shifts),
+    truncated: loaded.truncated,
   };
 }
 
@@ -245,9 +261,10 @@ function buildBuckets(checks, rangeStart, rangeEnd, days) {
       label:
         days === 1
           ? `${index * 4}–${(index + 1) * 4}ч`
-          : new Date(start).toLocaleDateString("ru-RU", {
+          : new Date(`${toOdataDateTime(start).slice(0, 10)}T00:00:00Z`).toLocaleDateString("ru-RU", {
               day: "2-digit",
               month: "2-digit",
+              timeZone: "UTC",
             }),
       checks: 0,
       revenue: 0,
@@ -429,7 +446,11 @@ async function scanCheckHeaders({
     limit,
   );
   const matched = new Map();
+  const matchedReportKeys = new Set();
   let scanned = 0;
+  let reachedPastRange = false;
+  let lastTimestamp = Infinity;
+  let absoluteLatestDate = null;
 
   while (scanned < scanLimit && matched.size < limit) {
     const page = await onecGet(CHECK_ENTITY, {
@@ -439,9 +460,15 @@ async function scanCheckHeaders({
       $orderby: "Date desc",
     });
     if (!page.length) break;
+    absoluteLatestDate ||= page[0].Date;
 
     page.forEach((check) => {
       const timestamp = parseOnecDateTime(check.Date);
+      if (!Number.isFinite(timestamp) || timestamp > lastTimestamp) {
+        throw new Error("1С нарушила сортировку чеков по дате");
+      }
+      lastTimestamp = timestamp;
+      if (timestamp < currentFrom) reachedPastRange = true;
       const matchesDate =
         timestamp >= currentFrom && timestamp <= currentTo;
       const matchesReport = reportKeys.has(
@@ -449,9 +476,12 @@ async function scanCheckHeaders({
       );
 
       if ((matchesDate || matchesReport) && isCompletedCheck(check)) {
+        if (matchesReport) {
+          matchedReportKeys.add(check.ОтчетОРозничныхПродажах_Key);
+        }
         matched.set(check.Ref_Key, {
           ...check,
-          Date: matchesReport
+          Date: matchesReport && !matchesDate
             ? reportDates.get(check.ОтчетОРозничныхПродажах_Key) ||
               check.Date
             : check.Date,
@@ -459,13 +489,72 @@ async function scanCheckHeaders({
       }
     });
     scanned += page.length;
-    if (page.length < pageSize) break;
+    if (page.length < pageSize || reachedPastRange) break;
   }
 
   return {
     checks: [...matched.values()],
     scanned,
-    truncated: scanned >= scanLimit,
+    absoluteLatestDate,
+    matchedReports: matchedReportKeys.size,
+    truncated: (scanned >= scanLimit && !reachedPastRange) || matched.size >= limit,
+  };
+}
+
+async function loadChecksByReports(reportRecords, limit) {
+  const pageSize = Math.min(
+    Math.max(Number(process.env.ONEC_CHECK_PAGE_SIZE || 100), 1),
+    100,
+  );
+  const matched = new Map();
+  let matchedReports = 0;
+  let failedReports = 0;
+  let truncated = false;
+
+  for (const report of reportRecords) {
+    if (matched.size >= limit) {
+      truncated = true;
+      break;
+    }
+    if (!GUID_PATTERN.test(report.Ref_Key || "")) continue;
+    let scanned = 0;
+    let matchedThisReport = false;
+    try {
+      while (scanned < limit && matched.size < limit) {
+        const size = Math.min(pageSize, limit - matched.size, limit - scanned);
+        if (size <= 0) { truncated = true; break; }
+        const page = await onecGet(CHECK_ENTITY, {
+          $top: size,
+          $skip: scanned,
+          $select: CHECK_SELECT,
+          $filter: checkReportFilter(report.Ref_Key),
+        });
+        for (const check of page) {
+          if (!isCompletedCheck(check)) continue;
+          matchedThisReport = true;
+          matched.set(check.Ref_Key, { ...check, Date: report.Date || check.Date });
+        }
+        scanned += page.length;
+        if (page.length < size) break;
+      }
+      if (matchedThisReport) matchedReports += 1;
+    } catch (error) {
+      failedReports += 1;
+      console.warn("Не удалось загрузить чеки розничного отчёта:",
+        error instanceof Error ? error.message : error);
+      // Unsupported report-key filtering is a property of this OData
+      // installation; scanning once below is safer than retrying every key.
+      break;
+    }
+  }
+
+  return {
+    checks: [...matched.values()].slice(0, limit),
+    matchedReports,
+    failedReports,
+    truncated,
+    scanned: 0,
+    documentDetailsAvailable: failedReports === 0 && !truncated && matched.size > 0,
   };
 }
 
@@ -477,7 +566,7 @@ async function computeCheckAnalyticsRange({
   reportRecords = [],
 }) {
   const currentFrom = parseOnecDateTime(`${from}T00:00:00`);
-  const currentTo = parseOnecDateTime(`${to}T23:59:59`);
+  const currentTo = parseOnecDateTime(`${to}T00:00:00`) + 86_400_000 - 1;
 
   if (
     !Number.isFinite(currentFrom) ||
@@ -502,49 +591,66 @@ async function computeCheckAnalyticsRange({
   let registerSummary = null;
   let registerTruncated = false;
   let cashShiftSummary = null;
-  const registerPromise = loadSalesDocuments({
-    startDate: new Date(currentFrom),
-    endDate: new Date(currentTo + 1),
-    limit,
-  }).then(
-    (result) => ({ result, error: null }),
-    (error) => ({ result: null, error }),
-  );
-  const cashShiftPromise = loadCashShiftsForRange(
-    new Date(currentFrom),
-    new Date(currentTo + 1),
-    limit,
-  ).then(
-    (result) => ({ result, error: null }),
-    (error) => ({ result: null, error }),
-  );
+  try {
+    loaded = { ...loaded, ...(await scanCheckHeaders({
+      reportRecords,
+      currentFrom,
+      currentTo,
+      limit,
+    })) };
+  } catch (error) {
+    loadError = error;
+    console.warn(
+      "Не удалось загрузить документы чеков:",
+      error instanceof Error ? error.message : error,
+    );
+  }
 
-  if (hasRetailReports) {
+  if (hasRetailReports && (!loaded.checks.length || loadError)) {
     try {
+      const linked = await loadChecksByReports(reportRecords, limit);
       loaded = {
         ...loaded,
-        ...(await scanCheckHeaders({
-          reportRecords,
-          currentFrom,
-          currentTo,
-          limit,
-        })),
+        ...linked,
+        scanned: loaded.scanned,
+        truncated: loaded.truncated || linked.truncated,
       };
     } catch (error) {
-      loadError = error;
-      console.warn(
-        "Не удалось загрузить чеки, связанные " +
-          "с розничными отчётами:",
-        error instanceof Error ? error.message : error,
-      );
+      loadError ||= error;
+      console.warn("Не удалось загрузить чеки по розничным отчётам:",
+        error instanceof Error ? error.message : error);
     }
   }
+
+  // Reading the sales register and cash shifts is expensive on this 1C
+  // installation. Only use them when check documents are unavailable.
+  const needsFallback = loaded.checks.length === 0;
+  const registerPromise = needsFallback
+    ? loadSalesDocuments({
+        startDate: new Date(currentFrom),
+        endDate: new Date(currentTo + 1),
+        limit,
+      }).then(
+        (result) => ({ result, error: null }),
+        (error) => ({ result: null, error }),
+      )
+    : Promise.resolve({ result: null, error: null });
+  const cashShiftPromise = needsFallback
+    ? loadCashShiftsForRange(
+        new Date(currentFrom),
+        new Date(currentTo + 1),
+        limit,
+      ).then(
+        (result) => ({ result, error: null }),
+        (error) => ({ result: null, error }),
+      )
+    : Promise.resolve({ result: null, error: null });
 
   const registerLoad = await registerPromise;
   if (registerLoad.result) {
     registerSummary = summarizeSalesDocuments(registerLoad.result.rows);
     registerTruncated = registerLoad.result.truncated;
-  } else {
+  } else if (registerLoad.error) {
     loadError ||= registerLoad.error;
     console.warn(
       "Не удалось восстановить чеки из регистра продаж:",
@@ -557,7 +663,7 @@ async function computeCheckAnalyticsRange({
   const cashShiftLoad = await cashShiftPromise;
   if (cashShiftLoad.result) {
     cashShiftSummary = cashShiftLoad.result;
-  } else {
+  } else if (cashShiftLoad.error) {
     loadError ||= cashShiftLoad.error;
     console.warn(
       "Не удалось восстановить количество чеков из кассовых смен:",
@@ -567,7 +673,17 @@ async function computeCheckAnalyticsRange({
     );
   }
 
-  const certificatePaymentKeys = await loadCertificatePaymentKeys();
+  if (!loaded.checks.length && !registerLoad.result && !cashShiftLoad.result) {
+    throw loadError || new Error("Не удалось получить чеки из 1С");
+  }
+  if (!loaded.checks.length && !registerSummary?.totalChecks &&
+      !cashShiftSummary?.checks) {
+    if (loaded.truncated) {
+      throw new Error(`Проверено ${loaded.scanned} чеков 1С, но дата ${from} ` +
+        "ещё не достигнута. Увеличьте ONEC_CHECK_SCAN_LIMIT для полного периода.");
+    }
+    if (loadError) throw loadError;
+  }
 
   const current = loaded.checks.filter((check) => {
     const timestamp = parseOnecDateTime(check.Date);
@@ -581,6 +697,10 @@ async function computeCheckAnalyticsRange({
     : [];
   const days = Math.max(Math.round(duration / DAY_MS), 1);
 
+  const documentDetailsAvailable = loaded.documentDetailsAvailable === true;
+  const certificatePaymentKeys = documentDetailsAvailable
+    ? await loadCertificatePaymentKeys()
+    : new Set();
   const documentSummary = summarizeChecks(current, certificatePaymentKeys);
   const reportSummary = hasRetailReports
     ? summarizeRetailReports(reportRecords, documentSummary.checks)
@@ -590,10 +710,7 @@ async function computeCheckAnalyticsRange({
     Boolean(registerSummary?.totalChecks);
   const usedCashShiftFallback =
     !usedRegisterFallback && Number(cashShiftSummary?.checks) > 0;
-  const documentDetailsAvailable = usedRegisterFallback
-    ? documentSummary.totalChecks === registerSummary.totalChecks &&
-      !loaded.truncated
-    : documentSummary.totalChecks > 0;
+  const seriesAvailable = documentSummary.totalChecks > 0 && !loaded.truncated;
   const currentSummary = documentSummary.totalChecks > 0
     ? {
         ...documentSummary,
@@ -633,13 +750,16 @@ async function computeCheckAnalyticsRange({
   return {
     current: currentSummary,
     previous: summarizeChecks(previous, certificatePaymentKeys),
-    series: documentDetailsAvailable
+    series: seriesAvailable
       ? buildBuckets(current, currentFrom, currentTo + 1, days)
       : [],
     periodStart: new Date(currentFrom).toISOString(),
     periodEnd: new Date(currentTo).toISOString(),
     latestDate: latestCheckTimestamp
       ? new Date(latestCheckTimestamp).toISOString()
+      : null,
+    absoluteLatestDate: loaded.absoluteLatestDate
+      ? new Date(parseOnecDateTime(loaded.absoluteLatestDate)).toISOString()
       : null,
     loaded: usedRegisterFallback || usedCashShiftFallback
       ? currentSummary.totalChecks
@@ -649,11 +769,13 @@ async function computeCheckAnalyticsRange({
       registerTruncated ||
       Boolean(cashShiftSummary?.truncated),
     dataAvailable:
-      !hasRetailReports ||
+      Boolean(loaded.checks.length) ||
+      Boolean(registerLoad.result) ||
+      Boolean(cashShiftLoad.result) ||
       current.length > 0 ||
       usedRegisterFallback ||
       usedCashShiftFallback,
-    seriesAvailable: documentDetailsAvailable,
+    seriesAvailable,
     documentDetailsAvailable,
     requestedReports: reportRecords.length,
     matchedReports: loaded.matchedReports,

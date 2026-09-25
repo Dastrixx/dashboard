@@ -140,11 +140,15 @@ export function CheckAnalyticsPanel({
           {!analytics.latestDate && analytics.current.totalChecks === 0 && (
             <div className="onec-reference-warning" role="status">
               <strong>
-                В Document_ЧекККМ нет чеков за выбранный диапазон.
+                OData 1С не вернула чеки за выбранный диапазон.
               </strong>
               <span>
-                Продажи продолжают отображаться по
-                проведённым документам «Отчёт о розничных продажах».
+                Проверено документов: {number.format(analytics.scannedChecks || 0)}.
+                {analytics.absoluteLatestDate && (
+                  <> Последний доступный через OData чек: {new Date(
+                    analytics.absoluteLatestDate,
+                  ).toLocaleString("ru-RU")}.</>
+                )}
               </span>
             </div>
           )}

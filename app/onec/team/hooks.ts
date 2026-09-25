@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import type { MarginAnalyticsResponse } from "../sales/types";
+import type { SalesDateRange } from "../sales/types";
 import type { SellerPayload } from "../types";
 import {
   fetchTeamData,
+  fetchTeamMargin,
   fetchTeamPlan,
   updateTeamPlan,
 } from "./api";
@@ -12,9 +14,10 @@ type TeamQuery = {
   storeKey: string;
   period: Period;
   channel: SalesChannel;
+  dateRange?: SalesDateRange | null;
 };
 
-export function useTeamData({ storeKey, period, channel }: TeamQuery) {
+export function useTeamData({ storeKey, period, channel, dateRange }: TeamQuery) {
   const [payload, setPayload] = useState<SellerPayload>({});
   const [margin, setMargin] = useState<
     MarginAnalyticsResponse["items"] | null
@@ -33,13 +36,11 @@ export function useTeamData({ storeKey, period, channel }: TeamQuery) {
         setMarginError("");
 
         const result = await fetchTeamData(
-          { storeKey, period, channel },
+          { storeKey, period, channel, dateRange },
           controller.signal,
         );
 
-        setPayload(result.payload);
-        setMargin(result.margin);
-        setMarginError(result.marginError);
+        if (!controller.signal.aborted) setPayload(result);
       } catch (cause) {
         if (!isAbortError(cause)) {
           setError(
@@ -53,9 +54,28 @@ export function useTeamData({ storeKey, period, channel }: TeamQuery) {
       }
     }
 
+    async function loadMargin() {
+      try {
+        setMargin(null);
+        const result = await fetchTeamMargin(
+          { storeKey, period, channel, dateRange },
+          controller.signal,
+        );
+        if (!controller.signal.aborted) {
+          setMargin(result.margin);
+          setMarginError(result.marginError);
+        }
+      } catch (cause) {
+        if (!isAbortError(cause) && !controller.signal.aborted) {
+          setMarginError(errorMessage(cause, "Не удалось получить маржу из 1С"));
+        }
+      }
+    }
+
     void load();
+    void loadMargin();
     return () => controller.abort();
-  }, [channel, period, storeKey]);
+  }, [channel, period, storeKey, dateRange]);
 
   return {
     payload,

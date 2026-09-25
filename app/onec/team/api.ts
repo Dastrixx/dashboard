@@ -1,5 +1,7 @@
+import { fetchLocalAnalytics } from "../local-api";
 import { API_URL } from "../shared";
 import type { MarginAnalyticsResponse } from "../sales/types";
+import type { SalesDateRange } from "../sales/types";
 import type { SellerPayload } from "../types";
 import type { Period, SalesChannel } from "./types";
 
@@ -7,6 +9,7 @@ type TeamQuery = {
   storeKey: string;
   period: Period;
   channel: SalesChannel;
+  dateRange?: SalesDateRange | null;
 };
 
 type TeamPlanPayload = {
@@ -16,8 +19,7 @@ type TeamPlanPayload = {
   message?: string;
 };
 
-export type TeamDataResult = {
-  payload: SellerPayload;
+export type TeamMarginResult = {
   margin: MarginAnalyticsResponse["items"] | null;
   marginError: string;
 };
@@ -26,7 +28,11 @@ export async function fetchTeamPlan(
   query: TeamQuery,
   signal: AbortSignal,
 ) {
-  const response = await fetch(buildUrl("/api/dashboard/team-plan", query), {
+  const response = await fetch(buildUrl("/api/dashboard/team-plan", {
+    storeKey: query.storeKey,
+    period: query.period,
+    channel: query.channel,
+  }), {
     signal,
     credentials: "include",
     cache: "no-store",
@@ -39,30 +45,33 @@ export async function fetchTeamPlan(
 export async function fetchTeamData(
   query: TeamQuery,
   signal: AbortSignal,
-): Promise<TeamDataResult> {
+): Promise<SellerPayload> {
   const sellerUrl = buildUrl("/api/dashboard/onec-consultants", {
     days: query.period,
     channel: query.channel,
+    ...(query.dateRange ?? {}),
   });
+  const sellerResponse = await fetch(sellerUrl, requestOptions(signal));
+  const payload = await readJson<SellerPayload>(sellerResponse);
+  ensureSuccessful(sellerResponse, payload.message);
+  return payload;
+}
+
+export async function fetchTeamMargin(
+  query: TeamQuery,
+  signal: AbortSignal,
+): Promise<TeamMarginResult> {
   const marginUrl = buildUrl("/api/dashboard/onec-margin", {
     days: query.period,
     storeKey: query.storeKey,
     channel: query.channel,
+    ...(query.dateRange ?? {}),
   });
 
-  const [sellerResponse, marginResponse] = await Promise.all([
-    fetch(sellerUrl, requestOptions(signal)),
-    fetch(marginUrl, requestOptions(signal)),
-  ]);
-  const [payload, marginPayload] = await Promise.all([
-    readJson<SellerPayload>(sellerResponse),
-    readJson<MarginAnalyticsResponse>(marginResponse),
-  ]);
-
-  ensureSuccessful(sellerResponse, payload.message);
+  const marginResponse = await fetchLocalAnalytics(marginUrl, requestOptions(signal));
+  const marginPayload = await readJson<MarginAnalyticsResponse>(marginResponse);
 
   return {
-    payload,
     margin: marginResponse.ok ? marginPayload.items ?? null : null,
     marginError: marginResponse.ok
       ? ""

@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { rollingDateRange } from "./sales/config";
+import type { SalesDateRange } from "./sales/types";
 import { DataState, MissingSource } from "./shared";
 import { buildSellerChart, buildTeamView } from "./team/analytics";
 import { TeamHeader } from "./team/header";
@@ -13,13 +15,16 @@ import type { SellerPayload } from "./types";
 
 export function OnecTeam() {
   const [period, setPeriod] = useState<Period>(30);
+  const [dateFrom, setDateFrom] = useState(() => rollingDateRange(30).from);
+  const [dateTo, setDateTo] = useState(() => rollingDateRange(30).to);
+  const [dateRange, setDateRange] = useState<SalesDateRange | null>(null);
   const [storeKey, setStoreKey] = useState("all");
   const [channel, setChannel] = useState<SalesChannel>("all");
   const [selectedKey, setSelectedKey] = useState("");
 
-  const query = { storeKey, period, channel };
+  const query = { storeKey, period, channel, dateRange };
   const data = useTeamData(query);
-  const teamPlan = useTeamPlan(query);
+  const teamPlan = useTeamPlan({ storeKey, period, channel });
 
   const view = useMemo(
     () => buildTeamView(data.payload, storeKey),
@@ -28,7 +33,9 @@ export function OnecTeam() {
   const selected =
     view.rows.find((seller) => seller.key === selectedKey) ?? view.rows[0];
   const chart = useMemo(() => buildSellerChart(selected), [selected]);
-  const planPercent = teamPlan.plan
+  const fallbackScope = data.payload.meta?.scope === "all";
+  const showPlan = !dateRange && !fallbackScope;
+  const planPercent = showPlan && teamPlan.plan
     ? (view.revenue / teamPlan.plan) * 100
     : 0;
 
@@ -48,16 +55,36 @@ export function OnecTeam() {
         stores={view.stores}
         storeKey={storeKey}
         period={period}
+        dateFilter={{
+          from: dateFrom,
+          to: dateTo,
+          appliedRange: dateRange,
+          canApply: Boolean(dateFrom && dateTo && dateFrom <= dateTo),
+          onFromChange: setDateFrom,
+          onToChange: setDateTo,
+          onApply: () => setDateRange({ from: dateFrom, to: dateTo }),
+        }}
         channel={channel}
         onStoreChange={setStoreKey}
-        onPeriodChange={setPeriod}
+        onPeriodChange={(value) => { setPeriod(value); setDateRange(null); }}
         onChannelChange={setChannel}
       />
+
+      {fallbackScope && (
+        <div className="onec-reference-warning" role="status">
+          Продажи взяты из доступных розничных отчётов 1С: в чеках продавец не указан.
+          {data.payload.meta?.periodStart && data.payload.meta?.periodEnd && (
+            <> Даты продаж: {data.payload.meta.periodStart.slice(0, 10)} — {data.payload.meta.periodEnd.slice(0, 10)}.</>
+          )}
+          {" "}Период сверху может не совпадать с датами этой выборки.
+        </div>
+      )}
 
       <TeamSummary
         view={view}
         channel={channel}
-        plan={teamPlan.plan}
+        plan={showPlan ? teamPlan.plan : 0}
+        showPlan={showPlan}
         planPercent={planPercent}
         margin={data.margin}
         marginError={data.marginError}
@@ -69,7 +96,7 @@ export function OnecTeam() {
         selectedKey={selected?.key ?? ""}
         chart={chart}
         channel={channel}
-        plan={teamPlan.plan}
+        plan={showPlan ? teamPlan.plan : 0}
         onSellerChange={setSelectedKey}
       />
 
@@ -79,6 +106,10 @@ export function OnecTeam() {
         channel={channel}
         plan={teamPlan.plan}
         planPercent={planPercent}
+        comparable={showPlan}
+        salesPeriod={data.payload.meta?.periodStart && data.payload.meta?.periodEnd
+          ? `${data.payload.meta.periodStart.slice(0, 10)} — ${data.payload.meta.periodEnd.slice(0, 10)}`
+          : undefined}
         planInput={teamPlan.planInput}
         planLoading={teamPlan.loading}
         planSaving={teamPlan.saving}

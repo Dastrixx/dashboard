@@ -8,6 +8,7 @@ type Props = {
   channel: SalesChannel;
   plan: number;
   planPercent: number;
+  showPlan?: boolean;
   margin: MarginAnalyticsResponse["items"] | null;
   marginError: string;
 };
@@ -17,6 +18,7 @@ export function TeamSummary({
   channel,
   plan,
   planPercent,
+  showPlan = true,
   margin,
   marginError,
 }: Props) {
@@ -55,7 +57,7 @@ export function TeamSummary({
         value={view.checks ? money.format(view.averageCheck) : "—"}
         note="продажи / количество чеков"
       />
-      <PlanKpi plan={plan} percent={planPercent} />
+      {showPlan && <PlanKpi plan={plan} percent={planPercent} />}
       <Kpi
         label="Маржа"
         value={hasMargin ? `${activeMargin.marginPercent.toFixed(1)}%` : "—"}

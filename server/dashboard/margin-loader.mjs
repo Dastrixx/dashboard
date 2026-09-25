@@ -213,27 +213,25 @@ export async function loadMarginPeriod(
 ) {
   const dimensions = [
     "Магазин",
-    "Склад",
-    "Номенклатура",
-    "Характеристика",
     ...(channel === "all" ? [] : ["ЗаказПокупателя"]),
   ];
+  const maxGroups = channel === "all" ? 1_000 : MAX_GROUPED_ROWS;
   const rows = await onecTurnovers(SALES_REGISTER, {
     startPeriod: startDate,
     endPeriod: endDate,
     dimensions: dimensions.join(","),
-    top: MAX_GROUPED_ROWS,
+    top: maxGroups + 1,
     select: [
       "Магазин_Key",
-      "Склад_Key",
-      "Номенклатура_Key",
-      "Характеристика_Key",
       ...(channel === "all" ? [] : ["ЗаказПокупателя_Key"]),
       "СтоимостьTurnover",
       "СтоимостьБезСкидокTurnover",
       "ор_СебестоимостьTurnover",
     ].join(","),
   });
+  if (rows.length > maxGroups) {
+    throw new Error("Слишком много групп оборотов для расчёта маржи");
+  }
   const scopedRows = filterRows(rows, storeKey, channel);
   const summary = summarizeMarginRows(scopedRows);
 

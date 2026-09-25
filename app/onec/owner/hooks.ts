@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { fetchLocalAnalytics } from "../local-api";
+
+import { useEffect, useMemo, useRef, useState } from "react";
 import { API_URL } from "../shared";
+import { onecRollingRange } from "../date-range";
 import { loadCheckAnalytics } from "../sales/check-api";
 import { previousDateRange } from "../sales/config";
 import type {
@@ -34,24 +37,8 @@ async function readJson<T>(response: Response): Promise<T> {
   return payload;
 }
 
-function formatQueryDate(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
-}
-
 function rollingDateRange(days: Period, timestamp: number): OwnerDateRange {
-  const to = new Date(timestamp);
-  const from = new Date(to);
-  from.setHours(0, 0, 0, 0);
-  from.setDate(from.getDate() - (days - 1));
-
-  return {
-    from: formatQueryDate(from),
-    to: formatQueryDate(to),
-  };
+  return onecRollingRange(days, timestamp);
 }
 
 export function useOwnerOverview(
@@ -72,6 +59,7 @@ export function useOwnerOverview(
   const [referencesError, setReferencesError] = useState("");
   const [checksError, setChecksError] = useState("");
   const [marginError, setMarginError] = useState("");
+  const loadedRanges = useRef<Record<string, string>>({});
 
   const effectiveRange = useMemo(
     () => dateRange || rollingDateRange(period, refreshedAt),
@@ -81,36 +69,48 @@ export function useOwnerOverview(
   useEffect(() => {
     const controller = new AbortController();
     let refreshTimer: number | undefined;
+    const rangeKey = `${effectiveRange.from}:${effectiveRange.to}`;
 
     async function loadReports() {
       try {
-        setReportsLoading(true);
+        setReportsLoading(loadedRanges.current.reports !== rangeKey);
         setReportsError("");
         const loadRange = async (range: OwnerDateRange) => {
           const reportQuery = new URLSearchParams(range);
-          const response = await fetch(
+          const response = await fetchLocalAnalytics(
             `${API_URL}/api/dashboard/onec-reports?${reportQuery}&references=false`,
             { credentials: "include", signal: controller.signal },
           );
           return readJson<OwnerReportsResponse>(response);
         };
-        const [current, previous] = await Promise.all([
-          loadRange(effectiveRange),
-          loadRange(previousDateRange(effectiveRange)),
-        ]);
+        const current = await loadRange(effectiveRange);
         if (controller.signal.aborted) return;
         const reportsByKey = new Map<string, OnecRetailReport>();
-        [...(current.items || []), ...(previous.items || [])].forEach(
+        (current.items || []).forEach(
           (report) => reportsByKey.set(report.Ref_Key, report),
         );
         setReports([...reportsByKey.values()]);
+        loadedRanges.current.reports = rangeKey;
+        void loadRange(previousDateRange(effectiveRange)).then((previous) => {
+          if (controller.signal.aborted) return;
+          const combined = new Map(reportsByKey);
+          (previous.items || []).forEach((report) =>
+            combined.set(report.Ref_Key, report));
+          setReports([...combined.values()]);
+        }).catch((error) => {
+          if (!controller.signal.aborted) console.warn(
+            "Не удалось загрузить предыдущий период владельца:", error,
+          );
+        });
       } catch (error) {
         if (isAbortError(error)) return;
-        setReportsError(
-          error instanceof Error
-            ? error.message
-            : "Не удалось загрузить отчёты 1С",
-        );
+        if (loadedRanges.current.reports !== rangeKey) {
+          setReportsError(
+            error instanceof Error
+              ? error.message
+              : "Не удалось загрузить отчёты 1С",
+          );
+        }
       } finally {
         if (!controller.signal.aborted) setReportsLoading(false);
       }
@@ -118,13 +118,13 @@ export function useOwnerOverview(
 
     async function loadReferences() {
       try {
-        setReferencesLoading(true);
+        setReferencesLoading(loadedRanges.current.references !== rangeKey);
         setReferencesError("");
         const reportQuery = new URLSearchParams({
           from: effectiveRange.from,
           to: effectiveRange.to,
         });
-        const response = await fetch(
+        const response = await fetchLocalAnalytics(
           `${API_URL}/api/dashboard/onec-reports?${reportQuery}&references=only`,
           { credentials: "include", signal: controller.signal },
         );
@@ -140,13 +140,16 @@ export function useOwnerOverview(
             ? payload.references.categories
             : [],
         );
+        loadedRanges.current.references = rangeKey;
       } catch (error) {
         if (isAbortError(error)) return;
-        setReferencesError(
-          error instanceof Error
-            ? error.message
-            : "Не удалось загрузить категории товаров",
-        );
+        if (loadedRanges.current.references !== rangeKey) {
+          setReferencesError(
+            error instanceof Error
+              ? error.message
+              : "Не удалось загрузить категории товаров",
+          );
+        }
       } finally {
         if (!controller.signal.aborted) setReferencesLoading(false);
       }
@@ -154,27 +157,30 @@ export function useOwnerOverview(
 
     async function loadMargin() {
       try {
-        setMarginLoading(true);
+        setMarginLoading(loadedRanges.current.margin !== rangeKey);
         setMarginError("");
         const query = new URLSearchParams({
           from: effectiveRange.from,
           to: effectiveRange.to,
           includePrevious: "false",
         });
-        const response = await fetch(
+        const response = await fetchLocalAnalytics(
           `${API_URL}/api/dashboard/onec-margin?${query}`,
           { signal: controller.signal, credentials: "include" },
         );
         const payload = await readJson<MarginAnalyticsResponse>(response);
         setMargin(payload.items || null);
+        loadedRanges.current.margin = rangeKey;
       } catch (error) {
         if (isAbortError(error)) return;
-        setMargin(null);
-        setMarginError(
-          error instanceof Error
-            ? error.message
-            : "Не удалось загрузить маржу 1С",
-        );
+        if (loadedRanges.current.margin !== rangeKey) {
+          setMargin(null);
+          setMarginError(
+            error instanceof Error
+              ? error.message
+              : "Не удалось загрузить маржу 1С",
+          );
+        }
       } finally {
         if (!controller.signal.aborted) setMarginLoading(false);
       }
@@ -182,7 +188,7 @@ export function useOwnerOverview(
 
     async function loadChecks() {
       try {
-        setChecksLoading(true);
+        setChecksLoading(loadedRanges.current.checks !== rangeKey);
         setChecksError("");
         const query = new URLSearchParams({
           from: effectiveRange.from,
@@ -194,25 +200,27 @@ export function useOwnerOverview(
         if (controller.signal.aborted) return;
 
         setChecks(analytics);
+        loadedRanges.current.checks = rangeKey;
       } catch (error) {
-        if (isAbortError(error)) return;
-        setChecks(null);
-        setChecksError(
-          error instanceof Error
-            ? error.message
-            : "Не удалось загрузить чеки 1С",
-        );
+        if (controller.signal.aborted || isAbortError(error)) return;
+        if (loadedRanges.current.checks !== rangeKey) {
+          setChecks(null);
+          setChecksError(
+            error instanceof Error
+              ? error.message
+              : "Не удалось загрузить чеки 1С",
+          );
+        }
       } finally {
         if (!controller.signal.aborted) setChecksLoading(false);
       }
     }
 
-    void Promise.allSettled([
-      loadReports(),
-      loadReferences(),
-      loadChecks(),
-      loadMargin(),
-    ]).then(() => {
+    // Чеки могут ждать 1С, поэтому не задерживают локальные продажи и маржу.
+    void loadChecks();
+    void loadReports().then(() =>
+      Promise.allSettled([loadReferences(), loadMargin()]),
+    ).then(() => {
       if (controller.signal.aborted) return;
 
       refreshTimer = window.setTimeout(
