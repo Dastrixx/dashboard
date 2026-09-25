@@ -43,7 +43,7 @@ import {
   loadCheckAnalyticsRange,
 } from "./dashboard/checks.mjs";
 import { loadMarginPeriod } from "./dashboard/margin-loader.mjs";
-import { scanReportsByRange } from "./dashboard/report-range.mjs";
+import { loadReportsByRange } from "./dashboard/report-range.mjs";
 import { summarizeMarginRows } from "./dashboard/margin.mjs";
 import {
   parseSalesChannel,
@@ -328,17 +328,27 @@ async function loadReportPagesByRange({ limit, from, to }) {
     Math.max(Number(process.env.ONEC_REPORT_MAX_SCAN) || 10_000, 100),
     100_000,
   );
-  const reports = await scanReportsByRange({
+  const reports = await loadReportsByRange({
     fromTimestamp,
     endExclusive,
     pageSize,
     maxScanned,
-    getPage: (top, skip) => onecGet(RETAIL_REPORT_ENTITY, {
+    getPage: (filter, top, skip) => onecGet(RETAIL_REPORT_ENTITY, {
       $top: top,
       $skip: skip,
       $select: RETAIL_REPORT_SELECT,
+      $filter: filter,
+      $orderby: "Date desc",
+    }),
+    getHeaderPage: (top, skip) => onecGet(RETAIL_REPORT_ENTITY, {
+      $top: top,
+      $skip: skip,
+      $select: "Ref_Key,Date,Posted",
       $filter: "Posted eq true",
       $orderby: "Date desc",
+    }),
+    getByKey: (key) => onecGetByKey(RETAIL_REPORT_ENTITY, key, {
+      $select: RETAIL_REPORT_SELECT,
     }),
   });
   return limit === null ? reports : reports.slice(0, limit);

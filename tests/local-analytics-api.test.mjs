@@ -54,7 +54,9 @@ test("authenticated API reads persisted reports and margin when 1C is unavailabl
               )
             : []
       : path.includes("Document_ОтчетОРозничныхПродажах")
-        ? [{ Ref_Key: "12345678-1234-1234-1234-123456789abc", Date: "2026-01-01T12:00:00", Posted: true, СуммаДокумента: 120, Товары: [{ Продавец_Key: "12345678-1234-1234-1234-123456789abc", Сумма: 120, Количество: 1 }] }]
+        ? new URL(request.url, "http://localhost").searchParams.get("$filter")?.includes("2026-07-01")
+          ? [{ Ref_Key: "july-report", Date: "2026-07-15T12:00:00", Posted: true, СуммаДокумента: 77, Товары: [] }]
+          : [{ Ref_Key: "12345678-1234-1234-1234-123456789abc", Date: "2026-01-01T12:00:00", Posted: true, СуммаДокумента: 120, Товары: [{ Продавец_Key: "12345678-1234-1234-1234-123456789abc", Сумма: 120, Количество: 1 }] }]
         : [];
     response.end(JSON.stringify({ value: rows }));
   });
@@ -137,7 +139,12 @@ test("authenticated API reads persisted reports and margin when 1C is unavailabl
     assert.equal(checks.items.documentDetailsAvailable, true);
     assert.equal(checks.items.scannedChecks, 0);
     assert.equal((await ready(margin)).items.current.profit, 40);
+    const julyReports = `${base}/api/dashboard/onec-reports?from=2026-07-01&to=2026-07-31&references=false`;
+    const july = await ready(julyReports);
+    assert.equal(july.items[0].СуммаДокумента, 77);
+    assert.equal(july.items[0].Date, "2026-07-15T06:00:00.000Z");
     reportsOffline = true;
+    assert.equal((await fetch(julyReports, { headers })).status, 200);
     const augustResponse = await fetch(
       `${base}/api/dashboard/onec-check-analytics?from=2026-08-01&to=2026-08-31&includePrevious=false`,
       { headers },
