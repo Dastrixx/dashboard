@@ -229,19 +229,6 @@ app.get("/api/dashboard/sync-status", (_request, response) => {
   response.json(localAnalytics?.status() || { enabled: false });
 });
 
-function warmLocalAnalytics() {
-  if (!localAnalytics || !process.env.ONEC_ODATA_URL || !process.env.ONEC_USER || !process.env.ONEC_PASSWORD) return;
-  const today = toOdataDateTime(Date.now()).slice(0, 10);
-  const dateAt = (offset) => new Date(Date.parse(today) + offset * 86_400_000).toISOString().slice(0, 10);
-  const current = { from: dateAt(-29), to: today };
-  const previous = { from: dateAt(-59), to: dateAt(-30) };
-  for (const range of [current, previous]) {
-    localAnalytics.read("reports", normalizeAnalyticsQuery("reports", { ...range, references: "false" }));
-  }
-  localAnalytics.read("margin", normalizeAnalyticsQuery("margin", { ...current, includePrevious: "false" }));
-  localAnalytics.read("reports", normalizeAnalyticsQuery("reports", { ...current, references: "only" }));
-}
-
 function uniqueReports(reports) {
   const seen = new Set();
   return reports.filter((report) => {
@@ -844,6 +831,32 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
         $orderby: "Date desc",
       };
       let checks;
+      const maxChecks = Math.max(Number(process.env.ONEC_SELLER_CHECK_LIMIT) || 20_000, 1_000);
+      const pageSize = 100;
+
+      async function loadCheckPages(filter, scanWithoutDateFilter = false) {
+        const result = [];
+        let scanned = 0;
+        let reachedPastRange = false;
+        while (scanned < maxChecks && !reachedPastRange) {
+          const currentPageSize = Math.min(pageSize, maxChecks - scanned);
+          const page = await onecGet("Document_ЧекККМ", {
+            ...checkQuery, $top: currentPageSize,
+            $skip: scanned, $filter: filter,
+          });
+          scanned += page.length;
+          result.push(...page);
+          reachedPastRange = scanWithoutDateFilter && page.some((check) =>
+            parseOnecDateTime(check.Date) < checkStartDate.getTime());
+          if (page.length < currentPageSize) return result;
+        }
+        if (!reachedPastRange && (await onecGet("Document_ЧекККМ", {
+          ...checkQuery, $top: 1, $skip: scanned, $filter: filter,
+        })).length) {
+          throw new Error(`За выбранный период найдено больше ${maxChecks} чеков; увеличьте ONEC_SELLER_CHECK_LIMIT`);
+        }
+        return result;
+      }
 
       try {
         const filter = [
@@ -852,31 +865,20 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
             `Date lt datetime'${toOdataDateTime(checkEndDate)}'`,
           ].join(" and ");
         if (customRange) {
-          checks = [];
-          const pageSize = 100;
-          while (checks.length < 1000) {
-            const page = await onecGet("Document_ЧекККМ", {
-              ...checkQuery, $top: pageSize, $skip: checks.length, $filter: filter,
-            });
-            checks.push(...page);
-            if (page.length < pageSize) break;
-          }
-          if (checks.length >= 1000) {
-            throw new Error("Лимит 1000 чеков за выбранный период; аналитика продавцов может быть неполной");
-          }
+          checks = await loadCheckPages(filter);
         } else {
           checks = await onecGet("Document_ЧекККМ", {
             ...checkQuery, $filter: filter,
           });
         }
       } catch (error) {
-        if (/Лимит 1000 чеков/.test(String(error?.message || ""))) throw error;
+        if (!/HTTP (400|500)/.test(String(error?.message || ""))) throw error;
         console.warn(
           "1С не приняла период консультантов по чекам, загружаем последние чеки:",
           error instanceof Error ? error.message : error,
         );
         checks = customRange
-          ? []
+          ? await loadCheckPages("Posted eq true", true)
           : await onecGet("Document_ЧекККМ", {
               ...checkQuery,
               $filter: "Posted eq true",
@@ -910,9 +912,16 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     // В некоторых базах консультант переносится из чеков только при закрытии
     // смены. Тогда ищем его в строках отчёта о розничных продажах.
     if (!grouped.size) {
-      const reportResult = customRange
-        ? await loadReportPagesByRangeCached({ limit: null, from, to })
-        : await loadConsultantReportPagesLegacyCached({ limit: 500, days });
+      const savedReports = customRange && localAnalytics
+        ? localAnalytics.read("reports", normalizeAnalyticsQuery("reports", {
+            from, to, references: "false",
+          }), { refresh: false }).payload
+        : null;
+      const reportResult = savedReports
+        ? { items: savedReports.items, cache: "local" }
+        : customRange
+          ? await loadReportPagesByRangeCached({ limit: null, from, to })
+          : await loadConsultantReportPagesLegacyCached({ limit: 500, days });
       // Совместимый источник уже применяет период на стороне 1С, а при отказе
       // фильтра 1С возвращает доступные отчёты целиком. Повторная локальная
       // фильтрация исключала старые строки с заполненными продавцами.
@@ -1679,6 +1688,10 @@ app.get("/api/dashboard/onec-stock", async (request, response) => {
           "СкладПолучатель_Key", "Товары",
         ], 60),
     ]);
+    if (operationsOnly && operationRequests.every((result) => result.status === "rejected")) {
+      throw new Error("Не удалось загрузить документы склада из 1С: " +
+        operationRequests[0].reason?.message);
+    }
     const [receiptResult, writeOffResult, recountResult, transferResult] = operationRequests;
     const receipts = receiptResult.status === "fulfilled" ? receiptResult.value : [];
     const writeOffs = writeOffResult.status === "fulfilled" ? writeOffResult.value : [];
@@ -2046,10 +2059,8 @@ if (authStore.countUsers() === 0) {
 
 app.listen(port, () => {
   console.log(`3КВАДРАТА API: http://localhost:${port}`);
-  warmLocalAnalytics();
   if (localAnalytics) {
     const timer = setInterval(() => {
-      warmLocalAnalytics();
       localAnalytics.refreshRecent();
     }, localAnalytics.refreshMs);
     timer.unref();

@@ -103,6 +103,10 @@ test("background refresh skips fresh snapshots and respects failure backoff", as
   now += 60_000;
   store.refreshRecent();
   await tick();
+  assert.equal(calls, 2);
+  now += 240_000;
+  store.refreshRecent();
+  await tick();
   assert.equal(calls, 3);
   store.db.close();
 });

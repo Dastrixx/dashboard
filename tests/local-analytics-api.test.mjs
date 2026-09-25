@@ -14,17 +14,26 @@ test("authenticated API reads persisted reports and margin when 1C is unavailabl
   const dir = await mkdtemp(join(tmpdir(), "analytics-api-"));
   let offline = false;
   let reportsOffline = false;
+  let rejectCheckDateFilter = false;
+  let upstreamReads = 0;
   const augustChecks = Array.from({ length: 6_000 }, (_, index) => ({
     Ref_Key: `august-${index}`, Date: "2026-08-15T12:00:00", Posted: true,
     DeletionMark: false, СтатусЧекаККМ: "Архивный", ВидОперации: "Продажа",
-    СуммаДокумента: 10,
+    СуммаДокумента: 10, Товары: [{ Продавец_Key: "12345678-1234-1234-1234-123456789abc", Сумма: 10, Количество: 1 }],
   }));
   const upstream = createServer((request, response) => {
+    upstreamReads += 1;
     response.setHeader("Content-Type", "application/json");
     if (offline) { response.statusCode = 503; response.end('{}'); return; }
     const path = decodeURIComponent(request.url);
     if (reportsOffline && path.includes("Document_ОтчетОРозничныхПродажах")) {
       response.statusCode = 503;
+      response.end('{}');
+      return;
+    }
+    if (rejectCheckDateFilter && path.includes("Document_ЧекККМ") &&
+      new URL(request.url, "http://localhost").searchParams.get("$filter")?.includes("Date ge")) {
+      response.statusCode = 400;
       response.end('{}');
       return;
     }
@@ -45,7 +54,7 @@ test("authenticated API reads persisted reports and margin when 1C is unavailabl
               )
             : []
       : path.includes("Document_ОтчетОРозничныхПродажах")
-        ? [{ Ref_Key: "12345678-1234-1234-1234-123456789abc", Date: "2026-01-01T12:00:00", Posted: true, СуммаДокумента: 120, Товары: [] }]
+        ? [{ Ref_Key: "12345678-1234-1234-1234-123456789abc", Date: "2026-01-01T12:00:00", Posted: true, СуммаДокумента: 120, Товары: [{ Продавец_Key: "12345678-1234-1234-1234-123456789abc", Сумма: 120, Количество: 1 }] }]
         : [];
     response.end(JSON.stringify({ value: rows }));
   });
@@ -63,7 +72,10 @@ test("authenticated API reads persisted reports and margin when 1C is unavailabl
     child = spawn(process.execPath, ["server/index.mjs"], { env: {
       ...process.env, PORT: String(port), CLIENT_URL: base,
       AUTH_DB_PATH: join(dir, "auth.sqlite"),
-      AUTH_BOOTSTRAP_USERS: JSON.stringify([{ email: "owner@example.com", name: "Owner", role: "owner", password: "strong-test-password" }]),
+      AUTH_BOOTSTRAP_USERS: JSON.stringify([
+        { email: "owner@example.com", name: "Owner", role: "owner", password: "strong-test-password" },
+        { email: "manager@example.com", name: "Manager", role: "manager", password: "strong-test-password" },
+      ]),
       ONEC_LOCAL_ANALYTICS: "true", ONEC_ANALYTICS_DB_PATH: dbPath,
       ONEC_ODATA_URL: `http://127.0.0.1:${upstream.address().port}/odata`,
       ONEC_USER: "test", ONEC_PASSWORD: "test", ONEC_TIMEOUT_MS: "500", ONEC_RETRIES: "0",
@@ -83,6 +95,8 @@ test("authenticated API reads persisted reports and margin when 1C is unavailabl
   };
   try {
     await start();
+    await pause();
+    assert.equal(upstreamReads, 0, "startup must not flood 1C before a dashboard request");
     assert.equal((await fetch(`${base}/api/dashboard/sync-status`)).status, 401);
     const login = await fetch(`${base}/api/auth/login`, {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -135,11 +149,44 @@ test("authenticated API reads persisted reports and margin when 1C is unavailabl
     assert.equal(august.items.scannedChecks, 6_000);
     assert.equal(august.items.absoluteLatestDate, "2026-08-15T06:00:00.000Z");
     assert.equal(august.items.series.reduce((sum, day) => sum + day.checks, 0), 6_000);
+    const managerLogin = await fetch(`${base}/api/auth/login`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "manager@example.com", password: "strong-test-password" }),
+    });
+    assert.equal(managerLogin.status, 200);
+    const managerHeaders = { Cookie: managerLogin.headers.get("set-cookie").split(";")[0] };
+    const janSellers = await fetch(
+      `${base}/api/dashboard/onec-consultants?from=2026-01-01&to=2026-01-02`,
+      { headers: managerHeaders },
+    );
+    assert.equal(janSellers.status, 200, "seller reports use the saved snapshot when report OData is offline");
+    const janSellerPayload = await janSellers.json();
+    assert.equal(janSellerPayload.meta.cache, "local");
+    assert.equal(janSellerPayload.items[0].СтоимостьTurnover, 120);
+    rejectCheckDateFilter = true;
+    const sellersResponse = await fetch(
+      `${base}/api/dashboard/onec-consultants?from=2026-08-01&to=2026-08-31`,
+      { headers: managerHeaders },
+    );
+    assert.equal(sellersResponse.status, 200, "seller analytics must handle more than 1000 checks");
+    const sellers = await sellersResponse.json();
+    assert.equal(sellers.meta.diagnostics.scannedChecks, 6_000);
+    assert.equal(sellers.items[0].СтоимостьTurnover, 60_000);
+    const transfers = await fetch(
+      `${base}/api/dashboard/onec-stock?operationsOnly=true&from=2026-08-01&to=2026-08-31`,
+      { headers: managerHeaders },
+    );
+    assert.equal(transfers.status, 200, "warehouse documents do not depend on retail reports");
+    offline = true;
+    const missingTransfers = await fetch(
+      `${base}/api/dashboard/onec-stock?operationsOnly=true&from=2026-08-01&to=2026-08-31`,
+      { headers: managerHeaders },
+    );
+    assert.equal(missingTransfers.status, 502, "unavailable warehouse documents must not look like an empty period");
     await stop();
     const db = new DatabaseSync(dbPath);
     db.exec("UPDATE analytics_snapshots SET synced_at=1");
     db.close();
-    offline = true;
     await start();
     const response = await fetch(reports, { headers });
     assert.equal(response.status, 200);

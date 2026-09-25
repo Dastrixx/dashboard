@@ -19,6 +19,7 @@ export class LocalAnalytics {
     this.namespace = namespace;
     this.loaders = loaders;
     this.refreshMs = refreshMs;
+    this.failureBackoffMs = Math.max(Number(process.env.ONEC_SYNC_FAILURE_BACKOFF_MS) || 300_000, refreshMs);
     this.now = now;
     this.queue = new Map();
     this.running = false;
@@ -107,7 +108,7 @@ export class LocalAnalytics {
       .get(this.namespace, key);
     const stale = !row.synced_at || now - row.synced_at >= this.refreshMs;
     // Back off after failures even when several browsers poll the same period.
-    if (refresh && stale && (!row.error || now - row.attempted_at >= 60_000)) {
+    if (refresh && stale && (!row.error || now - row.attempted_at >= this.failureBackoffMs)) {
       this.enqueue(key, kind, query);
     }
     const sync = {
@@ -157,7 +158,7 @@ export class LocalAnalytics {
     // Do not extend accessed_at here: unused periods stop refreshing after a day.
     for (const row of rows) {
       if (row.synced_at && now - row.synced_at < this.refreshMs) continue;
-      if (row.error && row.attempted_at && now - row.attempted_at < 60_000) continue;
+      if (row.error && row.attempted_at && now - row.attempted_at < this.failureBackoffMs) continue;
       const query = JSON.parse(row.query);
       const key = this.key(row.kind, query);
       this.enqueue(key, row.kind, query);
