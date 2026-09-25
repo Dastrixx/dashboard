@@ -164,17 +164,6 @@ export function OnecSales() {
       <section className="onec-document-footnote">
         <span>Получено документов: {sales.reports.length}</span>
         <span>Складов в справочнике: {sales.warehouses.length}</span>
-        <span>
-          Сервер: {" "}
-          {sales.loadMeta?.cache === "hit"
-            ? "из кэша"
-            : sales.loadMeta?.cache === "shared"
-              ? "общий запрос"
-              : "из 1С"}
-          {typeof sales.loadMeta?.durationMs === "number"
-            ? ` · ${sales.loadMeta.durationMs} мс`
-            : ""}
-        </span>
       </section>
     </div>
   );

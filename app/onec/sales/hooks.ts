@@ -2,7 +2,7 @@
 
 import { fetchLocalAnalytics } from "../local-api";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   API_URL,
   dateRangeQuery,
@@ -50,6 +50,8 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
   const [loadMeta, setLoadMeta] = useState<SalesLoadMeta>();
   const [analysisTimestamp, setAnalysisTimestamp] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
+  const loadedReportsQuery = useRef<string | null>(null);
+  const loadedReferencesQuery = useRef<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -59,7 +61,7 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
     const previousQuery = salesHistoryQuery(previousDateRange(currentRange));
 
     async function loadReferences() {
-      setReferencesLoading(true);
+      setReferencesLoading(loadedReferencesQuery.current !== currentQuery);
       setReferenceError("");
 
       try {
@@ -95,14 +97,17 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
             : [],
         );
         setLoadMeta(data.meta);
+        loadedReferencesQuery.current = currentQuery;
       } catch (loadError) {
         if (controller.signal.aborted || isAbortError(loadError)) return;
 
-        setReferenceError(
-          loadError instanceof Error
-            ? loadError.message
-            : "Не удалось получить названия товаров",
-        );
+        if (loadedReferencesQuery.current !== currentQuery) {
+          setReferenceError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Не удалось получить названия товаров",
+          );
+        }
       } finally {
         if (!controller.signal.aborted) setReferencesLoading(false);
       }
@@ -110,7 +115,7 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
 
     async function loadReports() {
       try {
-        setLoading(true);
+        setLoading(loadedReportsQuery.current !== currentQuery);
         setError("");
         const loadRange = async (query: string) => {
           const response = await fetchLocalAnalytics(
@@ -139,6 +144,7 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
           .filter((report) => report.Posted)
           .forEach((report) => reportsByKey.set(report.Ref_Key, report));
         setReports([...reportsByKey.values()]);
+        loadedReportsQuery.current = currentQuery;
         setLoadMeta(current.meta);
         setAnalysisTimestamp(Date.now());
         setLoading(false);
@@ -146,11 +152,13 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
       } catch (loadError) {
         if (controller.signal.aborted || isAbortError(loadError)) return;
 
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : "Не удалось загрузить данные 1С",
-        );
+        if (loadedReportsQuery.current !== currentQuery) {
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Не удалось загрузить данные 1С",
+          );
+        }
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);

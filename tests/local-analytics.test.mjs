@@ -59,6 +59,40 @@ test("failed refresh keeps the entire previous snapshot and backs off polling", 
   store.db.close();
 });
 
+test("background refresh skips fresh snapshots and respects failure backoff", async () => {
+  let now = 100000;
+  let calls = 0;
+  let fail = false;
+  const store = new LocalAnalytics({
+    databasePath: ":memory:", namespace: "test", refreshMs: 1000, now: () => now,
+    loaders: { reports: async () => {
+      calls += 1;
+      if (fail) throw new Error("1C timeout");
+      return payload;
+    } },
+  });
+  store.read("reports", query);
+  await tick();
+  store.refreshRecent();
+  await tick();
+  assert.equal(calls, 1);
+
+  now += 1001;
+  fail = true;
+  store.refreshRecent();
+  await tick();
+  assert.equal(calls, 2);
+  now += 1001;
+  store.refreshRecent();
+  await tick();
+  assert.equal(calls, 2);
+  now += 60_000;
+  store.refreshRecent();
+  await tick();
+  assert.equal(calls, 3);
+  store.db.close();
+});
+
 test("queue runs periods sequentially and publishes empty successful periods", async () => {
   let active = 0;
   let maxActive = 0;

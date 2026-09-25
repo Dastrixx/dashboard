@@ -113,17 +113,20 @@ export class LocalAnalytics {
   }
 
   refreshRecent() {
-    const rows = this.db.prepare(`SELECT kind,query FROM analytics_snapshots
+    const now = this.now();
+    const rows = this.db.prepare(`SELECT kind,query,synced_at,attempted_at,error FROM analytics_snapshots
       WHERE namespace=? AND accessed_at>=? ORDER BY accessed_at DESC LIMIT 64`)
-      .all(this.namespace, this.now() - 86_400_000);
+      .all(this.namespace, now - 86_400_000);
     // Do not extend accessed_at here: unused periods stop refreshing after a day.
     for (const row of rows) {
+      if (row.synced_at && now - row.synced_at < this.refreshMs) continue;
+      if (row.error && row.attempted_at && now - row.attempted_at < 60_000) continue;
       const query = JSON.parse(row.query);
       const key = this.key(row.kind, query);
       this.enqueue(key, row.kind, query);
     }
     this.db.prepare("DELETE FROM analytics_snapshots WHERE namespace=? AND accessed_at<?")
-      .run(this.namespace, this.now() - 30 * 86_400_000);
+      .run(this.namespace, now - 30 * 86_400_000);
   }
 
   status() {

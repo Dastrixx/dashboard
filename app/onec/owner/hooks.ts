@@ -2,7 +2,7 @@
 
 import { fetchLocalAnalytics } from "../local-api";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { API_URL } from "../shared";
 import { loadCheckAnalytics } from "../sales/check-api";
 import { previousDateRange } from "../sales/config";
@@ -74,6 +74,7 @@ export function useOwnerOverview(
   const [referencesError, setReferencesError] = useState("");
   const [checksError, setChecksError] = useState("");
   const [marginError, setMarginError] = useState("");
+  const loadedRanges = useRef<Record<string, string>>({});
 
   const effectiveRange = useMemo(
     () => dateRange || rollingDateRange(period, refreshedAt),
@@ -83,10 +84,11 @@ export function useOwnerOverview(
   useEffect(() => {
     const controller = new AbortController();
     let refreshTimer: number | undefined;
+    const rangeKey = `${effectiveRange.from}:${effectiveRange.to}`;
 
     async function loadReports() {
       try {
-        setReportsLoading(true);
+        setReportsLoading(loadedRanges.current.reports !== rangeKey);
         setReportsError("");
         const loadRange = async (range: OwnerDateRange) => {
           const reportQuery = new URLSearchParams(range);
@@ -106,13 +108,16 @@ export function useOwnerOverview(
           (report) => reportsByKey.set(report.Ref_Key, report),
         );
         setReports([...reportsByKey.values()]);
+        loadedRanges.current.reports = rangeKey;
       } catch (error) {
         if (isAbortError(error)) return;
-        setReportsError(
-          error instanceof Error
-            ? error.message
-            : "Не удалось загрузить отчёты 1С",
-        );
+        if (loadedRanges.current.reports !== rangeKey) {
+          setReportsError(
+            error instanceof Error
+              ? error.message
+              : "Не удалось загрузить отчёты 1С",
+          );
+        }
       } finally {
         if (!controller.signal.aborted) setReportsLoading(false);
       }
@@ -120,7 +125,7 @@ export function useOwnerOverview(
 
     async function loadReferences() {
       try {
-        setReferencesLoading(true);
+        setReferencesLoading(loadedRanges.current.references !== rangeKey);
         setReferencesError("");
         const reportQuery = new URLSearchParams({
           from: effectiveRange.from,
@@ -142,13 +147,16 @@ export function useOwnerOverview(
             ? payload.references.categories
             : [],
         );
+        loadedRanges.current.references = rangeKey;
       } catch (error) {
         if (isAbortError(error)) return;
-        setReferencesError(
-          error instanceof Error
-            ? error.message
-            : "Не удалось загрузить категории товаров",
-        );
+        if (loadedRanges.current.references !== rangeKey) {
+          setReferencesError(
+            error instanceof Error
+              ? error.message
+              : "Не удалось загрузить категории товаров",
+          );
+        }
       } finally {
         if (!controller.signal.aborted) setReferencesLoading(false);
       }
@@ -156,7 +164,7 @@ export function useOwnerOverview(
 
     async function loadMargin() {
       try {
-        setMarginLoading(true);
+        setMarginLoading(loadedRanges.current.margin !== rangeKey);
         setMarginError("");
         const query = new URLSearchParams({
           from: effectiveRange.from,
@@ -169,14 +177,17 @@ export function useOwnerOverview(
         );
         const payload = await readJson<MarginAnalyticsResponse>(response);
         setMargin(payload.items || null);
+        loadedRanges.current.margin = rangeKey;
       } catch (error) {
         if (isAbortError(error)) return;
-        setMargin(null);
-        setMarginError(
-          error instanceof Error
-            ? error.message
-            : "Не удалось загрузить маржу 1С",
-        );
+        if (loadedRanges.current.margin !== rangeKey) {
+          setMargin(null);
+          setMarginError(
+            error instanceof Error
+              ? error.message
+              : "Не удалось загрузить маржу 1С",
+          );
+        }
       } finally {
         if (!controller.signal.aborted) setMarginLoading(false);
       }
@@ -184,7 +195,7 @@ export function useOwnerOverview(
 
     async function loadChecks() {
       try {
-        setChecksLoading(true);
+        setChecksLoading(loadedRanges.current.checks !== rangeKey);
         setChecksError("");
         const query = new URLSearchParams({
           from: effectiveRange.from,
@@ -196,14 +207,17 @@ export function useOwnerOverview(
         if (controller.signal.aborted) return;
 
         setChecks(analytics);
+        loadedRanges.current.checks = rangeKey;
       } catch (error) {
         if (isAbortError(error)) return;
-        setChecks(null);
-        setChecksError(
-          error instanceof Error
-            ? error.message
-            : "Не удалось загрузить чеки 1С",
-        );
+        if (loadedRanges.current.checks !== rangeKey) {
+          setChecks(null);
+          setChecksError(
+            error instanceof Error
+              ? error.message
+              : "Не удалось загрузить чеки 1С",
+          );
+        }
       } finally {
         if (!controller.signal.aborted) setChecksLoading(false);
       }

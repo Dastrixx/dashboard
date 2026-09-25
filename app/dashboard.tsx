@@ -15,7 +15,6 @@ import {
   X,
 } from "lucide-react";
 import { OnecSales } from "./onec-sales";
-import { AnalyticsSyncStatus } from "./onec/sync-status";
 import {
   AuthError,
   getCurrentUser,
@@ -251,7 +250,6 @@ export function Dashboard({
         </header>
 
         <div className="content">
-          <AnalyticsSyncStatus />
           <div className="role-workspace">
             <div className="title-row">
               <div>
