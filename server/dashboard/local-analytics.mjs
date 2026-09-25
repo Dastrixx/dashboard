@@ -29,7 +29,7 @@ export class LocalAnalytics {
     return JSON.stringify([kind, Object.entries(query).sort(([a], [b]) => a.localeCompare(b))]);
   }
 
-  readCoveredReports(query, exactKey) {
+  readCoveredReports(query, exactKey, refresh) {
     const rows = this.db.prepare(`SELECT key,query,payload FROM analytics_snapshots
       WHERE namespace=? AND kind='reports' ORDER BY synced_at DESC`)
       .all(this.namespace);
@@ -57,7 +57,7 @@ export class LocalAnalytics {
     };
     const selected = cover(candidates.filter((candidate) => candidate.payload)) || cover(candidates);
     if (!selected) return null;
-    const sources = selected.map(({ source }) => this.read("reports", source));
+    const sources = selected.map(({ source }) => this.read("reports", source, { refresh }));
     const sync = {
       source: "local", stale: sources.some(({ sync }) => sync.stale),
       refreshing: sources.some(({ sync }) => sync.refreshing),
@@ -88,7 +88,7 @@ export class LocalAnalytics {
     } };
   }
 
-  read(kind, query) {
+  read(kind, query, { refresh = true } = {}) {
     const key = this.key(kind, query);
     // A smaller sales period can be calculated from downloaded documents.
     // Margin keeps exact period snapshots because fallback costs are valued
@@ -96,7 +96,7 @@ export class LocalAnalytics {
     const exactReady = this.db.prepare("SELECT 1 FROM analytics_snapshots WHERE namespace=? AND key=? AND payload IS NOT NULL")
       .get(this.namespace, key);
     if (!exactReady && kind === "reports" && query.from && query.references === "false") {
-      const covered = this.readCoveredReports(query, key);
+      const covered = this.readCoveredReports(query, key, refresh);
       if (covered) return covered;
     }
     const now = this.now();
@@ -107,7 +107,7 @@ export class LocalAnalytics {
       .get(this.namespace, key);
     const stale = !row.synced_at || now - row.synced_at >= this.refreshMs;
     // Back off after failures even when several browsers poll the same period.
-    if (stale && (!row.error || now - row.attempted_at >= 60_000)) {
+    if (refresh && stale && (!row.error || now - row.attempted_at >= 60_000)) {
       this.enqueue(key, kind, query);
     }
     const sync = {

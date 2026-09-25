@@ -115,6 +115,8 @@ export type CheckAnalytics = {
   periodStart: string | null;
   periodEnd: string | null;
   latestDate: string | null;
+  absoluteLatestDate?: string | null;
+  scannedChecks?: number;
   loaded: number;
   truncated: boolean;
   dataAvailable?: boolean;

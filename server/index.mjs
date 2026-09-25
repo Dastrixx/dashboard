@@ -1960,24 +1960,13 @@ app.get("/api/dashboard/onec-check-analytics", async (request, response) => {
       /^\d{4}-\d{2}-\d{2}$/.test(to);
     const includePrevious = request.query.includePrevious !== "false";
     const startedAt = Date.now();
-    // Sales reports live in SQLite; the old in-memory report cache is not
-    // populated when local analytics is enabled. The snapshot read only
-    // queues a background refresh if the requested period is missing.
+    // Existing reports can enrich archived checks, but their background sync
+    // must not block or trigger the direct Document_ЧекККМ request.
     const reportSnapshot = hasCustomRange && localAnalytics
       ? localAnalytics.read("reports", normalizeAnalyticsQuery("reports", {
           from, to, references: "false",
-        }))
+        }), { refresh: false })
       : null;
-    if (reportSnapshot && !reportSnapshot.payload) {
-      response.set("Retry-After", "10");
-      return response.status(503).json({
-        code: "ANALYTICS_SYNC_PENDING",
-        message: reportSnapshot.sync.error
-          ? "Не удалось обновить локальные отчёты для чеков: " + reportSnapshot.sync.error
-          : "Отчёты для выбранного периода загружаются в локальную базу",
-        meta: { localSync: reportSnapshot.sync },
-      });
-    }
     const reportCacheEntry = hasCustomRange && !localAnalytics
       ? reportCache.get(`range:all:${from}:${to}`)
       : null;

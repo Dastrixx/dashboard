@@ -37,6 +37,20 @@ test("cold period is queued once, then persisted across restart and isolated by 
   rmSync(dir, { recursive: true });
 });
 
+test("checking for a report snapshot does not start a 1C download", async () => {
+  let calls = 0;
+  const store = new LocalAnalytics({ databasePath: ":memory:", namespace: "test", loaders: {
+    reports: async () => { calls += 1; return { items: [], meta: { truncated: false } }; },
+  } });
+  assert.equal(store.read("reports", query, { refresh: false }).payload, null);
+  await tick();
+  assert.equal(calls, 0);
+  store.read("reports", query);
+  await tick();
+  assert.equal(calls, 1);
+  store.db.close();
+});
+
 test("failed refresh keeps the entire previous snapshot and backs off polling", async () => {
   let now = 100000;
   let fail = false;

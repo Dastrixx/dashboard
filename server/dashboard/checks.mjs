@@ -449,6 +449,8 @@ async function scanCheckHeaders({
   const matchedReportKeys = new Set();
   let scanned = 0;
   let reachedPastRange = false;
+  let lastTimestamp = Infinity;
+  let absoluteLatestDate = null;
 
   while (scanned < scanLimit && matched.size < limit) {
     const page = await onecGet(CHECK_ENTITY, {
@@ -458,10 +460,15 @@ async function scanCheckHeaders({
       $orderby: "Date desc",
     });
     if (!page.length) break;
+    absoluteLatestDate ||= page[0].Date;
 
     page.forEach((check) => {
       const timestamp = parseOnecDateTime(check.Date);
-      if (timestamp < currentFrom && !reportKeys.size) reachedPastRange = true;
+      if (!Number.isFinite(timestamp) || timestamp > lastTimestamp) {
+        throw new Error("1С нарушила сортировку чеков по дате");
+      }
+      lastTimestamp = timestamp;
+      if (timestamp < currentFrom) reachedPastRange = true;
       const matchesDate =
         timestamp >= currentFrom && timestamp <= currentTo;
       const matchesReport = reportKeys.has(
@@ -474,7 +481,7 @@ async function scanCheckHeaders({
         }
         matched.set(check.Ref_Key, {
           ...check,
-          Date: matchesReport
+          Date: matchesReport && !matchesDate
             ? reportDates.get(check.ОтчетОРозничныхПродажах_Key) ||
               check.Date
             : check.Date,
@@ -488,8 +495,9 @@ async function scanCheckHeaders({
   return {
     checks: [...matched.values()],
     scanned,
+    absoluteLatestDate,
     matchedReports: matchedReportKeys.size,
-    truncated: scanned >= scanLimit,
+    truncated: (scanned >= scanLimit && !reachedPastRange) || matched.size >= limit,
   };
 }
 
@@ -584,34 +592,34 @@ async function computeCheckAnalyticsRange({
   let registerTruncated = false;
   let cashShiftSummary = null;
   try {
-    if (hasRetailReports) {
-      loaded = { ...loaded, ...(await loadChecksByReports(reportRecords, limit)) };
-    }
-    if (!loaded.checks.length || loaded.failedReports) {
-      const scanned = await scanCheckHeaders({
-        reportRecords,
-        currentFrom,
-        currentTo,
-        limit,
-      });
-      const checks = new Map(
-        [...loaded.checks, ...scanned.checks].map((check) => [check.Ref_Key, check]),
-      );
-      loaded = {
-        ...loaded,
-        checks: [...checks.values()].slice(0, limit),
-        scanned: scanned.scanned,
-        matchedReports: Math.max(loaded.matchedReports, scanned.matchedReports),
-        truncated: loaded.truncated || scanned.truncated || checks.size > limit,
-        documentDetailsAvailable: false,
-      };
-    }
+    loaded = { ...loaded, ...(await scanCheckHeaders({
+      reportRecords,
+      currentFrom,
+      currentTo,
+      limit,
+    })) };
   } catch (error) {
     loadError = error;
     console.warn(
       "Не удалось загрузить документы чеков:",
       error instanceof Error ? error.message : error,
     );
+  }
+
+  if (hasRetailReports && (!loaded.checks.length || loadError)) {
+    try {
+      const linked = await loadChecksByReports(reportRecords, limit);
+      loaded = {
+        ...loaded,
+        ...linked,
+        scanned: loaded.scanned,
+        truncated: loaded.truncated || linked.truncated,
+      };
+    } catch (error) {
+      loadError ||= error;
+      console.warn("Не удалось загрузить чеки по розничным отчётам:",
+        error instanceof Error ? error.message : error);
+    }
   }
 
   // Reading the sales register and cash shifts is expensive on this 1C
@@ -667,6 +675,14 @@ async function computeCheckAnalyticsRange({
 
   if (!loaded.checks.length && !registerLoad.result && !cashShiftLoad.result) {
     throw loadError || new Error("Не удалось получить чеки из 1С");
+  }
+  if (!loaded.checks.length && !registerSummary?.totalChecks &&
+      !cashShiftSummary?.checks) {
+    if (loaded.truncated) {
+      throw new Error(`Проверено ${loaded.scanned} чеков 1С, но дата ${from} ` +
+        "ещё не достигнута. Увеличьте ONEC_CHECK_SCAN_LIMIT для полного периода.");
+    }
+    if (loadError) throw loadError;
   }
 
   const current = loaded.checks.filter((check) => {
@@ -741,6 +757,9 @@ async function computeCheckAnalyticsRange({
     periodEnd: new Date(currentTo).toISOString(),
     latestDate: latestCheckTimestamp
       ? new Date(latestCheckTimestamp).toISOString()
+      : null,
+    absoluteLatestDate: loaded.absoluteLatestDate
+      ? new Date(parseOnecDateTime(loaded.absoluteLatestDate)).toISOString()
       : null,
     loaded: usedRegisterFallback || usedCashShiftFallback
       ? currentSummary.totalChecks

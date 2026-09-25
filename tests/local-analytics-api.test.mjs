@@ -13,10 +13,21 @@ const pause = () => new Promise((resolve) => setTimeout(resolve, 50));
 test("authenticated API reads persisted reports and margin when 1C is unavailable", { timeout: 30000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), "analytics-api-"));
   let offline = false;
+  let reportsOffline = false;
+  const augustChecks = Array.from({ length: 6_000 }, (_, index) => ({
+    Ref_Key: `august-${index}`, Date: "2026-08-15T12:00:00", Posted: true,
+    DeletionMark: false, СтатусЧекаККМ: "Архивный", ВидОперации: "Продажа",
+    СуммаДокумента: 10,
+  }));
   const upstream = createServer((request, response) => {
     response.setHeader("Content-Type", "application/json");
     if (offline) { response.statusCode = 503; response.end('{}'); return; }
     const path = decodeURIComponent(request.url);
+    if (reportsOffline && path.includes("Document_ОтчетОРозничныхПродажах")) {
+      response.statusCode = 503;
+      response.end('{}');
+      return;
+    }
     const rows = path.includes("/Turnovers(")
       ? [{ Магазин_Key: "store", СтоимостьTurnover: 120, СтоимостьБезСкидокTurnover: 150, ор_СебестоимостьTurnover: 80 }]
       : path.includes("Document_ЧекККМ")
@@ -26,7 +37,13 @@ test("authenticated API reads persisted reports and margin when 1C is unavailabl
           ? [{ Ref_Key: "check", Date: "2025-12-31T12:00:00", Posted: true,
           DeletionMark: false, СтатусЧекаККМ: "Архивный", ВидОперации: "Продажа",
           СуммаДокумента: 120, ОтчетОРозничныхПродажах_Key: "12345678-1234-1234-1234-123456789abc" }]
-          : []
+          : reportsOffline
+            ? augustChecks.slice(
+                Number(new URL(request.url, "http://localhost").searchParams.get("$skip") || 0),
+                Number(new URL(request.url, "http://localhost").searchParams.get("$skip") || 0) +
+                  Number(new URL(request.url, "http://localhost").searchParams.get("$top") || 500),
+              )
+            : []
       : path.includes("Document_ОтчетОРозничныхПродажах")
         ? [{ Ref_Key: "12345678-1234-1234-1234-123456789abc", Date: "2026-01-01T12:00:00", Posted: true, СуммаДокумента: 120, Товары: [] }]
         : [];
@@ -77,8 +94,8 @@ test("authenticated API reads persisted reports and margin when 1C is unavailabl
       `${base}/api/dashboard/onec-check-analytics?from=2026-02-01&to=2026-02-02`,
       { headers },
     );
-    assert.equal(coldChecks.status, 503);
-    assert.equal((await coldChecks.json()).code, "ANALYTICS_SYNC_PENDING");
+    assert.equal(coldChecks.status, 200);
+    assert.equal((await coldChecks.json()).items.requestedReports, 0);
     const reports = `${base}/api/dashboard/onec-reports?from=2026-01-01&to=2026-01-02&references=false`;
     const margin = `${base}/api/dashboard/onec-margin?from=2026-01-01&to=2026-01-02&includePrevious=false`;
     const ready = async (url) => {
@@ -106,6 +123,18 @@ test("authenticated API reads persisted reports and margin when 1C is unavailabl
     assert.equal(checks.items.documentDetailsAvailable, true);
     assert.equal(checks.items.scannedChecks, 0);
     assert.equal((await ready(margin)).items.current.profit, 40);
+    reportsOffline = true;
+    const augustResponse = await fetch(
+      `${base}/api/dashboard/onec-check-analytics?from=2026-08-01&to=2026-08-31&includePrevious=false`,
+      { headers },
+    );
+    assert.equal(augustResponse.status, 200);
+    const august = await augustResponse.json();
+    assert.equal(august.items.current.checks, 6_000);
+    assert.equal(august.items.requestedReports, 0);
+    assert.equal(august.items.scannedChecks, 6_000);
+    assert.equal(august.items.absoluteLatestDate, "2026-08-15T06:00:00.000Z");
+    assert.equal(august.items.series.reduce((sum, day) => sum + day.checks, 0), 6_000);
     await stop();
     const db = new DatabaseSync(dbPath);
     db.exec("UPDATE analytics_snapshots SET synced_at=1");
