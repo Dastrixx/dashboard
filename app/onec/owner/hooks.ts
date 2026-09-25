@@ -83,17 +83,25 @@ export function useOwnerOverview(
           );
           return readJson<OwnerReportsResponse>(response);
         };
-        const [current, previous] = await Promise.all([
-          loadRange(effectiveRange),
-          loadRange(previousDateRange(effectiveRange)),
-        ]);
+        const current = await loadRange(effectiveRange);
         if (controller.signal.aborted) return;
         const reportsByKey = new Map<string, OnecRetailReport>();
-        [...(current.items || []), ...(previous.items || [])].forEach(
+        (current.items || []).forEach(
           (report) => reportsByKey.set(report.Ref_Key, report),
         );
         setReports([...reportsByKey.values()]);
         loadedRanges.current.reports = rangeKey;
+        void loadRange(previousDateRange(effectiveRange)).then((previous) => {
+          if (controller.signal.aborted) return;
+          const combined = new Map(reportsByKey);
+          (previous.items || []).forEach((report) =>
+            combined.set(report.Ref_Key, report));
+          setReports([...combined.values()]);
+        }).catch((error) => {
+          if (!controller.signal.aborted) console.warn(
+            "Не удалось загрузить предыдущий период владельца:", error,
+          );
+        });
       } catch (error) {
         if (isAbortError(error)) return;
         if (loadedRanges.current.reports !== rangeKey) {

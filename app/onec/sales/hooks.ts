@@ -132,15 +132,12 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
           }
           return data;
         };
-        const [current, previous] = await Promise.all([
-          loadRange(currentQuery),
-          loadRange(previousQuery),
-        ]);
+        const current = await loadRange(currentQuery);
 
         if (controller.signal.aborted) return;
 
         const reportsByKey = new Map<string, OnecRetailReport>();
-        [...(current.items || []), ...(previous.items || [])]
+        (current.items || [])
           .filter((report) => report.Posted)
           .forEach((report) => reportsByKey.set(report.Ref_Key, report));
         setReports([...reportsByKey.values()]);
@@ -148,6 +145,17 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
         setLoadMeta(current.meta);
         setAnalysisTimestamp(Date.now());
         setLoading(false);
+        void loadRange(previousQuery).then((previous) => {
+          if (controller.signal.aborted) return;
+          const combined = new Map(reportsByKey);
+          (previous.items || []).filter((report) => report.Posted)
+            .forEach((report) => combined.set(report.Ref_Key, report));
+          setReports([...combined.values()]);
+        }).catch((loadError) => {
+          if (!controller.signal.aborted) console.warn(
+            "Не удалось загрузить предыдущий период продаж:", loadError,
+          );
+        });
         await loadReferences();
       } catch (loadError) {
         if (controller.signal.aborted || isAbortError(loadError)) return;

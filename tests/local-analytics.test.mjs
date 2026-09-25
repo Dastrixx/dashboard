@@ -152,3 +152,49 @@ test("sales date filters inside a downloaded period use local documents without 
   assert.equal(calls, 1);
   store.db.close();
 });
+
+test("sales filter combines adjacent local periods without a new 1C scan", async () => {
+  let calls = 0;
+  const store = new LocalAnalytics({ databasePath: ":memory:", namespace: "test", loaders: {
+    reports: async (range) => {
+      calls += 1;
+      return { items: [{ Ref_Key: range.from, Date: `${range.to === "2026-08-30" ? range.to : range.from}T12:00:00` }],
+        meta: { truncated: false } };
+    },
+  } });
+  const first = { from: "2026-08-01", to: "2026-08-30", references: "false" };
+  const second = { from: "2026-08-31", to: "2026-09-29", references: "false" };
+  store.read("reports", first);
+  store.read("reports", second);
+  const range = { from: "2026-08-29", to: "2026-09-02", references: "false" };
+  assert.equal(store.read("reports", range).payload, null);
+  while (store.running || store.queue.size) await tick();
+  const result = store.read("reports", range);
+  assert.equal(result.payload.meta.cache, "local-range");
+  assert.equal(result.payload.meta.from, range.from);
+  assert.equal(result.payload.meta.to, range.to);
+  assert.deepEqual(result.payload.items.map((item) => item.Ref_Key), [second.from, first.from]);
+  assert.equal(calls, 2);
+  store.db.close();
+});
+
+test("sales filter returns only covered dates and does not fill a gap", async () => {
+  let calls = 0;
+  const store = new LocalAnalytics({ databasePath: ":memory:", namespace: "test", loaders: {
+    reports: async () => {
+      calls += 1;
+      return { items: [
+        { Ref_Key: "in", Date: "2026-08-30T23:59:59.999" },
+        { Ref_Key: "out", Date: "2026-09-05T12:00:00" },
+      ], meta: { truncated: false } };
+    },
+  } });
+  store.read("reports", { from: "2026-08-01", to: "2026-08-30", references: "false" });
+  store.read("reports", { from: "2026-09-02", to: "2026-09-30", references: "false" });
+  while (store.running || store.queue.size) await tick();
+  const range = store.read("reports", { from: "2026-08-30", to: "2026-09-03", references: "false" });
+  assert.equal(range.payload, null);
+  while (store.running || store.queue.size) await tick();
+  assert.equal(calls, 3);
+  store.db.close();
+});

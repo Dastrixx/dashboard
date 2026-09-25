@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { describeDataFreshness, filterByPeriod, parseOnecDateTime } from "./utils.mjs";
+import { describeDataFreshness, parseOnecDateTime } from "./utils.mjs";
 
 // Only complete, successfully calculated reports are published. A failed
 // refresh never overwrites the last usable snapshot.
@@ -29,6 +29,65 @@ export class LocalAnalytics {
     return JSON.stringify([kind, Object.entries(query).sort(([a], [b]) => a.localeCompare(b))]);
   }
 
+  readCoveredReports(query, exactKey) {
+    const rows = this.db.prepare(`SELECT key,query,payload FROM analytics_snapshots
+      WHERE namespace=? AND kind='reports' ORDER BY synced_at DESC`)
+      .all(this.namespace);
+    const candidates = rows.flatMap((row) => {
+      const source = JSON.parse(row.query);
+      if (row.key === exactKey || !source.from || !source.to ||
+          source.references === "only" || source.from > query.to || source.to < query.from) return [];
+      const payload = row.payload ? JSON.parse(row.payload) : null;
+      if (payload?.meta?.truncated) return [];
+      return [{ source, payload }];
+    });
+    const cover = (options) => {
+      const chosen = [];
+      let cursor = query.from;
+      while (cursor <= query.to) {
+        const next = options
+          .filter(({ source }) => source.from <= cursor && source.to >= cursor)
+          .sort((left, right) => right.source.to.localeCompare(left.source.to))[0];
+        if (!next) return null;
+        chosen.push(next);
+        cursor = new Date(Date.parse(`${next.source.to}T00:00:00Z`) + 86_400_000)
+          .toISOString().slice(0, 10);
+      }
+      return chosen;
+    };
+    const selected = cover(candidates.filter((candidate) => candidate.payload)) || cover(candidates);
+    if (!selected) return null;
+    const sources = selected.map(({ source }) => this.read("reports", source));
+    const sync = {
+      source: "local", stale: sources.some(({ sync }) => sync.stale),
+      refreshing: sources.some(({ sync }) => sync.refreshing),
+      error: sources.find(({ sync }) => sync.error)?.sync.error || null,
+      syncedAt: sources.every(({ sync }) => sync.syncedAt)
+        ? sources.map(({ sync }) => sync.syncedAt).sort()[0] : null,
+    };
+    if (sources.some(({ payload }) => !payload)) return { payload: null, sync };
+    const documents = new Map();
+    const from = parseOnecDateTime(`${query.from}T00:00:00`);
+    const endExclusive = parseOnecDateTime(`${query.to}T00:00:00`) + 86_400_000;
+    for (const { payload } of sources) {
+      for (const report of payload.items || []) {
+        const date = parseOnecDateTime(report.Date);
+        if (date >= from && date < endExclusive) documents.set(report.Ref_Key, report);
+      }
+    }
+    const items = [...documents.values()].sort((a, b) =>
+      parseOnecDateTime(b.Date) - parseOnecDateTime(a.Date));
+    const latestDate = items[0]?.Date || null;
+    return { sync, payload: {
+      ...sources[0].payload, items,
+      references: { products: [], warehouses: [], categories: [] },
+      meta: { ...sources[0].payload.meta, from: query.from, to: query.to,
+        loaded: items.length, uniqueDocuments: items.length, duplicatesRemoved: 0,
+        latestDate, freshness: describeDataFreshness(latestDate), referencesLoaded: false,
+        cache: "local-range", truncated: false },
+    } };
+  }
+
   read(kind, query) {
     const key = this.key(kind, query);
     // A smaller sales period can be calculated from downloaded documents.
@@ -37,30 +96,8 @@ export class LocalAnalytics {
     const exactReady = this.db.prepare("SELECT 1 FROM analytics_snapshots WHERE namespace=? AND key=? AND payload IS NOT NULL")
       .get(this.namespace, key);
     if (!exactReady && kind === "reports" && query.from && query.references === "false") {
-      const candidates = this.db.prepare(`SELECT key,query FROM analytics_snapshots
-        WHERE namespace=? AND kind='reports' AND payload IS NOT NULL ORDER BY synced_at DESC`)
-        .all(this.namespace);
-      for (const candidate of candidates) {
-        const sourceQuery = JSON.parse(candidate.query);
-        if (candidate.key === key || !sourceQuery.from || sourceQuery.references === "only" ||
-          sourceQuery.from > query.from || sourceQuery.to < query.to) continue;
-        const sourcePayload = JSON.parse(this.db.prepare("SELECT payload FROM analytics_snapshots WHERE namespace=? AND key=?")
-          .get(this.namespace, candidate.key).payload);
-        if (sourcePayload.meta?.truncated) continue;
-        const result = this.read(kind, sourceQuery);
-        const items = filterByPeriod(result.payload.items || [], "Date",
-          new Date(parseOnecDateTime(`${query.from}T00:00:00`)),
-          new Date(parseOnecDateTime(`${query.to}T00:00:00`) + 86_400_000 - 1));
-        const latestDate = items[0]?.Date || null;
-        return { sync: result.sync, payload: {
-          ...result.payload, items,
-          references: { products: [], warehouses: [], categories: [] },
-          meta: { ...result.payload.meta, from: query.from, to: query.to,
-            loaded: items.length, uniqueDocuments: items.length, duplicatesRemoved: 0,
-            latestDate, freshness: describeDataFreshness(latestDate), referencesLoaded: false,
-            cache: "local-range", truncated: false },
-        } };
-      }
+      const covered = this.readCoveredReports(query, key);
+      if (covered) return covered;
     }
     const now = this.now();
     this.db.prepare(`INSERT INTO analytics_snapshots(namespace,key,kind,query,accessed_at)
