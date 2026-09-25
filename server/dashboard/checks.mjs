@@ -245,9 +245,10 @@ function buildBuckets(checks, rangeStart, rangeEnd, days) {
       label:
         days === 1
           ? `${index * 4}–${(index + 1) * 4}ч`
-          : new Date(start).toLocaleDateString("ru-RU", {
+          : new Date(`${toOdataDateTime(start).slice(0, 10)}T00:00:00Z`).toLocaleDateString("ru-RU", {
               day: "2-digit",
               month: "2-digit",
+              timeZone: "UTC",
             }),
       checks: 0,
       revenue: 0,
@@ -421,7 +422,7 @@ async function scanCheckHeaders({
       .map((report) => [report.Ref_Key, report.Date]),
   );
   const pageSize = Math.min(
-    Math.max(Number(process.env.ONEC_CHECK_SCAN_PAGE_SIZE || 500), 1),
+    Math.max(Number(process.env.ONEC_CHECK_SCAN_PAGE_SIZE || 100), 1),
     1_000,
   );
   const scanLimit = Math.max(
@@ -430,6 +431,7 @@ async function scanCheckHeaders({
   );
   const matched = new Map();
   let scanned = 0;
+  let reachedPastRange = false;
 
   while (scanned < scanLimit && matched.size < limit) {
     const page = await onecGet(CHECK_ENTITY, {
@@ -442,6 +444,7 @@ async function scanCheckHeaders({
 
     page.forEach((check) => {
       const timestamp = parseOnecDateTime(check.Date);
+      if (timestamp < currentFrom && !reportKeys.size) reachedPastRange = true;
       const matchesDate =
         timestamp >= currentFrom && timestamp <= currentTo;
       const matchesReport = reportKeys.has(
@@ -459,7 +462,7 @@ async function scanCheckHeaders({
       }
     });
     scanned += page.length;
-    if (page.length < pageSize) break;
+    if (page.length < pageSize || reachedPastRange) break;
   }
 
   return {
@@ -477,7 +480,7 @@ async function computeCheckAnalyticsRange({
   reportRecords = [],
 }) {
   const currentFrom = parseOnecDateTime(`${from}T00:00:00`);
-  const currentTo = parseOnecDateTime(`${to}T23:59:59`);
+  const currentTo = parseOnecDateTime(`${to}T00:00:00`) + 86_400_000 - 1;
 
   if (
     !Number.isFinite(currentFrom) ||
@@ -502,49 +505,53 @@ async function computeCheckAnalyticsRange({
   let registerSummary = null;
   let registerTruncated = false;
   let cashShiftSummary = null;
-  const registerPromise = loadSalesDocuments({
-    startDate: new Date(currentFrom),
-    endDate: new Date(currentTo + 1),
-    limit,
-  }).then(
-    (result) => ({ result, error: null }),
-    (error) => ({ result: null, error }),
-  );
-  const cashShiftPromise = loadCashShiftsForRange(
-    new Date(currentFrom),
-    new Date(currentTo + 1),
-    limit,
-  ).then(
-    (result) => ({ result, error: null }),
-    (error) => ({ result: null, error }),
-  );
-
-  if (hasRetailReports) {
-    try {
-      loaded = {
-        ...loaded,
-        ...(await scanCheckHeaders({
-          reportRecords,
-          currentFrom,
-          currentTo,
-          limit,
-        })),
-      };
-    } catch (error) {
-      loadError = error;
-      console.warn(
-        "Не удалось загрузить чеки, связанные " +
-          "с розничными отчётами:",
-        error instanceof Error ? error.message : error,
-      );
-    }
+  try {
+    loaded = {
+      ...loaded,
+      ...(await scanCheckHeaders({
+        reportRecords,
+        currentFrom,
+        currentTo,
+        limit,
+      })),
+    };
+  } catch (error) {
+    loadError = error;
+    console.warn(
+      "Не удалось загрузить документы чеков:",
+      error instanceof Error ? error.message : error,
+    );
   }
+
+  // Reading the sales register and cash shifts is expensive on this 1C
+  // installation. Only use them when check documents are unavailable.
+  const needsFallback = loaded.checks.length === 0;
+  const registerPromise = needsFallback
+    ? loadSalesDocuments({
+        startDate: new Date(currentFrom),
+        endDate: new Date(currentTo + 1),
+        limit,
+      }).then(
+        (result) => ({ result, error: null }),
+        (error) => ({ result: null, error }),
+      )
+    : Promise.resolve({ result: null, error: null });
+  const cashShiftPromise = needsFallback
+    ? loadCashShiftsForRange(
+        new Date(currentFrom),
+        new Date(currentTo + 1),
+        limit,
+      ).then(
+        (result) => ({ result, error: null }),
+        (error) => ({ result: null, error }),
+      )
+    : Promise.resolve({ result: null, error: null });
 
   const registerLoad = await registerPromise;
   if (registerLoad.result) {
     registerSummary = summarizeSalesDocuments(registerLoad.result.rows);
     registerTruncated = registerLoad.result.truncated;
-  } else {
+  } else if (registerLoad.error) {
     loadError ||= registerLoad.error;
     console.warn(
       "Не удалось восстановить чеки из регистра продаж:",
@@ -557,7 +564,7 @@ async function computeCheckAnalyticsRange({
   const cashShiftLoad = await cashShiftPromise;
   if (cashShiftLoad.result) {
     cashShiftSummary = cashShiftLoad.result;
-  } else {
+  } else if (cashShiftLoad.error) {
     loadError ||= cashShiftLoad.error;
     console.warn(
       "Не удалось восстановить количество чеков из кассовых смен:",
@@ -567,7 +574,9 @@ async function computeCheckAnalyticsRange({
     );
   }
 
-  const certificatePaymentKeys = await loadCertificatePaymentKeys();
+  if (!loaded.checks.length && !registerLoad.result && !cashShiftLoad.result) {
+    throw loadError || new Error("Не удалось получить чеки из 1С");
+  }
 
   const current = loaded.checks.filter((check) => {
     const timestamp = parseOnecDateTime(check.Date);
@@ -581,7 +590,8 @@ async function computeCheckAnalyticsRange({
     : [];
   const days = Math.max(Math.round(duration / DAY_MS), 1);
 
-  const documentSummary = summarizeChecks(current, certificatePaymentKeys);
+  // The header query does not contain payment rows; skip the extra catalog call.
+  const documentSummary = summarizeChecks(current);
   const reportSummary = hasRetailReports
     ? summarizeRetailReports(reportRecords, documentSummary.checks)
     : null;
@@ -590,10 +600,8 @@ async function computeCheckAnalyticsRange({
     Boolean(registerSummary?.totalChecks);
   const usedCashShiftFallback =
     !usedRegisterFallback && Number(cashShiftSummary?.checks) > 0;
-  const documentDetailsAvailable = usedRegisterFallback
-    ? documentSummary.totalChecks === registerSummary.totalChecks &&
-      !loaded.truncated
-    : documentSummary.totalChecks > 0;
+  const documentDetailsAvailable = false;
+  const seriesAvailable = documentSummary.totalChecks > 0 && !loaded.truncated;
   const currentSummary = documentSummary.totalChecks > 0
     ? {
         ...documentSummary,
@@ -632,8 +640,8 @@ async function computeCheckAnalyticsRange({
 
   return {
     current: currentSummary,
-    previous: summarizeChecks(previous, certificatePaymentKeys),
-    series: documentDetailsAvailable
+    previous: summarizeChecks(previous),
+    series: seriesAvailable
       ? buildBuckets(current, currentFrom, currentTo + 1, days)
       : [],
     periodStart: new Date(currentFrom).toISOString(),
@@ -649,11 +657,13 @@ async function computeCheckAnalyticsRange({
       registerTruncated ||
       Boolean(cashShiftSummary?.truncated),
     dataAvailable:
-      !hasRetailReports ||
+      Boolean(loaded.checks.length) ||
+      Boolean(registerLoad.result) ||
+      Boolean(cashShiftLoad.result) ||
       current.length > 0 ||
       usedRegisterFallback ||
       usedCashShiftFallback,
-    seriesAvailable: documentDetailsAvailable,
+    seriesAvailable,
     documentDetailsAvailable,
     requestedReports: reportRecords.length,
     matchedReports: loaded.matchedReports,

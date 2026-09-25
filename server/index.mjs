@@ -43,6 +43,7 @@ import {
   loadCheckAnalyticsRange,
 } from "./dashboard/checks.mjs";
 import { loadMarginPeriod } from "./dashboard/margin-loader.mjs";
+import { scanReportsByRange } from "./dashboard/report-range.mjs";
 import { summarizeMarginRows } from "./dashboard/margin.mjs";
 import {
   parseSalesChannel,
@@ -326,43 +327,34 @@ async function loadReportPagesByRange({ limit, from, to }) {
   const configuredPageSize = Number(process.env.ONEC_PAGE_SIZE || 25);
   const pageSize = Math.min(Math.max(configuredPageSize, 1), 100);
   const fromTimestamp = parseOnecDateTime(`${from}T00:00:00`);
-  const toTimestamp = parseOnecDateTime(`${to}T23:59:59`);
+  const endExclusive = parseOnecDateTime(`${to}T00:00:00`) + 86_400_000;
 
   if (
     !Number.isFinite(fromTimestamp) ||
-    !Number.isFinite(toTimestamp) ||
-    fromTimestamp > toTimestamp
+    !Number.isFinite(endExclusive) ||
+    fromTimestamp >= endExclusive
   ) {
     throw new Error("Некорректный диапазон дат");
   }
 
-  const filter = [
-    "Posted eq true",
-    `Date ge datetime'${toOdataDateTime(fromTimestamp)}'`,
-    `Date le datetime'${toOdataDateTime(toTimestamp)}'`,
-  ].join(" and ");
-  const result = [];
-
-  while (limit === null || result.length < limit) {
-    const currentPageSize =
-      limit === null ? pageSize : Math.min(pageSize, limit - result.length);
-    const page = await onecGet(RETAIL_REPORT_ENTITY, {
-      $top: currentPageSize,
-      $skip: result.length,
-      $select: RETAIL_REPORT_SELECT,
-      $filter: filter,
-      $orderby: "Date desc",
-    });
-    result.push(...page);
-    if (page.length < currentPageSize) break;
-  }
-
-  return filterByPeriod(
-    result,
-    "Date",
-    new Date(fromTimestamp),
-    new Date(toTimestamp),
+  const maxScanned = Math.min(
+    Math.max(Number(process.env.ONEC_REPORT_MAX_SCAN) || 10_000, 100),
+    100_000,
   );
+  const reports = await scanReportsByRange({
+    fromTimestamp,
+    endExclusive,
+    pageSize,
+    maxScanned,
+    getPage: (top, skip) => onecGet(RETAIL_REPORT_ENTITY, {
+      $top: top,
+      $skip: skip,
+      $select: RETAIL_REPORT_SELECT,
+      $filter: "Posted eq true",
+      $orderby: "Date desc",
+    }),
+  });
+  return limit === null ? reports : reports.slice(0, limit);
 }
 
 async function loadReportPagesByRangeCached({ limit, from, to }) {
@@ -1968,16 +1960,14 @@ app.get("/api/dashboard/onec-check-analytics", async (request, response) => {
       /^\d{4}-\d{2}-\d{2}$/.test(to);
     const includePrevious = request.query.includePrevious !== "false";
     const startedAt = Date.now();
-    const reportRecords = hasCustomRange
-      ? uniqueReports(
-          (
-            await loadReportPagesByRangeCached({
-              limit: null,
-              from,
-              to,
-            })
-          ).items,
-        )
+    // Checks should not wait for a full report scan. Reuse reports only when
+    // the reports endpoint already fetched them for this exact range.
+    const reportCacheEntry = hasCustomRange
+      ? reportCache.get(`range:all:${from}:${to}`)
+      : null;
+    const reportRecords = reportCacheEntry?.items &&
+      reportCacheEntry.expiresAt > Date.now()
+      ? uniqueReports(reportCacheEntry.items)
       : [];
     const analytics = hasCustomRange
       ? await loadCheckAnalyticsRange({

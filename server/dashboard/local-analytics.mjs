@@ -50,7 +50,7 @@ export class LocalAnalytics {
         const result = this.read(kind, sourceQuery);
         const items = filterByPeriod(result.payload.items || [], "Date",
           new Date(parseOnecDateTime(`${query.from}T00:00:00`)),
-          new Date(parseOnecDateTime(`${query.to}T23:59:59`)));
+          new Date(parseOnecDateTime(`${query.to}T00:00:00`) + 86_400_000 - 1));
         const latestDate = items[0]?.Date || null;
         return { sync: result.sync, payload: {
           ...result.payload, items,

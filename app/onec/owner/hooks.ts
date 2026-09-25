@@ -4,6 +4,7 @@ import { fetchLocalAnalytics } from "../local-api";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { API_URL } from "../shared";
+import { onecRollingRange } from "../date-range";
 import { loadCheckAnalytics } from "../sales/check-api";
 import { previousDateRange } from "../sales/config";
 import type {
@@ -36,24 +37,8 @@ async function readJson<T>(response: Response): Promise<T> {
   return payload;
 }
 
-function formatQueryDate(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
-}
-
 function rollingDateRange(days: Period, timestamp: number): OwnerDateRange {
-  const to = new Date(timestamp);
-  const from = new Date(to);
-  from.setHours(0, 0, 0, 0);
-  from.setDate(from.getDate() - (days - 1));
-
-  return {
-    from: formatQueryDate(from),
-    to: formatQueryDate(to),
-  };
+  return onecRollingRange(days, timestamp);
 }
 
 export function useOwnerOverview(

@@ -1,4 +1,5 @@
 import { DAY_MS, PERIODS, shortDate } from "./config";
+import { ONEC_OFFSET_MS, onecRangeBounds } from "../date-range";
 import type {
   AnalyticsPeriod,
   ChartPoint,
@@ -21,9 +22,7 @@ export function inRange(value: string, from: number, to: number) {
 }
 
 function startOfCalendarDay(timestamp: number) {
-  const date = new Date(timestamp);
-  date.setHours(0, 0, 0, 0);
-  return date.getTime();
+  return Math.floor((timestamp + ONEC_OFFSET_MS) / DAY_MS) * DAY_MS - ONEC_OFFSET_MS;
 }
 
 function periodBounds(latestTimestamp: number, days: number) {
@@ -43,18 +42,7 @@ function periodBounds(latestTimestamp: number, days: number) {
 }
 
 function customRangeBounds(range: SalesDateRange) {
-  const currentFrom = new Date(`${range.from}T00:00:00`).getTime();
-  const currentTo = new Date(`${range.to}T23:59:59.999`).getTime();
-  const duration = currentTo - currentFrom + 1;
-  const previousTo = currentFrom - 1;
-
-  return {
-    currentFrom,
-    currentTo,
-    previousFrom: currentFrom - duration,
-    previousTo,
-    duration,
-  };
+  return onecRangeBounds(range);
 }
 
 function chartPeriod(duration: number): AnalyticsPeriod {
@@ -171,7 +159,7 @@ function buildRevenueBuckets(
       label:
         period === "day"
           ? `${index * 4}–${(index + 1) * 4}ч`
-          : shortDate.format(new Date(rangeStart + index * bucketSize)),
+          : shortDate.format(new Date(rangeStart + index * bucketSize + ONEC_OFFSET_MS)),
       value: 0,
     }),
   );
