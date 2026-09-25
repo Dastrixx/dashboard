@@ -122,12 +122,36 @@ function SellerSalesChart({
 }
 
 function ChartSvg({ chart }: { chart: SellerChart }) {
+  const lastIndex = chart.points.length - 1;
+  const dateIndexes = new Set<number>();
+  let lastDateX = -Infinity;
+  chart.points.forEach((point, index) => {
+    if (index === 0 || index === lastIndex ||
+      (point.x - lastDateX >= 100 &&
+        chart.points[lastIndex].x - point.x >= 80)) {
+      dateIndexes.add(index);
+      lastDateX = point.x;
+    }
+  });
+  const peakIndexes = new Set<number>();
+  chart.points
+    .map((point, index) => ({ point, index }))
+    .filter(({ point, index }) => point.value > 0 &&
+      (index === 0 || point.value > chart.points[index - 1].value) &&
+      (index === lastIndex || point.value >= chart.points[index + 1].value))
+    .sort((left, right) => right.point.value - left.point.value)
+    .forEach(({ point, index }) => {
+      if (peakIndexes.size < 5 &&
+        [...peakIndexes].every((other) => Math.abs(point.x - chart.points[other].x) >= 110)) {
+        peakIndexes.add(index);
+      }
+    });
   return (
     <div className="seller-sales-chart">
       <svg
         aria-label="Динамика продаж продавца"
         role="img"
-        viewBox="0 0 720 220"
+        viewBox="0 0 720 245"
       >
         {[30, 70, 110, 150, 190].map((y) => (
           <line
@@ -141,28 +165,37 @@ function ChartSvg({ chart }: { chart: SellerChart }) {
         ))}
         <defs>
           <linearGradient id="sellerArea" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="#0b7a55" stopOpacity=".24" />
-            <stop offset="100%" stopColor="#0b7a55" stopOpacity="0" />
+            <stop offset="0%" stopColor="var(--brand-turquoise)" stopOpacity=".24" />
+            <stop offset="100%" stopColor="var(--brand-turquoise)" stopOpacity="0" />
           </linearGradient>
         </defs>
         <path d={chart.area} fill="url(#sellerArea)" />
         <polyline
           fill="none"
           points={chart.line}
-          stroke="#0b7a55"
+          stroke="var(--brand-turquoise)"
           strokeLinecap="round"
           strokeLinejoin="round"
           strokeWidth="3"
         />
-        {chart.points.map((point) => (
-          <ChartPoint point={point} key={point.date} />
+        {chart.points.map((point, index) => (
+          <ChartPoint
+            point={point}
+            key={point.date}
+            showDate={dateIndexes.has(index)}
+            isPeak={peakIndexes.has(index)}
+          />
         ))}
       </svg>
     </div>
   );
 }
 
-function ChartPoint({ point }: { point: SellerChart["points"][number] }) {
+function ChartPoint({ point, showDate, isPeak }: {
+  point: SellerChart["points"][number];
+  showDate: boolean;
+  isPeak: boolean;
+}) {
   return (
     <g>
       <circle
@@ -170,21 +203,25 @@ function ChartPoint({ point }: { point: SellerChart["points"][number] }) {
         cy={point.y}
         fill="#fff"
         r="4"
-        stroke="#0b7a55"
+        stroke={isPeak ? "var(--brand-yellow)" : "var(--brand-turquoise)"}
         strokeWidth="2"
       >
         <title>
           {formatChartDate(point.date)} — {money.format(point.value)}
         </title>
       </circle>
-      <text
-        className="seller-chart-label"
-        textAnchor="middle"
-        x={point.x}
-        y="211"
-      >
-        {formatChartDate(point.date)}
-      </text>
+      {isPeak && (
+        <text className="seller-chart-value" textAnchor="middle"
+          x={point.x} y={Math.max(point.y - 12, 17)}>
+          {money.format(point.value)}
+        </text>
+      )}
+      {showDate && (
+        <text className="seller-chart-label" textAnchor="middle"
+          x={Math.max(22, Math.min(point.x, 698))} y="225">
+          {formatChartDate(point.date)}
+        </text>
+      )}
     </g>
   );
 }
