@@ -493,6 +493,63 @@ async function scanCheckHeaders({
   };
 }
 
+async function loadChecksByReports(reportRecords, limit) {
+  const pageSize = Math.min(
+    Math.max(Number(process.env.ONEC_CHECK_PAGE_SIZE || 100), 1),
+    100,
+  );
+  const matched = new Map();
+  let matchedReports = 0;
+  let failedReports = 0;
+  let truncated = false;
+
+  for (const report of reportRecords) {
+    if (matched.size >= limit) {
+      truncated = true;
+      break;
+    }
+    if (!GUID_PATTERN.test(report.Ref_Key || "")) continue;
+    let scanned = 0;
+    let matchedThisReport = false;
+    try {
+      while (scanned < limit && matched.size < limit) {
+        const size = Math.min(pageSize, limit - matched.size, limit - scanned);
+        if (size <= 0) { truncated = true; break; }
+        const page = await onecGet(CHECK_ENTITY, {
+          $top: size,
+          $skip: scanned,
+          $select: CHECK_SELECT,
+          $filter: checkReportFilter(report.Ref_Key),
+        });
+        for (const check of page) {
+          if (!isCompletedCheck(check)) continue;
+          matchedThisReport = true;
+          matched.set(check.Ref_Key, { ...check, Date: report.Date || check.Date });
+        }
+        scanned += page.length;
+        if (page.length < size) break;
+      }
+      if (matchedThisReport) matchedReports += 1;
+    } catch (error) {
+      failedReports += 1;
+      console.warn("Не удалось загрузить чеки розничного отчёта:",
+        error instanceof Error ? error.message : error);
+      // Unsupported report-key filtering is a property of this OData
+      // installation; scanning once below is safer than retrying every key.
+      break;
+    }
+  }
+
+  return {
+    checks: [...matched.values()].slice(0, limit),
+    matchedReports,
+    failedReports,
+    truncated,
+    scanned: 0,
+    documentDetailsAvailable: failedReports === 0 && !truncated && matched.size > 0,
+  };
+}
+
 async function computeCheckAnalyticsRange({
   from,
   to,
@@ -527,15 +584,28 @@ async function computeCheckAnalyticsRange({
   let registerTruncated = false;
   let cashShiftSummary = null;
   try {
-    loaded = {
-      ...loaded,
-      ...(await scanCheckHeaders({
+    if (hasRetailReports) {
+      loaded = { ...loaded, ...(await loadChecksByReports(reportRecords, limit)) };
+    }
+    if (!loaded.checks.length || loaded.failedReports) {
+      const scanned = await scanCheckHeaders({
         reportRecords,
         currentFrom,
         currentTo,
         limit,
-      })),
-    };
+      });
+      const checks = new Map(
+        [...loaded.checks, ...scanned.checks].map((check) => [check.Ref_Key, check]),
+      );
+      loaded = {
+        ...loaded,
+        checks: [...checks.values()].slice(0, limit),
+        scanned: scanned.scanned,
+        matchedReports: Math.max(loaded.matchedReports, scanned.matchedReports),
+        truncated: loaded.truncated || scanned.truncated || checks.size > limit,
+        documentDetailsAvailable: false,
+      };
+    }
   } catch (error) {
     loadError = error;
     console.warn(
@@ -611,8 +681,11 @@ async function computeCheckAnalyticsRange({
     : [];
   const days = Math.max(Math.round(duration / DAY_MS), 1);
 
-  // The header query does not contain payment rows; skip the extra catalog call.
-  const documentSummary = summarizeChecks(current);
+  const documentDetailsAvailable = loaded.documentDetailsAvailable === true;
+  const certificatePaymentKeys = documentDetailsAvailable
+    ? await loadCertificatePaymentKeys()
+    : new Set();
+  const documentSummary = summarizeChecks(current, certificatePaymentKeys);
   const reportSummary = hasRetailReports
     ? summarizeRetailReports(reportRecords, documentSummary.checks)
     : null;
@@ -621,7 +694,6 @@ async function computeCheckAnalyticsRange({
     Boolean(registerSummary?.totalChecks);
   const usedCashShiftFallback =
     !usedRegisterFallback && Number(cashShiftSummary?.checks) > 0;
-  const documentDetailsAvailable = false;
   const seriesAvailable = documentSummary.totalChecks > 0 && !loaded.truncated;
   const currentSummary = documentSummary.totalChecks > 0
     ? {
@@ -661,7 +733,7 @@ async function computeCheckAnalyticsRange({
 
   return {
     current: currentSummary,
-    previous: summarizeChecks(previous),
+    previous: summarizeChecks(previous, certificatePaymentKeys),
     series: seriesAvailable
       ? buildBuckets(current, currentFrom, currentTo + 1, days)
       : [],

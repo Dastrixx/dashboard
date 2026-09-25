@@ -20,11 +20,15 @@ test("authenticated API reads persisted reports and margin when 1C is unavailabl
     const rows = path.includes("/Turnovers(")
       ? [{ Магазин_Key: "store", СтоимостьTurnover: 120, СтоимостьБезСкидокTurnover: 150, ор_СебестоимостьTurnover: 80 }]
       : path.includes("Document_ЧекККМ")
-        ? [{ Ref_Key: "check", Date: "2025-12-31T12:00:00", Posted: true,
+        ? new URL(request.url, "http://localhost").searchParams.get("$filter")?.includes(
+            "ОтчетОРозничныхПродажах_Key eq guid",
+          )
+          ? [{ Ref_Key: "check", Date: "2025-12-31T12:00:00", Posted: true,
           DeletionMark: false, СтатусЧекаККМ: "Архивный", ВидОперации: "Продажа",
-          СуммаДокумента: 120, ОтчетОРозничныхПродажах_Key: "report" }]
+          СуммаДокумента: 120, ОтчетОРозничныхПродажах_Key: "12345678-1234-1234-1234-123456789abc" }]
+          : []
       : path.includes("Document_ОтчетОРозничныхПродажах")
-        ? [{ Ref_Key: "report", Date: "2026-01-01T12:00:00", Posted: true, СуммаДокумента: 120, Товары: [] }]
+        ? [{ Ref_Key: "12345678-1234-1234-1234-123456789abc", Date: "2026-01-01T12:00:00", Posted: true, СуммаДокумента: 120, Товары: [] }]
         : [];
     response.end(JSON.stringify({ value: rows }));
   });
@@ -69,6 +73,12 @@ test("authenticated API reads persisted reports and margin when 1C is unavailabl
     });
     assert.equal(login.status, 200);
     const headers = { Cookie: login.headers.get("set-cookie").split(";")[0] };
+    const coldChecks = await fetch(
+      `${base}/api/dashboard/onec-check-analytics?from=2026-02-01&to=2026-02-02`,
+      { headers },
+    );
+    assert.equal(coldChecks.status, 503);
+    assert.equal((await coldChecks.json()).code, "ANALYTICS_SYNC_PENDING");
     const reports = `${base}/api/dashboard/onec-reports?from=2026-01-01&to=2026-01-02&references=false`;
     const margin = `${base}/api/dashboard/onec-margin?from=2026-01-01&to=2026-01-02&includePrevious=false`;
     const ready = async (url) => {
@@ -93,6 +103,8 @@ test("authenticated API reads persisted reports and margin when 1C is unavailabl
     assert.equal(checks.items.current.checks, 1);
     assert.equal(checks.items.requestedReports, 1);
     assert.equal(checks.items.current.revenue, 120);
+    assert.equal(checks.items.documentDetailsAvailable, true);
+    assert.equal(checks.items.scannedChecks, 0);
     assert.equal((await ready(margin)).items.current.profit, 40);
     await stop();
     const db = new DatabaseSync(dbPath);

@@ -1968,6 +1968,16 @@ app.get("/api/dashboard/onec-check-analytics", async (request, response) => {
           from, to, references: "false",
         }))
       : null;
+    if (reportSnapshot && !reportSnapshot.payload) {
+      response.set("Retry-After", "10");
+      return response.status(503).json({
+        code: "ANALYTICS_SYNC_PENDING",
+        message: reportSnapshot.sync.error
+          ? "Не удалось обновить локальные отчёты для чеков: " + reportSnapshot.sync.error
+          : "Отчёты для выбранного периода загружаются в локальную базу",
+        meta: { localSync: reportSnapshot.sync },
+      });
+    }
     const reportCacheEntry = hasCustomRange && !localAnalytics
       ? reportCache.get(`range:all:${from}:${to}`)
       : null;
