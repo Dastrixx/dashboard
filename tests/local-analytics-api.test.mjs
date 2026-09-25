@@ -19,6 +19,10 @@ test("authenticated API reads persisted reports and margin when 1C is unavailabl
     const path = decodeURIComponent(request.url);
     const rows = path.includes("/Turnovers(")
       ? [{ Магазин_Key: "store", СтоимостьTurnover: 120, СтоимостьБезСкидокTurnover: 150, ор_СебестоимостьTurnover: 80 }]
+      : path.includes("Document_ЧекККМ")
+        ? [{ Ref_Key: "check", Date: "2025-12-31T12:00:00", Posted: true,
+          DeletionMark: false, СтатусЧекаККМ: "Архивный", ВидОперации: "Продажа",
+          СуммаДокумента: 120, ОтчетОРозничныхПродажах_Key: "report" }]
       : path.includes("Document_ОтчетОРозничныхПродажах")
         ? [{ Ref_Key: "report", Date: "2026-01-01T12:00:00", Posted: true, СуммаДокумента: 120, Товары: [] }]
         : [];
@@ -80,6 +84,15 @@ test("authenticated API reads persisted reports and margin when 1C is unavailabl
     };
     const original = await ready(reports);
     assert.equal(original.items[0].СуммаДокумента, 120);
+    const checksResponse = await fetch(
+      `${base}/api/dashboard/onec-check-analytics?from=2026-01-01&to=2026-01-02&includePrevious=false`,
+      { headers },
+    );
+    assert.equal(checksResponse.status, 200);
+    const checks = await checksResponse.json();
+    assert.equal(checks.items.current.checks, 1);
+    assert.equal(checks.items.requestedReports, 1);
+    assert.equal(checks.items.current.revenue, 120);
     assert.equal((await ready(margin)).items.current.profit, 40);
     await stop();
     const db = new DatabaseSync(dbPath);

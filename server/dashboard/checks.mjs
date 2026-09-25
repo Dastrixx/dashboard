@@ -173,24 +173,40 @@ async function loadCashShiftsForRange(startDate, endDate, limit) {
     `Date ge datetime'${toOdataDateTime(startDate.getTime())}'`,
     `Date lt datetime'${toOdataDateTime(endDate.getTime())}'`,
   ].join(" and ");
-  const shifts = [];
+  async function load(useDateFilter) {
+    const shifts = [];
+    let scanned = 0;
+    while (scanned < limit) {
+      const currentPageSize = Math.min(pageSize, limit - scanned);
+      const page = await onecGet(CASH_SHIFT_ENTITY, {
+        $top: currentPageSize,
+        $skip: scanned,
+        $select: "Ref_Key,Date,DeletionMark,Posted,КоличествоЧеков",
+        $filter: useDateFilter ? filter : "Posted eq true",
+        $orderby: "Date desc",
+      });
+      scanned += page.length;
+      shifts.push(...(useDateFilter ? page : filterByPeriod(
+        page, "Date", startDate, new Date(endDate.getTime() - 1),
+      )));
+      if (page.length < currentPageSize ||
+        (!useDateFilter && page.some((shift) =>
+          parseOnecDateTime(shift.Date) < startDate.getTime()))) break;
+    }
+    return { shifts, truncated: scanned >= limit };
+  }
 
-  while (shifts.length < limit) {
-    const currentPageSize = Math.min(pageSize, limit - shifts.length);
-    const page = await onecGet(CASH_SHIFT_ENTITY, {
-      $top: currentPageSize,
-      $skip: shifts.length,
-      $select: "Ref_Key,Date,DeletionMark,Posted,КоличествоЧеков",
-      $filter: filter,
-      $orderby: "Date desc",
-    });
-    shifts.push(...page);
-    if (page.length < currentPageSize) break;
+  let loaded;
+  try {
+    loaded = await load(true);
+  } catch (error) {
+    if (!/HTTP (400|500)/.test(String(error?.message))) throw error;
+    loaded = await load(false);
   }
 
   return {
-    ...summarizeCashShifts(shifts),
-    truncated: shifts.length >= limit,
+    ...summarizeCashShifts(loaded.shifts),
+    truncated: loaded.truncated,
   };
 }
 
@@ -422,7 +438,7 @@ async function scanCheckHeaders({
       .map((report) => [report.Ref_Key, report.Date]),
   );
   const pageSize = Math.min(
-    Math.max(Number(process.env.ONEC_CHECK_SCAN_PAGE_SIZE || 100), 1),
+    Math.max(Number(process.env.ONEC_CHECK_SCAN_PAGE_SIZE || 500), 1),
     1_000,
   );
   const scanLimit = Math.max(
@@ -430,6 +446,7 @@ async function scanCheckHeaders({
     limit,
   );
   const matched = new Map();
+  const matchedReportKeys = new Set();
   let scanned = 0;
   let reachedPastRange = false;
 
@@ -452,6 +469,9 @@ async function scanCheckHeaders({
       );
 
       if ((matchesDate || matchesReport) && isCompletedCheck(check)) {
+        if (matchesReport) {
+          matchedReportKeys.add(check.ОтчетОРозничныхПродажах_Key);
+        }
         matched.set(check.Ref_Key, {
           ...check,
           Date: matchesReport
@@ -468,6 +488,7 @@ async function scanCheckHeaders({
   return {
     checks: [...matched.values()],
     scanned,
+    matchedReports: matchedReportKeys.size,
     truncated: scanned >= scanLimit,
   };
 }

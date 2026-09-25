@@ -1960,15 +1960,21 @@ app.get("/api/dashboard/onec-check-analytics", async (request, response) => {
       /^\d{4}-\d{2}-\d{2}$/.test(to);
     const includePrevious = request.query.includePrevious !== "false";
     const startedAt = Date.now();
-    // Checks should not wait for a full report scan. Reuse reports only when
-    // the reports endpoint already fetched them for this exact range.
-    const reportCacheEntry = hasCustomRange
+    // Sales reports live in SQLite; the old in-memory report cache is not
+    // populated when local analytics is enabled. The snapshot read only
+    // queues a background refresh if the requested period is missing.
+    const reportSnapshot = hasCustomRange && localAnalytics
+      ? localAnalytics.read("reports", normalizeAnalyticsQuery("reports", {
+          from, to, references: "false",
+        }))
+      : null;
+    const reportCacheEntry = hasCustomRange && !localAnalytics
       ? reportCache.get(`range:all:${from}:${to}`)
       : null;
-    const reportRecords = reportCacheEntry?.items &&
-      reportCacheEntry.expiresAt > Date.now()
-      ? uniqueReports(reportCacheEntry.items)
-      : [];
+    const reportRecords = uniqueReports(
+      reportSnapshot?.payload?.items ||
+      (reportCacheEntry?.expiresAt > Date.now() ? reportCacheEntry.items : []) || [],
+    );
     const analytics = hasCustomRange
       ? await loadCheckAnalyticsRange({
           from,
