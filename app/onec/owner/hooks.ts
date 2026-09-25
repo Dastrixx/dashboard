@@ -94,10 +94,8 @@ export function useOwnerOverview(
           );
           return readJson<OwnerReportsResponse>(response);
         };
-        const [current, previous] = await Promise.all([
-          loadRange(effectiveRange),
-          loadRange(previousDateRange(effectiveRange)),
-        ]);
+        const current = await loadRange(effectiveRange);
+        const previous = await loadRange(previousDateRange(effectiveRange));
         if (controller.signal.aborted) return;
         const reportsByKey = new Map<string, OnecRetailReport>();
         [...(current.items || []), ...(previous.items || [])].forEach(

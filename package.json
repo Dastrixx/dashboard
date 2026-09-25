@@ -17,6 +17,7 @@
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
     "auth:create-user": "node --env-file-if-exists=.env server/auth/create-user.mjs",
     "audit:onec": "node --env-file-if-exists=.env scripts/audit-onec.mjs",
+    "probe:onec": "node --env-file-if-exists=.env scripts/probe-onec.mjs",
     "dev:client": "vite",
     "dev:server": "node --env-file-if-exists=.env --watch server/index.mjs",
     "dev:full": "concurrently -n CLIENT,SERVER -c green,blue \"npm:dev:client\" \"npm:dev:server\""
