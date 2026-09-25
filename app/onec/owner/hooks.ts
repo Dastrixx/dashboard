@@ -209,7 +209,7 @@ export function useOwnerOverview(
         setChecks(analytics);
         loadedRanges.current.checks = rangeKey;
       } catch (error) {
-        if (isAbortError(error)) return;
+        if (controller.signal.aborted || isAbortError(error)) return;
         if (loadedRanges.current.checks !== rangeKey) {
           setChecks(null);
           setChecksError(
@@ -223,9 +223,9 @@ export function useOwnerOverview(
       }
     }
 
-    // Не отправляем четыре тяжёлых запроса в OData одновременно.
-    // Каждый блок обновляется независимо, одновременно идут максимум два.
-    void Promise.allSettled([loadReports(), loadChecks()]).then(() =>
+    // Чеки могут ждать 1С, поэтому не задерживают локальные продажи и маржу.
+    void loadChecks();
+    void loadReports().then(() =>
       Promise.allSettled([loadReferences(), loadMargin()]),
     ).then(() => {
       if (controller.signal.aborted) return;
