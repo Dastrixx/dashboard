@@ -2,14 +2,17 @@ import { closePool } from './db.mjs';
 import { daysInRange } from './ranges.mjs';
 import { readReports, rangeStatus } from './repository.mjs';
 import { fetchReportDay } from './onec-reports.mjs';
+import { waitForCoverage } from './wait-for-coverage.mjs';
 
 const args = Object.fromEntries(process.argv.slice(2).filter(arg => arg.startsWith('--') && arg.includes('='))
   .map(arg => arg.slice(2).split('=')));
 try {
   const days = daysInRange(args.from, args.to);
   if (days.length > 31) throw new Error('Сверяйте не более 31 дня за запуск');
-  const coverage = await rangeStatus(args.from, args.to, { enqueue: false });
-  if (coverage.status !== 'ready') throw new Error(`Период ещё не готов: ${coverage.completedDays}/${coverage.totalDays}`);
+  await waitForCoverage({
+    readStatus: () => rangeStatus(args.from, args.to, { enqueue: false }),
+    waitMs: args['wait-ms'] ? Number(args['wait-ms']) : 900_000,
+  });
   let differences = 0;
   for (const day of days) {
     const source = (await fetchReportDay(day)).filter(row => row.Posted && !row.DeletionMark);

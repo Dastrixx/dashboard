@@ -88,7 +88,7 @@ npm run dev:full
 npm run sync:range -- --from=2026-08-01 --to=2026-08-02
 ```
 
-Worker должен вывести `completed fetched=1` для каждого дня. Посмотрите строки в базе:
+`sync:range` только ставит задачи в очередь. Worker должен вывести `completed fetched=1` для каждого дня. `sync:verify` теперь ждёт завершения (до 15 минут), а затем сверяет источник с БД. Посмотрите строки в базе:
 
 ```bash
 docker compose -f compose.sync.yaml exec postgres psql -U dashboard -d dashboard -c "SELECT sync_date,status,records_count FROM sync_days ORDER BY sync_date"
