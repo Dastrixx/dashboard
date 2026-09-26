@@ -27,4 +27,12 @@ const server = createServer((request, response) => {
 });
 
 const port = Number(process.env.MOCK_ONEC_PORT || 4100);
+server.on('error', error => {
+  if (error.code === 'EADDRINUSE') {
+    console.error(`Порт ${port} уже занят. Закройте другой процесс или запустите mock на другом порту: $env:MOCK_ONEC_PORT='4101'; npm run dev:mock-onec. Затем укажите порт 4101 в ONEC_ODATA_URL файла .env.`);
+    process.exitCode = 1;
+    return;
+  }
+  throw error;
+});
 server.listen(port, '127.0.0.1', () => console.log(`Mock 1C: http://127.0.0.1:${port}/odata/standard.odata`));

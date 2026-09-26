@@ -9,7 +9,19 @@ docker compose -f compose.sync.yaml up -d
 docker compose -f compose.sync.yaml ps
 ```
 
-Скопируйте `.env.example` в `.env` (`Copy-Item .env.example .env` в PowerShell). Для теста на фикстуре задайте:
+В PowerShell выполните **из корня проекта**:
+
+```powershell
+Test-Path .env
+```
+
+Если результат `False`, скопируйте готовую локальную конфигурацию:
+
+```powershell
+Copy-Item .env.sync.local.example .env
+```
+
+Если результат `True`, **не перезаписывайте существующий `.env`**. Откройте его через `notepad .env` и приведите перечисленные ниже переменные к локальным значениям (каждая переменная должна встречаться один раз). Для теста на фикстуре нужны:
 
 ```env
 DATABASE_URL=postgres://dashboard:dashboard_local_only@127.0.0.1:5432/dashboard
@@ -20,6 +32,18 @@ ONEC_PAGE_SIZE=25
 SYNC_ONEC_PAGE_SIZE=1
 SYNC_REPORTS_FROM_DB=true
 SYNC_TIMEZONE=Asia/Almaty
+```
+
+Проверьте только наличие настройки, не выводя пароль в терминал:
+
+```powershell
+node --env-file-if-exists=.env -e "console.log('DATABASE_URL:', Boolean(process.env.DATABASE_URL))"
+```
+
+Должно вывести `DATABASE_URL: true`. Если `False`, миграция и worker не запустятся. Перед миграцией проверьте контейнер:
+
+```powershell
+docker compose -f compose.sync.yaml ps
 ```
 
 Пароль `dashboard_local_only` предназначен только для локальной тестовой базы. При запуске на VDS создайте другой пароль и не публикуйте `.env`.
@@ -34,6 +58,19 @@ npm run db:migrate:sync
 Откройте три терминала в корне проекта:
 
 ```bash
+npm run dev:mock-onec
+```
+
+Если порт 4100 занят, сначала посмотрите, какой процесс его использует:
+
+```powershell
+Get-NetTCPConnection -LocalPort 4100 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Get-Process -Id $_.OwningProcess | Select-Object Id,ProcessName,Path }
+```
+
+Если это уже запущенный mock 1С, второй экземпляр не нужен. В остальных случаях используйте свободный порт, например 4101: в `.env` поменяйте `ONEC_ODATA_URL` на `http://127.0.0.1:4101/odata/standard.odata`, а в терминале mock выполните:
+
+```powershell
+$env:MOCK_ONEC_PORT='4101'
 npm run dev:mock-onec
 ```
 
