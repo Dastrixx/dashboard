@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { API_URL } from "../shared";
 import { loadCheckAnalytics } from "../sales/check-api";
+import { fetchSyncedJson } from '../sales/sync-fetch';
 import { previousDateRange } from "../sales/config";
 import type {
   CheckAnalytics,
@@ -72,6 +73,8 @@ export function useOwnerOverview(
   const [referencesError, setReferencesError] = useState("");
   const [checksError, setChecksError] = useState("");
   const [marginError, setMarginError] = useState("");
+  const [syncProgress, setSyncProgress] = useState('');
+  const [retryKey, setRetryKey] = useState(0);
 
   const effectiveRange = useMemo(
     () => dateRange || rollingDateRange(period, refreshedAt),
@@ -88,11 +91,10 @@ export function useOwnerOverview(
         setReportsError("");
         const loadRange = async (range: OwnerDateRange) => {
           const reportQuery = new URLSearchParams(range);
-          const response = await fetch(
+          return fetchSyncedJson<OwnerReportsResponse>(
             `${API_URL}/api/dashboard/onec-reports?${reportQuery}&references=false`,
-            { credentials: "include", signal: controller.signal },
+            controller.signal, setSyncProgress,
           );
-          return readJson<OwnerReportsResponse>(response);
         };
         const [current, previous] = await Promise.all([
           loadRange(effectiveRange),
@@ -225,7 +227,17 @@ export function useOwnerOverview(
       controller.abort();
       if (refreshTimer) window.clearTimeout(refreshTimer);
     };
-  }, [effectiveRange]);
+  }, [effectiveRange, retryKey]);
+
+  async function retryReports() {
+    await Promise.all([effectiveRange, previousDateRange(effectiveRange)].map(range =>
+      fetch(`${API_URL}/api/sync/retry`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(range),
+      }),
+    ));
+    setRetryKey(value => value + 1);
+  }
 
   const analytics = useMemo(
     () =>
@@ -251,5 +263,7 @@ export function useOwnerOverview(
     margin,
     marginLoading,
     marginError,
+    syncProgress,
+    retryReports,
   };
 }

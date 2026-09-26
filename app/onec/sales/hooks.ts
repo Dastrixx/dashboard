@@ -9,6 +9,7 @@ import {
   rollingDateRange,
 } from "./config";
 import { loadCheckAnalytics } from "./check-api";
+import { fetchSyncedJson } from './sync-fetch';
 import type {
   AnalyticsPeriod,
   CheckAnalytics,
@@ -48,6 +49,18 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
   const [loadMeta, setLoadMeta] = useState<SalesLoadMeta>();
   const [analysisTimestamp, setAnalysisTimestamp] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [syncProgress, setSyncProgress] = useState('');
+
+  async function retryReports() {
+    const range = dateRange || rollingDateRange(SALES_HISTORY_DAYS);
+    await Promise.all([range, previousDateRange(range)].map(item =>
+      fetch(`${API_URL}/api/sync/retry`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item),
+      }),
+    ));
+    setRefreshKey(value => value + 1);
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -111,19 +124,10 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
         setLoading(true);
         setError("");
         const loadRange = async (query: string) => {
-          const response = await fetch(
+          return fetchSyncedJson<Partial<OnecSalesResponse>>(
             `${API_URL}/api/dashboard/onec-reports?${query}&references=false`,
-            {
-              credentials: "include",
-              cache: "no-store",
-              signal: controller.signal,
-            },
+            controller.signal, setSyncProgress,
           );
-          const data = (await response.json()) as Partial<OnecSalesResponse>;
-          if (!response.ok) {
-            throw new Error(data.message || `Ошибка HTTP ${response.status}`);
-          }
-          return data;
         };
         const [current, previous] = await Promise.all([
           loadRange(currentQuery),
@@ -178,6 +182,8 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
     referenceError,
     loadMeta,
     analysisTimestamp,
+    syncProgress,
+    retryReports,
   };
 }
 

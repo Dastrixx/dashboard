@@ -90,10 +90,12 @@ export function DataState({
   loading,
   error,
   empty,
+  progress,
 }: {
   loading: boolean;
   error: string;
   empty: boolean;
+  progress?: string;
 }) {
   if (loading) {
     return (
@@ -101,7 +103,7 @@ export function DataState({
         <span className="onec-spinner" />
         <div>
           <strong>Получаем данные из 1С</strong>
-          <p>Загрузка отчётов о розничных продажах…</p>
+          <p>{progress || 'Загрузка отчётов о розничных продажах…'}</p>
         </div>
       </section>
     );

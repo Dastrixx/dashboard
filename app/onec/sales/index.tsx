@@ -16,27 +16,28 @@ import type { AnalyticsPeriod, SalesDateRange } from "./types";
 
 const DEFAULT_SALES_RANGE = rollingDateRange(30);
 
-function LoadingState() {
+function LoadingState({ progress }: { progress?: string }) {
   return (
     <div className="page-stack">
       <section className="onec-state panel">
         <span className="onec-spinner" />
         <div>
           <strong>Формируем аналитику из 1С</strong>
-          <p>Загружаем отчёты, номенклатуру и категории…</p>
+          <p>{progress || 'Загружаем отчёты, номенклатуру и категории…'}</p>
         </div>
       </section>
     </div>
   );
 }
 
-function ErrorState({ message }: { message: string }) {
+function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div className="page-stack">
       <section className="onec-state onec-error panel">
         <div>
           <strong>Не удалось получить данные 1С</strong>
           <p>{message}</p>
+          <button type="button" onClick={onRetry}>Повторить</button>
         </div>
       </section>
     </div>
@@ -96,8 +97,8 @@ export function OnecSales() {
     ],
   );
 
-  if (sales.loading) return <LoadingState />;
-  if (sales.error) return <ErrorState message={sales.error} />;
+  if (sales.loading) return <LoadingState progress={sales.syncProgress} />;
+  if (sales.error) return <ErrorState message={sales.error} onRetry={() => { void sales.retryReports(); }} />;
   if (!analytics) return <EmptyState />;
 
   const referencesReady =

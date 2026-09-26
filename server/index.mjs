@@ -45,6 +45,8 @@ import {
   parseSalesChannel,
   salesChannelFromOrder,
 } from "./dashboard/sales-channels.mjs";
+import { addDays, businessDate, daysInRange } from './sync/ranges.mjs';
+import { enqueueDays, rangeStatus, readReports, syncHealth } from './sync/repository.mjs';
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -89,6 +91,52 @@ app.use(
 
 app.get("/api/dashboard", (_request, response) => {
   response.json(dashboardData);
+});
+
+app.get('/api/sync/health', async (_request, response) => {
+  try { response.json(await syncHealth()); }
+  catch (error) { response.status(503).json({ message: error.message }); }
+});
+
+app.get('/api/sync/status', async (request, response) => {
+  try {
+    response.json(await rangeStatus(String(request.query.from || ''), String(request.query.to || '')));
+  } catch (error) { response.status(400).json({ message: error.message }); }
+});
+
+app.post('/api/sync/retry', async (request, response) => {
+  try {
+    const { from, to } = request.body || {};
+    daysInRange(from, to);
+    await enqueueDays(from, to);
+    response.status(202).json(await rangeStatus(from, to));
+  } catch (error) { response.status(400).json({ message: error.message }); }
+});
+
+// Roll out per route. Existing calculations remain available until their inputs are migrated.
+app.get('/api/dashboard/onec-reports', async (request, response, next) => {
+  if (process.env.SYNC_REPORTS_FROM_DB !== 'true' || request.query.references !== 'false') return next();
+  try {
+    const { day } = businessDate();
+    const from = String(request.query.from || addDays(day, -(Math.min(Math.max(Number(request.query.days) || 60, 1), 365) - 1)));
+    const to = String(request.query.to || day);
+    const coverage = await rangeStatus(from, to);
+    if (coverage.status !== 'ready') {
+      return response.status(coverage.status === 'failed' ? 503 : 202).json({
+        ...coverage,
+        message: coverage.status === 'failed'
+          ? 'Не удалось загрузить данные за выбранный период. Повторить'
+          : 'Загружаем данные за выбранный период из 1С...',
+      });
+    }
+    const items = await readReports(from, to);
+    const normalized = items.map(report => ({ ...report, Date: normalizeOnecDateTime(report.Date) }));
+    return response.json({ items: normalized, references: { products: [], warehouses: [], categories: [] },
+      meta: { from, to, loaded: items.length, cache: 'postgres', referencesLoaded: false,
+        latestDate: normalized[0]?.Date || null, truncated: false, ...coverage } });
+  } catch (error) {
+    return response.status(error.message?.includes('диапазон') ? 400 : 503).json({ message: error.message });
+  }
 });
 app.get("/api/dashboard/team-plan", (request, response) => {
   const period = [1, 7, 30].includes(Number(request.query.period))

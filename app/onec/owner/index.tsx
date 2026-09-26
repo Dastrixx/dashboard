@@ -28,9 +28,11 @@ export function OnecOverview({
       <div className="page-stack">
         <DataState
           loading={state.reportsLoading}
+          progress={state.syncProgress}
           error={state.reportsError}
           empty={!state.reportsLoading && !state.reportsError && !state.analytics}
         />
+        {state.reportsError && <button type="button" onClick={() => { void state.retryReports(); }}>Повторить</button>}
       </div>
     );
   }
