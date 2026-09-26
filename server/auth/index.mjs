@@ -122,11 +122,14 @@ export function authorizeDashboardApi(request, response, next) {
     "/api/dashboard/onec-check-analytics",
     "/api/dashboard/onec-product-categories",
     "/api/dashboard/onec-margin",
+    "/api/sync/health",
+    "/api/sync/status",
   ]);
   const pathname = request.originalUrl.split("?", 1)[0];
   if (request.method === "GET" && ownerGetRoutes.has(pathname)) {
     return next();
   }
+  if (request.method === 'POST' && pathname === '/api/sync/retry') return next();
 
   return response.status(403).json({ message: "Недостаточно прав" });
 }

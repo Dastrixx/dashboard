@@ -17,6 +17,11 @@
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
     "auth:create-user": "node --env-file-if-exists=.env server/auth/create-user.mjs",
     "audit:onec": "node --env-file-if-exists=.env scripts/audit-onec.mjs",
+    "db:migrate:sync": "node --env-file-if-exists=.env server/sync/migrate.mjs",
+    "sync:worker": "node --env-file-if-exists=.env server/sync/worker.mjs",
+    "sync:initial": "node --env-file-if-exists=.env server/sync/enqueue.mjs --initial",
+    "sync:daily": "node --env-file-if-exists=.env server/sync/enqueue.mjs --daily",
+    "sync:range": "node --env-file-if-exists=.env server/sync/enqueue.mjs",
     "dev:client": "vite",
     "dev:server": "node --env-file-if-exists=.env --watch server/index.mjs",
     "dev:full": "concurrently -n CLIENT,SERVER -c green,blue \"npm:dev:client\" \"npm:dev:server\""
@@ -27,6 +32,7 @@
     "express": "^5.1.0",
     "lucide-react": "^0.468.0",
     "next": "16.2.6",
+    "pg": "^8.16.3",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },
