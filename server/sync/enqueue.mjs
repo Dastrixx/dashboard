@@ -15,6 +15,7 @@ if (process.argv.includes('--initial')) {
 } else if (process.argv.includes('--daily')) {
   from = addDays(day, -7); to = day; refresh = true;
 }
+if (process.argv.includes('--refresh')) refresh = true;
 try {
   const count = await enqueueDays(from, to, { refresh });
   console.log(`[SYNC][reports] queued ${count} days ${from}..${to}`);

@@ -30,6 +30,7 @@ pm2 save
 
 ```bash
 npm run sync:range -- --from=2026-08-01 --to=2026-08-31
+npm run sync:range -- --from=2026-08-01 --to=2026-08-31 --refresh
 npm run sync:daily
 pm2 logs dashboard-sync-worker --lines 100
 ```

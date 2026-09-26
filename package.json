@@ -22,6 +22,8 @@
     "sync:initial": "node --env-file-if-exists=.env server/sync/enqueue.mjs --initial",
     "sync:daily": "node --env-file-if-exists=.env server/sync/enqueue.mjs --daily",
     "sync:range": "node --env-file-if-exists=.env server/sync/enqueue.mjs",
+    "sync:verify": "node --env-file-if-exists=.env server/sync/verify.mjs",
+    "dev:mock-onec": "node scripts/mock-onec.mjs",
     "dev:client": "vite",
     "dev:server": "node --env-file-if-exists=.env --watch server/index.mjs",
     "dev:full": "concurrently -n CLIENT,SERVER -c green,blue \"npm:dev:client\" \"npm:dev:server\""

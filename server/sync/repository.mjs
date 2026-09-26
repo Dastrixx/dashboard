@@ -12,7 +12,7 @@ export async function enqueueDays(from, to, { refresh = false } = {}) {
         WHERE sync_jobs.status='failed' OR ($2 AND sync_jobs.status='completed')`, [day, refresh]);
       await client.query(`INSERT INTO sync_days (data_type, sync_date, status) VALUES ('reports', $1, 'pending')
         ON CONFLICT (data_type, sync_date) DO UPDATE SET status='pending', error=NULL
-        WHERE sync_days.status='failed' OR ($2 AND sync_days.status='completed')`, [day, refresh]);
+        WHERE sync_days.status='failed'`, [day]);
     }
     await client.query('COMMIT');
   } catch (error) {
@@ -52,7 +52,7 @@ export async function claimJob() {
     FROM next WHERE j.id=next.id RETURNING j.*, j.sync_date::text AS day`);
   const job = result.rows[0];
   if (job) await getPool().query(`UPDATE sync_days SET status='running', started_at=now(), error=NULL
-    WHERE data_type=$1 AND sync_date=$2`, [job.data_type, job.day]);
+    WHERE data_type=$1 AND sync_date=$2 AND status <> 'completed'`, [job.data_type, job.day]);
   return job;
 }
 
@@ -103,7 +103,7 @@ export async function failJob(job, error) {
   await getPool().query(`UPDATE sync_jobs SET status=$2,run_after=now()+($3 * interval '1 second'),error=$4,
     completed_at=CASE WHEN $2='failed' THEN now() ELSE NULL END WHERE id=$1`,
   [job.id, retry ? 'pending' : 'failed', retry ? seconds : 0, String(error).slice(0, 1000)]);
-  await getPool().query(`UPDATE sync_days SET status=$2,error=$3 WHERE data_type='reports' AND sync_date=$1`,
+  await getPool().query(`UPDATE sync_days SET status=$2,error=$3 WHERE data_type='reports' AND sync_date=$1 AND status <> 'completed'`,
     [job.day, retry ? 'pending' : 'failed', String(error).slice(0, 1000)]);
 }
 
