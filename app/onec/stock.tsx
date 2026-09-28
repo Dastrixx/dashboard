@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { API_URL, DataState, number } from "./shared";
 import type { StockOperation, StockPayload } from "./types";
+import { fetchSyncedJson } from "./sales/sync-fetch";
 
 function uniqueSubcategories(
   rows: Array<{ subcategoryKey: string; subcategory: string }>,
@@ -36,19 +37,21 @@ export function OnecStock() {
 
   useEffect(() => {
     const controller = new AbortController();
+    let receivedPartial = false;
 
     async function load() {
       try {
         setLoading(true);
         setError("");
-        const response = await fetch(
+        const data = await fetchSyncedJson<StockPayload>(
           `${API_URL}/api/dashboard/onec-stock?top=5000`,
-          { signal: controller.signal, credentials: "include" },
+          controller.signal, undefined, partial => {
+            if (controller.signal.aborted) return;
+            receivedPartial = true;
+            setPayload(partial);
+            setLoading(false);
+          },
         );
-        const data = (await response.json()) as StockPayload;
-        if (!response.ok) {
-          throw new Error(data.message || `Ошибка HTTP ${response.status}`);
-        }
         setPayload(data);
       } catch (loadError) {
         if (
@@ -57,11 +60,8 @@ export function OnecStock() {
         ) {
           return;
         }
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : "Не удалось получить остатки из 1С",
-        );
+        if (!receivedPartial) setError(loadError instanceof Error
+          ? loadError.message : "Не удалось получить остатки из 1С");
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }

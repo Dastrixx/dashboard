@@ -27,14 +27,6 @@ function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
-async function readJson<T>(response: Response): Promise<T> {
-  const payload = (await response.json()) as T & { message?: string };
-  if (!response.ok) {
-    throw new Error(payload.message || `Ошибка HTTP ${response.status}`);
-  }
-  return payload;
-}
-
 function formatQueryDate(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -84,6 +76,9 @@ export function useOwnerOverview(
   useEffect(() => {
     const controller = new AbortController();
     let refreshTimer: number | undefined;
+    let reportsPartiallyLoaded = false;
+    let checksPartiallyLoaded = false;
+    let marginPartiallyLoaded = false;
 
     async function loadReports() {
       try {
@@ -96,6 +91,7 @@ export function useOwnerOverview(
             controller.signal, setSyncProgress,
             range === effectiveRange ? partial => {
               if (controller.signal.aborted) return;
+              reportsPartiallyLoaded = true;
               setReports(partial.items || []);
               setReportsLoading(false);
             } : undefined,
@@ -118,11 +114,9 @@ export function useOwnerOverview(
         }
       } catch (error) {
         if (isAbortError(error)) return;
-        setReportsError(
-          error instanceof Error
-            ? error.message
-            : "Не удалось загрузить отчёты 1С",
-        );
+        const message = error instanceof Error ? error.message : "Не удалось загрузить отчёты 1С";
+        if (reportsPartiallyLoaded) setSyncProgress(`Часть отчётов доступна. ${message}`);
+        else setReportsError(message);
       } finally {
         if (!controller.signal.aborted) setReportsLoading(false);
       }
@@ -136,11 +130,10 @@ export function useOwnerOverview(
           from: effectiveRange.from,
           to: effectiveRange.to,
         });
-        const response = await fetch(
+        const payload = await fetchSyncedJson<OwnerReportsResponse>(
           `${API_URL}/api/dashboard/onec-reports?${reportQuery}&references=only`,
-          { credentials: "include", signal: controller.signal },
+          controller.signal,
         );
-        const payload = await readJson<OwnerReportsResponse>(response);
         if (controller.signal.aborted) return;
         setProducts(
           Array.isArray(payload.references?.products)
@@ -173,20 +166,22 @@ export function useOwnerOverview(
           to: effectiveRange.to,
           includePrevious: "false",
         });
-        const response = await fetch(
+        const payload = await fetchSyncedJson<MarginAnalyticsResponse>(
           `${API_URL}/api/dashboard/onec-margin?${query}`,
-          { signal: controller.signal, credentials: "include" },
+          controller.signal, undefined, partial => {
+            if (controller.signal.aborted) return;
+            marginPartiallyLoaded = true;
+            setMargin(partial.items || null);
+            setMarginLoading(false);
+          },
         );
-        const payload = await readJson<MarginAnalyticsResponse>(response);
         setMargin(payload.items || null);
       } catch (error) {
         if (isAbortError(error)) return;
-        setMargin(null);
-        setMarginError(
-          error instanceof Error
-            ? error.message
-            : "Не удалось загрузить маржу 1С",
-        );
+        if (!marginPartiallyLoaded) {
+          setMargin(null);
+          setMarginError(error instanceof Error ? error.message : "Не удалось загрузить маржу 1С");
+        }
       } finally {
         if (!controller.signal.aborted) setMarginLoading(false);
       }
@@ -201,19 +196,22 @@ export function useOwnerOverview(
           to: effectiveRange.to,
           includePrevious: "false",
         });
-        const analytics = await loadCheckAnalytics(query.toString());
+        const analytics = await loadCheckAnalytics(query.toString(), controller.signal, partial => {
+          if (controller.signal.aborted) return;
+          checksPartiallyLoaded = true;
+          setChecks(partial);
+          setChecksLoading(false);
+        });
 
         if (controller.signal.aborted) return;
 
         setChecks(analytics);
       } catch (error) {
         if (isAbortError(error)) return;
-        setChecks(null);
-        setChecksError(
-          error instanceof Error
-            ? error.message
-            : "Не удалось загрузить чеки 1С",
-        );
+        if (!checksPartiallyLoaded) {
+          setChecks(null);
+          setChecksError(error instanceof Error ? error.message : "Не удалось загрузить чеки 1С");
+        }
       } finally {
         if (!controller.signal.aborted) setChecksLoading(false);
       }

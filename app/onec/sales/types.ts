@@ -62,7 +62,7 @@ export type OnecCategoryReference = {
 export type SalesLoadMeta = {
   loaded?: number;
   days?: number;
-  cache?: "hit" | "miss" | "shared";
+  cache?: "hit" | "miss" | "shared" | "postgres";
   durationMs?: number;
   referencesLoaded?: boolean;
   latestDate?: string | null;

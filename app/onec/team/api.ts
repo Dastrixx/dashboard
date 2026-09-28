@@ -2,6 +2,7 @@ import { API_URL } from "../shared";
 import type { MarginAnalyticsResponse } from "../sales/types";
 import type { SellerPayload } from "../types";
 import type { Period, SalesChannel } from "./types";
+import { fetchSyncedJson } from "../sales/sync-fetch";
 
 type TeamQuery = {
   storeKey: string;
@@ -39,6 +40,7 @@ export async function fetchTeamPlan(
 export async function fetchTeamData(
   query: TeamQuery,
   signal: AbortSignal,
+  onPartial?: (payload: SellerPayload) => void,
 ): Promise<TeamDataResult> {
   const sellerUrl = buildUrl("/api/dashboard/onec-consultants", {
     days: query.period,
@@ -50,23 +52,17 @@ export async function fetchTeamData(
     channel: query.channel,
   });
 
-  const [sellerResponse, marginResponse] = await Promise.all([
-    fetch(sellerUrl, requestOptions(signal)),
-    fetch(marginUrl, requestOptions(signal)),
+  const [payload, marginResult] = await Promise.all([
+    fetchSyncedJson<SellerPayload>(sellerUrl, signal, undefined, onPartial),
+    fetchSyncedJson<MarginAnalyticsResponse>(marginUrl, signal)
+      .then(value => ({ value, error: "" }))
+      .catch(cause => ({ value: null, error: cause instanceof Error ? cause.message : "Маржа недоступна" })),
   ]);
-  const [payload, marginPayload] = await Promise.all([
-    readJson<SellerPayload>(sellerResponse),
-    readJson<MarginAnalyticsResponse>(marginResponse),
-  ]);
-
-  ensureSuccessful(sellerResponse, payload.message);
 
   return {
     payload,
-    margin: marginResponse.ok ? marginPayload.items ?? null : null,
-    marginError: marginResponse.ok
-      ? ""
-      : marginPayload.message ?? `Ошибка HTTP ${marginResponse.status}`,
+    margin: marginResult.value?.items ?? null,
+    marginError: marginResult.error,
   };
 }
 
@@ -99,14 +95,6 @@ function buildUrl(
   });
 
   return `${API_URL}${pathname}?${params.toString()}`;
-}
-
-function requestOptions(signal: AbortSignal): RequestInit {
-  return {
-    signal,
-    credentials: "include",
-    cache: "no-store",
-  };
 }
 
 async function readJson<T>(response: Response): Promise<T> {

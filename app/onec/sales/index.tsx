@@ -176,6 +176,8 @@ export function OnecSales() {
             ? "из кэша"
             : sales.loadMeta?.cache === "shared"
               ? "общий запрос"
+              : sales.loadMeta?.cache === "postgres"
+                ? "из базы данных"
               : "из 1С"}
           {typeof sales.loadMeta?.durationMs === "number"
             ? ` · ${sales.loadMeta.durationMs} мс`

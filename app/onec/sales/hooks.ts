@@ -65,28 +65,22 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
   useEffect(() => {
     const controller = new AbortController();
     let refreshTimer: number | undefined;
+    let referencesStarted = false;
+    let reportsPartiallyLoaded = false;
     const currentRange = dateRange || monthToDateRange();
     const currentQuery = salesHistoryQuery(currentRange);
     const previousQuery = salesHistoryQuery(previousDateRange(currentRange));
 
     async function loadReferences() {
+      referencesStarted = true;
       setReferencesLoading(true);
       setReferenceError("");
 
       try {
-        const response = await fetch(
+        const data = await fetchSyncedJson<Partial<OnecSalesResponse>>(
           `${API_URL}/api/dashboard/onec-reports?${currentQuery}&references=only`,
-          {
-            credentials: "include",
-            cache: "no-store",
-            signal: controller.signal,
-          },
+          controller.signal,
         );
-        const data = (await response.json()) as Partial<OnecSalesResponse>;
-
-        if (!response.ok) {
-          throw new Error(data.message || `Ошибка HTTP ${response.status}`);
-        }
 
         if (controller.signal.aborted) return;
 
@@ -129,10 +123,12 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
             controller.signal, setSyncProgress,
             query === currentQuery ? partial => {
               if (controller.signal.aborted) return;
+              reportsPartiallyLoaded = true;
               setReports((partial.items || []).filter(report => report.Posted));
               setLoadMeta(partial.meta);
               setAnalysisTimestamp(Date.now());
               setLoading(false);
+              if (!referencesStarted) void loadReferences();
             } : undefined,
           );
         };
@@ -162,11 +158,9 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
       } catch (loadError) {
         if (controller.signal.aborted || isAbortError(loadError)) return;
 
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : "Не удалось загрузить данные 1С",
-        );
+        const message = loadError instanceof Error ? loadError.message : "Не удалось загрузить данные 1С";
+        if (reportsPartiallyLoaded) setSyncProgress(`Часть отчётов доступна. ${message}`);
+        else setError(message);
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
@@ -211,6 +205,8 @@ export function useCheckAnalytics(
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
+    let receivedPartial = false;
 
     async function load() {
       try {
@@ -219,17 +215,20 @@ export function useCheckAnalytics(
         const range = dateRange || (period === 'month' ? monthToDateRange() : rollingDateRange(PERIODS[period].days));
         const query = new URLSearchParams(dateRangeQuery(range));
         query.set("includePrevious", "false");
-        const analytics = await loadCheckAnalytics(query.toString());
+        const analytics = await loadCheckAnalytics(query.toString(), controller.signal, partial => {
+          if (!active) return;
+          receivedPartial = true;
+          setData(partial);
+          setLoading(false);
+        });
         if (active) setData(analytics);
       } catch (loadError) {
         if (!active) return;
 
-        setData(null);
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : "Не удалось загрузить аналитику чеков",
-        );
+        if (!receivedPartial) {
+          setData(null);
+          setError(loadError instanceof Error ? loadError.message : "Не удалось загрузить аналитику чеков");
+        }
       } finally {
         if (active) setLoading(false);
       }
@@ -238,6 +237,7 @@ export function useCheckAnalytics(
     load();
     return () => {
       active = false;
+      controller.abort();
     };
   }, [dateRange, period]);
 
@@ -255,6 +255,7 @@ export function useMarginAnalytics(
 
   useEffect(() => {
     const controller = new AbortController();
+    let receivedPartial = false;
 
     async function load() {
       try {
@@ -263,23 +264,22 @@ export function useMarginAnalytics(
         const range = dateRange || (period === 'month' ? monthToDateRange() : rollingDateRange(PERIODS[period].days));
         const query = new URLSearchParams(dateRangeQuery(range));
         query.set("includePrevious", "false");
-        const response = await fetch(
+        const payload = await fetchSyncedJson<MarginAnalyticsResponse>(
           `${API_URL}/api/dashboard/onec-margin?${query}`,
-          { signal: controller.signal, credentials: "include" },
+          controller.signal, undefined, partial => {
+            if (controller.signal.aborted) return;
+            receivedPartial = true;
+            setData(partial.items || null);
+            setLoading(false);
+          },
         );
-        const payload = (await response.json()) as MarginAnalyticsResponse;
-        if (!response.ok) {
-          throw new Error(payload.message || `Ошибка HTTP ${response.status}`);
-        }
         setData(payload.items || null);
       } catch (loadError) {
         if (isAbortError(loadError)) return;
-        setData(null);
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : "Не удалось загрузить маржу",
-        );
+        if (!receivedPartial) {
+          setData(null);
+          setError(loadError instanceof Error ? loadError.message : "Не удалось загрузить маржу");
+        }
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }

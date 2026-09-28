@@ -57,7 +57,15 @@ export async function rangeStatus(from, to, { enqueue = true } = {}) {
 export async function claimJob(preferredFrom, preferredTo) {
   const result = await getPool().query(`WITH next AS (
     SELECT id FROM sync_jobs WHERE status='pending' AND run_after <= now()
-    ORDER BY CASE WHEN sync_date BETWEEN $1 AND $2 THEN 0 ELSE 1 END, run_after, id FOR UPDATE SKIP LOCKED LIMIT 1
+    ORDER BY CASE
+      WHEN sync_date BETWEEN $1 AND $2 AND data_type='reports' THEN 0
+      WHEN sync_date BETWEEN $1 AND $2 AND data_type LIKE 'raw:Catalog_%' THEN 1
+      WHEN sync_date=$2 AND data_type IN ('raw:Balance_ТоварыНаСкладах',
+        'raw:SliceLast_СебестоимостьНоменклатуры') THEN 2
+      WHEN sync_date BETWEEN $1 AND $2 AND data_type='raw:Document_ЧекККМ' THEN 3
+      WHEN sync_date BETWEEN $1 AND $2 AND data_type='raw:AccumulationRegister_Продажи_RecordType' THEN 4
+      WHEN sync_date BETWEEN $1 AND $2 THEN 5
+      ELSE 6 END, run_after, id FOR UPDATE SKIP LOCKED LIMIT 1
   ) UPDATE sync_jobs j SET status='running', attempt=attempt+1, started_at=now()
     FROM next WHERE j.id=next.id RETURNING j.*, j.sync_date::text AS day`, [preferredFrom, preferredTo]);
   const job = result.rows[0];
@@ -218,4 +226,33 @@ export async function readRaw(source, from, to, limit, offset) {
       WHERE source=$1 AND scope_date BETWEEN $2 AND $3`, [source, from, to]),
   ]);
   return { items: rows.rows.map(row => row.raw_data), total: count.rows[0].total };
+}
+
+export async function readCatalogSnapshot(source, to) {
+  const result = await getPool().query(`SELECT sync_date::text AS day FROM sync_days
+    WHERE data_type=$1 AND status='completed' AND sync_date<=$2
+    ORDER BY sync_date DESC LIMIT 1`, [`raw:${source}`, to]);
+  const day = result.rows[0]?.day;
+  if (!day) return { day: null, items: [] };
+  const rows = await getPool().query(`SELECT r.raw_data FROM onec_raw_records r
+    JOIN sync_jobs j ON j.data_type=$1 AND j.sync_date=r.scope_date AND j.status='completed'
+    WHERE r.source=$2 AND r.scope_date=$3`, [`raw:${source}`, source, day]);
+  return { day, items: rows.rows.map(row => row.raw_data) };
+}
+
+export async function readCompletedRaw(source, from, to) {
+  daysInRange(from, to);
+  const rows = await getPool().query(`SELECT r.raw_data FROM onec_raw_records r
+    JOIN sync_days d ON d.data_type=$1 AND d.sync_date=r.scope_date AND d.status='completed'
+    JOIN sync_jobs j ON j.data_type=$1 AND j.sync_date=r.scope_date AND j.status='completed'
+    WHERE r.source=$2 AND r.scope_date BETWEEN $3 AND $4
+    ORDER BY r.scope_date,r.source_key`, [`raw:${source}`, source, from, to]);
+  return rows.rows.map(row => row.raw_data);
+}
+
+export async function enqueueMissingRaw(source, from, to) {
+  const count = daysInRange(from, to).length;
+  const result = await getPool().query(`SELECT count(*)::integer AS count FROM sync_jobs
+    WHERE data_type=$1 AND sync_date BETWEEN $2 AND $3`, [`raw:${source}`, from, to]);
+  if (result.rows[0].count < count) await enqueueDays(from, to, { dataType: `raw:${source}` });
 }
