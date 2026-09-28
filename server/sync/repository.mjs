@@ -11,8 +11,8 @@ export async function enqueueDays(from, to, { refresh = false, retryNow = false 
         ON CONFLICT (data_type, sync_date) DO UPDATE SET status='pending', attempt=0, run_after=now(), error=NULL, completed_at=NULL
         WHERE sync_jobs.status='failed' OR ($2 AND sync_jobs.status='completed') OR ($3 AND sync_jobs.status='pending')`, [day, refresh, retryNow]);
       await client.query(`INSERT INTO sync_days (data_type, sync_date, status) VALUES ('reports', $1, 'pending')
-        ON CONFLICT (data_type, sync_date) DO UPDATE SET status='pending', error=NULL
-        WHERE sync_days.status='failed'`, [day]);
+        ON CONFLICT (data_type, sync_date) DO UPDATE SET status='pending', error=NULL, completed_at=NULL
+        WHERE sync_days.status='failed' OR ($2 AND sync_days.status='completed')`, [day, refresh]);
     }
     await client.query('COMMIT');
   } catch (error) {
@@ -25,8 +25,11 @@ export async function enqueueDays(from, to, { refresh = false, retryNow = false 
 export async function rangeStatus(from, to, { enqueue = true } = {}) {
   const days = daysInRange(from, to);
   const result = await getPool().query(
-    `SELECT sync_date::text AS day, status, error FROM sync_days
-     WHERE data_type='reports' AND sync_date BETWEEN $1 AND $2`, [from, to]);
+    `SELECT d.sync_date::text AS day,
+       CASE WHEN j.status IN ('pending','running','failed') THEN j.status ELSE d.status END AS status,
+       COALESCE(j.error, d.error) AS error
+     FROM sync_days d LEFT JOIN sync_jobs j ON j.data_type=d.data_type AND j.sync_date=d.sync_date
+     WHERE d.data_type='reports' AND d.sync_date BETWEEN $1 AND $2`, [from, to]);
   const states = new Map(result.rows.map(row => [row.day, row]));
   const missing = days.filter(day => !states.has(day));
   if (enqueue && missing.length) {
@@ -51,8 +54,8 @@ export async function claimJob() {
   ) UPDATE sync_jobs j SET status='running', attempt=attempt+1, started_at=now()
     FROM next WHERE j.id=next.id RETURNING j.*, j.sync_date::text AS day`);
   const job = result.rows[0];
-  if (job) await getPool().query(`UPDATE sync_days SET status='running', started_at=now(), error=NULL
-    WHERE data_type=$1 AND sync_date=$2 AND status <> 'completed'`, [job.data_type, job.day]);
+  if (job) await getPool().query(`UPDATE sync_days SET status='running', started_at=now(), completed_at=NULL, error=NULL
+    WHERE data_type=$1 AND sync_date=$2`, [job.data_type, job.day]);
   return job;
 }
 
