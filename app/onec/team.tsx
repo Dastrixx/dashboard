@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { DataState, MissingSource } from "./shared";
+import { rollingDateRange } from "./sales/config";
 import { buildSellerChart, buildTeamView } from "./team/analytics";
 import { TeamHeader } from "./team/header";
 import { useTeamData, useTeamPlan } from "./team/hooks";
@@ -11,15 +12,36 @@ import { TeamSummary } from "./team/summary";
 import type { Period, SalesChannel } from "./team/types";
 import type { SellerPayload } from "./types";
 
+const DEFAULT_TEAM_RANGE = rollingDateRange(30);
+
 export function OnecTeam() {
   const [period, setPeriod] = useState<Period>(30);
   const [storeKey, setStoreKey] = useState("all");
   const [channel, setChannel] = useState<SalesChannel>("all");
   const [selectedKey, setSelectedKey] = useState("");
+  const [dateFrom, setDateFrom] = useState(DEFAULT_TEAM_RANGE.from);
+  const [dateTo, setDateTo] = useState(DEFAULT_TEAM_RANGE.to);
+  const [dateRange, setDateRange] = useState(DEFAULT_TEAM_RANGE);
 
-  const query = { storeKey, period, channel };
-  const data = useTeamData(query);
-  const teamPlan = useTeamPlan(query);
+  const data = useTeamData({ storeKey, channel, dateRange });
+  const teamPlan = useTeamPlan({ storeKey, period, channel });
+
+  const selectPeriod = (value: Period) => {
+    const range = rollingDateRange(value);
+    setPeriod(value);
+    setDateFrom(range.from);
+    setDateTo(range.to);
+    setDateRange(range);
+  };
+
+  const canApplyDateRange = Boolean(
+    dateFrom && dateTo && dateFrom <= dateTo,
+  );
+
+  const applyDateRange = () => {
+    if (!canApplyDateRange) return;
+    setDateRange({ from: dateFrom, to: dateTo });
+  };
 
   const view = useMemo(
     () => buildTeamView(data.payload, storeKey),
@@ -49,9 +71,16 @@ export function OnecTeam() {
         storeKey={storeKey}
         period={period}
         channel={channel}
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+        dateRange={dateRange}
+        canApplyDateRange={canApplyDateRange}
         onStoreChange={setStoreKey}
-        onPeriodChange={setPeriod}
+        onPeriodChange={selectPeriod}
         onChannelChange={setChannel}
+        onDateFromChange={setDateFrom}
+        onDateToChange={setDateTo}
+        onApplyDateRange={applyDateRange}
       />
 
       <TeamSummary
