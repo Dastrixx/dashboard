@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { MarginAnalyticsResponse } from "../sales/types";
+import type { MarginAnalyticsResponse, SalesDateRange } from "../sales/types";
 import type { SellerPayload } from "../types";
 import {
   fetchTeamData,
@@ -8,13 +8,23 @@ import {
 } from "./api";
 import type { Period, SalesChannel } from "./types";
 
-type TeamQuery = {
+type TeamDataQuery = {
+  storeKey: string;
+  channel: SalesChannel;
+  dateRange: SalesDateRange;
+};
+
+type TeamPlanQuery = {
   storeKey: string;
   period: Period;
   channel: SalesChannel;
 };
 
-export function useTeamData({ storeKey, period, channel }: TeamQuery) {
+export function useTeamData({
+  storeKey,
+  channel,
+  dateRange,
+}: TeamDataQuery) {
   const [payload, setPayload] = useState<SellerPayload>({});
   const [margin, setMargin] = useState<
     MarginAnalyticsResponse["items"] | null
@@ -33,7 +43,7 @@ export function useTeamData({ storeKey, period, channel }: TeamQuery) {
         setMarginError("");
 
         const result = await fetchTeamData(
-          { storeKey, period, channel },
+          { storeKey, channel, dateRange },
           controller.signal,
         );
 
@@ -55,7 +65,7 @@ export function useTeamData({ storeKey, period, channel }: TeamQuery) {
 
     void load();
     return () => controller.abort();
-  }, [channel, period, storeKey]);
+  }, [channel, dateRange.from, dateRange.to, storeKey]);
 
   return {
     payload,
@@ -66,7 +76,7 @@ export function useTeamData({ storeKey, period, channel }: TeamQuery) {
   };
 }
 
-export function useTeamPlan({ storeKey, period, channel }: TeamQuery) {
+export function useTeamPlan({ storeKey, period, channel }: TeamPlanQuery) {
   const [plan, setPlan] = useState(0);
   const [planInput, setPlanInput] = useState("");
   const [loading, setLoading] = useState(true);
