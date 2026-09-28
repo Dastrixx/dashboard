@@ -1,7 +1,7 @@
 import { getPool } from './db.mjs';
 import { daysInRange } from './ranges.mjs';
 
-export async function enqueueDays(from, to, { refresh = false } = {}) {
+export async function enqueueDays(from, to, { refresh = false, retryNow = false } = {}) {
   const days = daysInRange(from, to);
   const client = await getPool().connect();
   try {
@@ -9,7 +9,7 @@ export async function enqueueDays(from, to, { refresh = false } = {}) {
     for (const day of days) {
       await client.query(`INSERT INTO sync_jobs (data_type, sync_date, status) VALUES ('reports', $1, 'pending')
         ON CONFLICT (data_type, sync_date) DO UPDATE SET status='pending', attempt=0, run_after=now(), error=NULL, completed_at=NULL
-        WHERE sync_jobs.status='failed' OR ($2 AND sync_jobs.status='completed')`, [day, refresh]);
+        WHERE sync_jobs.status='failed' OR ($2 AND sync_jobs.status='completed') OR ($3 AND sync_jobs.status='pending')`, [day, refresh, retryNow]);
       await client.query(`INSERT INTO sync_days (data_type, sync_date, status) VALUES ('reports', $1, 'pending')
         ON CONFLICT (data_type, sync_date) DO UPDATE SET status='pending', error=NULL
         WHERE sync_days.status='failed'`, [day]);

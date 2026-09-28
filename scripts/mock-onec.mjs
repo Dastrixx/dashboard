@@ -17,9 +17,15 @@ const server = createServer((request, response) => {
     return;
   }
   const filter = url.searchParams.get('$filter') || '';
+  if (filter && process.env.MOCK_ONEC_REJECT_DATE_FILTER === 'true') {
+    response.writeHead(500, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify({ 'odata.error': { message: { value: 'Операция не разрешена в предложении "ГДЕ"' } } }));
+    return;
+  }
   const start = filter.match(/Date ge datetime'([^']+)'/)?.[1];
   const end = filter.match(/Date lt datetime'([^']+)'/)?.[1];
-  const items = rows.filter(row => (!start || row.Date >= start) && (!end || row.Date < end));
+  const items = rows.filter(row => (!start || row.Date >= start) && (!end || row.Date < end))
+    .sort((a, b) => b.Date.localeCompare(a.Date));
   const skip = Number(url.searchParams.get('$skip') || 0);
   const top = Number(url.searchParams.get('$top') || 100);
   response.writeHead(200, { 'Content-Type': 'application/json' });

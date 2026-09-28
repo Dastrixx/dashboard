@@ -17,6 +17,6 @@ if (process.argv.includes('--initial')) {
 }
 if (process.argv.includes('--refresh')) refresh = true;
 try {
-  const count = await enqueueDays(from, to, { refresh });
+  const count = await enqueueDays(from, to, { refresh, retryNow: process.argv.includes('--retry-now') });
   console.log(`[SYNC][reports] queued ${count} days ${from}..${to}`);
 } finally { await closePool(); }
