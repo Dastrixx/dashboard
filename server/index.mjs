@@ -802,55 +802,29 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
         $orderby: "Date desc",
       };
 
-      const loadChecks = async (filter) => {
-        const result = [];
-        const pageSize = 500;
-        const maxChecks = Math.max(
-          Number(process.env.ONEC_CONSULTANT_MAX_CHECKS || 50_000),
-          pageSize,
-        );
-
-        while (result.length < maxChecks) {
-          const page = await onecGet("Document_ЧекККМ", {
-            ...checkQuery,
-            $top: Math.min(pageSize, maxChecks - result.length),
-            $skip: result.length,
-            $filter: filter,
-          });
-          result.push(...page);
-          if (page.length < pageSize) break;
-
-          if (!filter.includes("Date ") && page.length) {
-            const oldest = parseOnecDateTime(page[page.length - 1]?.Date);
-            if (Number.isFinite(oldest) && oldest < checkStartDate.getTime()) {
-              break;
-            }
-          }
-        }
-
-        return filterByPeriod(
-          result,
-          "Date",
-          checkStartDate,
-          checkEndDate,
-        );
-      };
-
       const dateFilter = [
         "Posted eq true",
         `Date ge datetime'${toOdataDateTime(checkStartDate)}'`,
-        `Date lt datetime'${toOdataDateTime(checkEndDate)}'`,
       ].join(" and ");
       let checks;
 
       try {
-        checks = await loadChecks(dateFilter);
+        const loadedChecks = await onecGet("Document_ЧекККМ", {
+          ...checkQuery,
+          $top: 1000,
+          $filter: dateFilter,
+        });
+        checks = filterByPeriod(
+          loadedChecks,
+          "Date",
+          checkStartDate,
+          checkEndDate,
+        );
       } catch (error) {
         console.warn(
           [
             "1С не приняла период консультантов по чекам.",
-            "Не запускаем тяжёлый полный скан Document_ЧекККМ;",
-            "используем fallback по розничным отчётам за выбранный диапазон:",
+            "Используем fallback по розничным отчётам за выбранный диапазон:",
           ].join(" "),
           error instanceof Error ? error.message : error,
         );
