@@ -8,6 +8,7 @@ process.on('SIGTERM', () => { stopping = true; });
 process.on('SIGINT', () => { stopping = true; });
 
 async function scheduleDaily() {
+  if (process.env.SYNC_AUTO_SCHEDULE === 'false') return;
   const { day, hour } = businessDate();
   if (hour < 5) return;
   const result = await getPool().query(`INSERT INTO sync_schedule(sync_date) VALUES ($1)

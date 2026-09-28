@@ -1,8 +1,9 @@
 const DAY_MS = 86_400_000;
 
 export function validDay(day) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(day) &&
-    new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) === day;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
+  const time = Date.parse(`${day}T00:00:00Z`);
+  return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === day;
 }
 
 export function daysInRange(from, to) {
