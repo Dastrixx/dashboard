@@ -109,6 +109,20 @@ docker compose -f compose.sync.yaml exec postgres psql -U dashboard -d dashboard
 npm run sync:verify -- --from=2026-08-01 --to=2026-08-02
 ```
 
+Если второй запуск worker сообщает `Worker уже запущен`, один процесс уже держит блокировку PostgreSQL. Посмотрите его первый терминал. Если он был запущен до изменения `.env` (например, смены порта mock с 4100 на 4101), остановите его через `Ctrl+C` и запустите заново: запущенный Node не перечитывает `.env`. Найти процесс в PowerShell:
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match 'server[\\/]sync[\\/]worker\.mjs' } | Select-Object ProcessId,CommandLine
+```
+
+Чтобы понять, почему `sync:verify` показывает `0/2`, проверьте очередь:
+
+```powershell
+docker compose -f compose.sync.yaml exec postgres psql -U dashboard -d dashboard -c "SELECT id,sync_date,status,attempt,run_after,started_at,error FROM sync_jobs ORDER BY id LIMIT 25"
+```
+
+`pending` означает ожидание worker или более ранних задач. При `running` смотрите его лог; при `failed` смотрите `error`. После устранения ошибки снова поставьте неудачные дни через `npm run sync:range -- --from=2026-08-01 --to=2026-08-02`.
+
 API защищён авторизацией. Создайте локального пользователя через `npm run auth:create-user` и войдите в интерфейс `http://localhost:5173/login`. Затем откройте в той же вкладке `http://localhost:4000/api/sync/health` и `http://localhost:4000/api/dashboard/onec-reports?from=2026-08-01&to=2026-08-02&references=false`. Готовый диапазон вернёт HTTP 200 с двумя документами и `cache: postgres`.
 
 Запрос за `2026-08-03` сперва вернёт HTTP 202, затем worker сохранит пустой день, и следующий запрос вернёт HTTP 200 с пустым `items`. Перезапуск `sync:worker` не должен терять очередь. Для выключения локальной базы: `docker compose -f compose.sync.yaml down`; для полного удаления тестовых данных дополнительно `-v`.

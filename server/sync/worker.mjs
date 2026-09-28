@@ -25,30 +25,34 @@ async function scheduleDaily() {
 const lockClient = await getPool().connect();
 try {
   const lock = await lockClient.query('SELECT pg_try_advisory_lock(38291741) AS acquired');
-  if (!lock.rows[0].acquired) throw new Error('Another sync worker is already running');
-  await recoverJobs();
-  while (!stopping) {
-    try {
-      await scheduleDaily();
-      const job = await claimJob();
-      if (!job) {
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        continue;
-      }
-      const day = job.day;
-      const start = Date.now();
-      console.log(`[SYNC][reports][${day}] started attempt=${job.attempt}`);
+  if (!lock.rows[0].acquired) {
+    console.error('[SYNC] Worker уже запущен для этой базы. Проверьте первый терминал и очередь sync_jobs. Если меняли .env, остановите старый worker и запустите заново.');
+    process.exitCode = 1;
+  } else {
+    await recoverJobs();
+    while (!stopping) {
       try {
-        const reports = await fetchReportDay(day);
-        await storeReports(day, reports, job.id);
-        console.log(`[SYNC][reports][${day}] completed fetched=${reports.length} durationMs=${Date.now() - start}`);
+        await scheduleDaily();
+        const job = await claimJob();
+        if (!job) {
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          continue;
+        }
+        const day = job.day;
+        const start = Date.now();
+        console.log(`[SYNC][reports][${day}] started attempt=${job.attempt}`);
+        try {
+          const reports = await fetchReportDay(day);
+          await storeReports(day, reports, job.id);
+          console.log(`[SYNC][reports][${day}] completed fetched=${reports.length} durationMs=${Date.now() - start}`);
+        } catch (error) {
+          console.error(`[SYNC][reports][${day}] attempt=${job.attempt} error=${error.message}`);
+          await failJob(job, error.message);
+        }
       } catch (error) {
-        console.error(`[SYNC][reports][${day}] attempt=${job.attempt} error=${error.message}`);
-        await failJob(job, error.message);
+        console.error('[SYNC] worker loop error', error);
+        await new Promise(resolve => setTimeout(resolve, 5000));
       }
-    } catch (error) {
-      console.error('[SYNC] worker loop error', error);
-      await new Promise(resolve => setTimeout(resolve, 5000));
     }
   }
 } finally {
