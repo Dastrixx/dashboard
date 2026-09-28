@@ -659,10 +659,30 @@ app.get("/api/dashboard/onec-product-categories", async (request, response) => {
 
 app.get("/api/dashboard/onec-consultants", async (request, response) => {
   try {
+    const from = typeof request.query.from === "string" ? request.query.from : "";
+    const to = typeof request.query.to === "string" ? request.query.to : "";
+    const hasCustomRange =
+      /^\d{4}-\d{2}-\d{2}$/.test(from) &&
+      /^\d{4}-\d{2}-\d{2}$/.test(to);
     const days = [1, 7, 30].includes(Number(request.query.days))
       ? Number(request.query.days)
       : 30;
     const channel = parseSalesChannel(request.query.channel);
+    const rangeStart = hasCustomRange
+      ? new Date(parseOnecDateTime(`${from}T00:00:00`))
+      : null;
+    const rangeEnd = hasCustomRange
+      ? new Date(parseOnecDateTime(`${to}T23:59:59`) + 1000)
+      : null;
+
+    if (
+      hasCustomRange &&
+      (!Number.isFinite(rangeStart?.getTime()) ||
+        !Number.isFinite(rangeEnd?.getTime()) ||
+        rangeStart >= rangeEnd)
+    ) {
+      return response.status(400).json({ message: "Некорректный диапазон дат" });
+    }
     const grouped = new Map();
     let salesLines = 0;
     let returnLines = 0;
@@ -745,20 +765,30 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       grouped.set(key, current);
     };
 
-    const latestChecks = await onecGet("Document_ЧекККМ", {
-      $top: 1,
-      $select: "Date",
-      $filter: "Posted eq true",
-      $orderby: "Date desc",
-    });
+    let checkStartDate = rangeStart;
+    let checkEndDate = rangeEnd;
 
-    if (latestChecks.length) {
-      latestDate = latestChecks[0].Date;
-      const checkStartDate = new Date(
-        parseOnecDateTime(latestDate) - days * 86_400_000,
-      );
+    if (!hasCustomRange) {
+      const latestChecks = await onecGet("Document_ЧекККМ", {
+        $top: 1,
+        $select: "Date",
+        $filter: "Posted eq true",
+        $orderby: "Date desc",
+      });
+
+      if (latestChecks.length) {
+        latestDate = latestChecks[0].Date;
+        checkEndDate = new Date(parseOnecDateTime(latestDate) + 1000);
+        checkStartDate = new Date(
+          parseOnecDateTime(latestDate) - days * 86_400_000,
+        );
+      }
+    } else {
+      latestDate = to;
+    }
+
+    if (checkStartDate && checkEndDate) {
       const checkQuery = {
-        $top: 1000,
         $select: [
           "Ref_Key",
           "Date",
@@ -771,25 +801,56 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
         ].join(","),
         $orderby: "Date desc",
       };
+
+      const loadChecks = async (filter) => {
+        const result = [];
+        const pageSize = 500;
+        const maxChecks = Math.max(
+          Number(process.env.ONEC_CONSULTANT_MAX_CHECKS || 50_000),
+          pageSize,
+        );
+
+        while (result.length < maxChecks) {
+          const page = await onecGet("Document_ЧекККМ", {
+            ...checkQuery,
+            $top: Math.min(pageSize, maxChecks - result.length),
+            $skip: result.length,
+            $filter: filter,
+          });
+          result.push(...page);
+          if (page.length < pageSize) break;
+
+          if (!filter.includes("Date ") && page.length) {
+            const oldest = parseOnecDateTime(page[page.length - 1]?.Date);
+            if (Number.isFinite(oldest) && oldest < checkStartDate.getTime()) {
+              break;
+            }
+          }
+        }
+
+        return filterByPeriod(
+          result,
+          "Date",
+          checkStartDate,
+          checkEndDate,
+        );
+      };
+
+      const dateFilter = [
+        "Posted eq true",
+        `Date ge datetime'${toOdataDateTime(checkStartDate)}'`,
+        `Date lt datetime'${toOdataDateTime(checkEndDate)}'`,
+      ].join(" and ");
       let checks;
 
       try {
-        checks = await onecGet("Document_ЧекККМ", {
-          ...checkQuery,
-          $filter: [
-            "Posted eq true",
-            `Date ge datetime'${toOdataDateTime(checkStartDate)}'`,
-          ].join(" and "),
-        });
+        checks = await loadChecks(dateFilter);
       } catch (error) {
         console.warn(
-          "1С не приняла период консультантов по чекам, загружаем последние чеки:",
+          "1С не приняла период консультантов по чекам, фильтруем локально:",
           error instanceof Error ? error.message : error,
         );
-        checks = await onecGet("Document_ЧекККМ", {
-          ...checkQuery,
-          $filter: "Posted eq true",
-        });
+        checks = await loadChecks("Posted eq true");
       }
       scannedChecks = checks.length;
 
@@ -816,10 +877,16 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
     // В некоторых базах консультант переносится из чеков только при закрытии
     // смены. Тогда ищем его в строках отчёта о розничных продажах.
     if (!grouped.size) {
-      const reportResult = await loadConsultantReportPagesLegacyCached({
-        limit: 500,
-        days,
-      });
+      const reportResult = hasCustomRange
+        ? await loadReportPagesByRangeCached({
+            limit: null,
+            from,
+            to,
+          })
+        : await loadConsultantReportPagesLegacyCached({
+            limit: 500,
+            days,
+          });
       reports = reportResult.items;
       cache = reportResult.cache;
       latestDate = reports[0]?.Date || latestDate;
@@ -876,7 +943,9 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
       items,
       references: { sellers: consultants, stores },
       meta: {
-        days,
+        days: hasCustomRange ? null : days,
+        from: hasCustomRange ? from : null,
+        to: hasCustomRange ? to : null,
         channel,
         loaded: items.length,
         latestDate: latestDate ? normalizeOnecDateTime(latestDate) : null,
