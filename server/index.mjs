@@ -847,10 +847,14 @@ app.get("/api/dashboard/onec-consultants", async (request, response) => {
         checks = await loadChecks(dateFilter);
       } catch (error) {
         console.warn(
-          "1С не приняла период консультантов по чекам, фильтруем локально:",
+          [
+            "1С не приняла период консультантов по чекам.",
+            "Не запускаем тяжёлый полный скан Document_ЧекККМ;",
+            "используем fallback по розничным отчётам за выбранный диапазон:",
+          ].join(" "),
           error instanceof Error ? error.message : error,
         );
-        checks = await loadChecks("Posted eq true");
+        checks = [];
       }
       scannedChecks = checks.length;
 
