@@ -18,7 +18,7 @@ function wait(ms: number, signal?: AbortSignal) {
 }
 
 export async function fetchSyncedJson<T>(url: string, signal?: AbortSignal,
-  onProgress?: (message: string) => void): Promise<T> {
+  onProgress?: (message: string) => void, onPartial?: (payload: T) => void): Promise<T> {
   while (true) {
     const response = await fetch(url, { credentials: 'include', cache: 'no-store', signal });
     const payload = (await response.json()) as T & SyncResponse;
@@ -28,6 +28,16 @@ export async function fetchSyncedJson<T>(url: string, signal?: AbortSignal,
       continue;
     }
     if (!response.ok) throw new Error(payload.message || `Ошибка HTTP ${response.status}`);
+    if (payload.status === 'syncing') {
+      onPartial?.(payload);
+      onProgress?.(payload.message || `Показаны загруженные дни: ${payload.completedDays ?? 0} из ${payload.totalDays ?? 0}`);
+      await wait(3000, signal);
+      continue;
+    }
+    if (payload.status === 'failed') {
+      onProgress?.(`${payload.message || 'Период загружен частично'}; есть неудачные дни. Повторите синхронизацию.`);
+      return payload;
+    }
     onProgress?.('');
     return payload;
   }

@@ -82,7 +82,10 @@ try {
         }
         const day = job.day;
         const start = Date.now();
-        console.log(`[SYNC][reports][${day}] started attempt=${job.attempt}`);
+        console.log(`[SYNC][${job.data_type}][${day}] started attempt=${job.attempt}`);
+        const heartbeat = setInterval(() => {
+          console.log(`[SYNC][${job.data_type}][${day}] работаем ${Math.round((Date.now() - start) / 1000)}с`);
+        }, 30_000);
         try {
           if (job.data_type === 'reports') {
             const reports = await fetchReportDay(day);
@@ -95,8 +98,10 @@ try {
             console.log(`[SYNC][${source}][${day}] completed fetched=${rows.length} durationMs=${Date.now() - start}`);
           } else throw new Error(`Неизвестный тип задания ${job.data_type}`);
         } catch (error) {
-          console.error(`[SYNC][reports][${day}] attempt=${job.attempt} error=${error.message}`);
+          console.error(`[SYNC][${job.data_type}][${day}] attempt=${job.attempt} error=${error.message}`);
           await failJob(job, error.message);
+        } finally {
+          clearInterval(heartbeat);
         }
       } catch (error) {
         console.error('[SYNC] worker loop error', error);

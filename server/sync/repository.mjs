@@ -149,9 +149,12 @@ export async function failJob(job, error) {
 }
 
 export async function readReports(from, to) {
-  const result = await getPool().query(`SELECT raw_data FROM retail_reports
-    WHERE sync_date BETWEEN $1 AND $2 AND posted AND NOT deletion_mark
-    ORDER BY document_date DESC, source_id DESC`, [from, to]);
+  const result = await getPool().query(`SELECT r.raw_data FROM retail_reports r
+    JOIN sync_days d ON d.data_type='reports' AND d.sync_date=r.sync_date
+    JOIN sync_jobs j ON j.data_type='reports' AND j.sync_date=r.sync_date
+    WHERE r.sync_date BETWEEN $1 AND $2 AND d.status='completed' AND j.status='completed'
+      AND r.posted AND NOT r.deletion_mark
+    ORDER BY r.document_date DESC, r.source_id DESC`, [from, to]);
   return result.rows.map(row => row.raw_data);
 }
 

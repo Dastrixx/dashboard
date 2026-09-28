@@ -169,7 +169,7 @@ app.get('/api/dashboard/onec-reports', async (request, response, next) => {
       }
     }
     const coverage = await rangeStatus(from, to);
-    if (coverage.status !== 'ready') {
+    if (coverage.status !== 'ready' && coverage.completedDays === 0) {
       return response.status(coverage.status === 'failed' ? 503 : 202).json({
         ...coverage,
         message: coverage.status === 'failed'
@@ -179,7 +179,10 @@ app.get('/api/dashboard/onec-reports', async (request, response, next) => {
     }
     const items = await readReports(from, to);
     const normalized = items.map(report => ({ ...report, Date: normalizeOnecDateTime(report.Date) }));
-    return response.json({ items: normalized, references: { products: [], warehouses: [], categories: [] },
+    return response.json({ ...coverage,
+      message: coverage.status === 'ready' ? undefined
+        : `Показаны загруженные дни: ${coverage.completedDays} из ${coverage.totalDays}`,
+      items: normalized, references: { products: [], warehouses: [], categories: [] },
       meta: { from, to, loaded: items.length, cache: 'postgres', referencesLoaded: false,
         latestDate: normalized[0]?.Date || null, truncated: false, ...coverage } });
   } catch (error) {

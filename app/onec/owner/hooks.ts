@@ -94,6 +94,11 @@ export function useOwnerOverview(
           return fetchSyncedJson<OwnerReportsResponse>(
             `${API_URL}/api/dashboard/onec-reports?${reportQuery}&references=false`,
             controller.signal, setSyncProgress,
+            range === effectiveRange ? partial => {
+              if (controller.signal.aborted) return;
+              setReports(partial.items || []);
+              setReportsLoading(false);
+            } : undefined,
           );
         };
         const current = await loadRange(effectiveRange);

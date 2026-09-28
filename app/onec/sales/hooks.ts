@@ -127,6 +127,13 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
           return fetchSyncedJson<Partial<OnecSalesResponse>>(
             `${API_URL}/api/dashboard/onec-reports?${query}&references=false`,
             controller.signal, setSyncProgress,
+            query === currentQuery ? partial => {
+              if (controller.signal.aborted) return;
+              setReports((partial.items || []).filter(report => report.Posted));
+              setLoadMeta(partial.meta);
+              setAnalysisTimestamp(Date.now());
+              setLoading(false);
+            } : undefined,
           );
         };
         const current = await loadRange(currentQuery);

@@ -1,6 +1,7 @@
 import { onecGet } from '../onec.mjs';
 import { RETAIL_REPORT_ENTITY, RETAIL_REPORT_SELECT } from '../dashboard/constants.mjs';
 import { addDays } from './ranges.mjs';
+import { ascendingStartOffset } from './seek.mjs';
 
 const MAX_PAGES = 2000;
 const monthCache = new Map();
@@ -17,16 +18,17 @@ function unique(items) {
   return items;
 }
 
-async function loadRange(from, toExclusive, { filterByDate }) {
+async function loadRange(from, toExclusive, { filterByDate, startOffset = 0, initialDirection = null }) {
   const size = Math.min(100, Math.max(2, Number(process.env.SYNC_ONEC_PAGE_SIZE || 50)));
   const start = `${from}T00:00:00`;
   const end = `${toExclusive}T00:00:00`;
   const items = [];
   let previousDate = null;
-  let direction = null;
-  let offset = 0;
+  let direction = initialDirection;
+  let offset = startOffset;
 
   for (let pageNumber = 0; pageNumber < MAX_PAGES; pageNumber += 1) {
+    const pageStarted = Date.now();
     const page = await onecGet(RETAIL_REPORT_ENTITY, {
       $top: size,
       $skip: offset,
@@ -67,6 +69,9 @@ async function loadRange(from, toExclusive, { filterByDate }) {
       }
       items.push(report);
     }
+    if (pageNumber % 10 === 0 || Date.now() - pageStarted > 10_000) {
+      console.log(`[SYNC][reports] страница=${pageNumber + 1} offset=${offset} найдено=${items.length}`);
+    }
   }
   throw new Error(`Превышен лимит ${MAX_PAGES} страниц 1С; день не отмечен как синхронизированный`);
 }
@@ -83,7 +88,9 @@ export async function fetchReportDay(day) {
   } catch (error) {
     if (!isUnsupportedDateFilter(error)) throw error;
     console.warn(`[SYNC][reports][${day}] 1С не поддерживает фильтр Date; читаем месяц ${month} одним проходом`);
-    const rows = await loadRange(month, nextMonth, { filterByDate: false });
+    const position = await ascendingStartOffset(RETAIL_REPORT_ENTITY, 'Date', `${month}T00:00:00`);
+    const rows = await loadRange(month, nextMonth, { filterByDate: false,
+      startOffset: position.offset, initialDirection: position.direction });
     monthCache.clear();
     monthCache.set(key, { rows, expiresAt: Date.now() + 30 * 60_000 });
     return rows.filter(row => String(row.Date).slice(0, 10) === day);

@@ -3,10 +3,13 @@ import { onecBalance, onecGet, onecSliceLast } from '../onec.mjs';
 import { parseOnecDateTime } from '../dashboard/utils.mjs';
 import { addDays } from './ranges.mjs';
 import { CATALOG_SOURCES, DATED_SOURCES, SNAPSHOT_SOURCES } from './sources.mjs';
+import { ascendingStartOffset } from './seek.mjs';
 
 const MAX_PAGES = 2000;
 const monthCache = new Map();
-const pageSize = () => Math.min(100, Math.max(2, Number(process.env.SYNC_ONEC_PAGE_SIZE || 50)));
+// A legacy local configuration used page size 1. Large real-world months then
+// needed thousands of HTTP requests and could hit MAX_PAGES before completion.
+const pageSize = () => Math.min(100, Math.max(25, Number(process.env.SYNC_ONEC_PAGE_SIZE || 50)));
 const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 function rowKey(row, entity) {
@@ -22,16 +25,18 @@ function checkPage(page, source) {
   return page;
 }
 
-async function loadDated(from, toExclusive, { entity, field }, filterByDate) {
+async function loadDated(from, toExclusive, { entity, field }, filterByDate,
+  { startOffset = 0, initialDirection = null } = {}) {
   const size = pageSize();
   const start = `${from}T00:00:00`;
   const end = `${toExclusive}T00:00:00`;
   const items = [];
   const seen = new Set();
   let previous = null;
-  let direction = null;
-  let offset = 0;
+  let direction = initialDirection;
+  let offset = startOffset;
   for (let index = 0; index < MAX_PAGES; index += 1) {
+    const pageStarted = Date.now();
     const page = checkPage(await onecGet(entity, {
       $top: size,
       $skip: offset,
@@ -62,6 +67,9 @@ async function loadDated(from, toExclusive, { entity, field }, filterByDate) {
         if (filterByDate) throw new Error(`${entity}: 1С нарушила фильтр ${field}`);
         if (direction === 'asc') return items;
       } else items.push(row);
+    }
+    if (index % 10 === 0 || Date.now() - pageStarted > 10_000) {
+      console.log(`[SYNC][${entity}] страница=${index + 1} offset=${offset} найдено=${items.length}`);
     }
   }
   throw new Error(`${entity}: превышен лимит ${MAX_PAGES} страниц`);
@@ -125,7 +133,9 @@ export async function fetchRawSource(day, source) {
     catch (error) {
       if (!/Операция не разрешена в предложении|operation not allowed in (the )?where/i.test(String(error.message))) throw error;
       console.warn(`[SYNC][${source}][${day}] фильтр даты не поддержан, читаем месяц ${month} одним проходом`);
-      const rows = await loadDated(month, nextMonth, dated, false);
+      const position = await ascendingStartOffset(source, dated.field, `${month}T00:00:00`);
+      const rows = await loadDated(month, nextMonth, dated, false,
+        { startOffset: position.offset, initialDirection: position.direction });
       monthCache.clear(); // Bound memory: only the current source/month is retained.
       monthCache.set(key, { rows, expiresAt: Date.now() + 30 * 60_000 });
       return rows.filter(row => String(row[dated.field]).slice(0, 10) === day);
