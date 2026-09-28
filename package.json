@@ -20,6 +20,7 @@
     "db:migrate:sync": "node --env-file-if-exists=.env server/sync/migrate.mjs",
     "sync:worker": "node --env-file-if-exists=.env server/sync/worker.mjs",
     "sync:initial": "node --env-file-if-exists=.env server/sync/enqueue.mjs --initial",
+    "sync:prune-queue": "node --env-file-if-exists=.env server/sync/prune-queue.mjs",
     "sync:daily": "node --env-file-if-exists=.env server/sync/enqueue.mjs --daily",
     "sync:range": "node --env-file-if-exists=.env server/sync/enqueue.mjs",
     "sync:verify": "node --env-file-if-exists=.env server/sync/verify.mjs",

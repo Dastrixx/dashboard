@@ -9,8 +9,7 @@ let from = args.from;
 let to = args.to;
 let refresh = false;
 if (process.argv.includes('--initial')) {
-  const [year, month] = day.split('-').map(Number);
-  from = new Date(Date.UTC(year, month - 4, 1)).toISOString().slice(0, 10);
+  from = addDays(day, -29);
   to = day;
 } else if (process.argv.includes('--daily')) {
   from = addDays(day, -7); to = day; refresh = true;
