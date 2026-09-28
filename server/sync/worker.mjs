@@ -1,6 +1,9 @@
 import { closePool, getPool } from './db.mjs';
-import { claimJob, enqueueDays, failJob, rangeStatus, recoverJobs, storeReports } from './repository.mjs';
+import { claimJob, enqueueDays, failJob, rangeStatus, recoverJobs, storeRaw, storeReports } from './repository.mjs';
 import { fetchReportDay } from './onec-reports.mjs';
+import { fetchRawSource } from './raw-source.mjs';
+import { enqueueRawRange } from './enqueue-raw.mjs';
+import { CATALOG_SOURCES, DATED_SOURCES, SNAPSHOT_SOURCES, datedType } from './sources.mjs';
 import { addDays, businessDate } from './ranges.mjs';
 
 let stopping = false;
@@ -16,6 +19,7 @@ async function scheduleDaily() {
   if (!result.rowCount) return;
   try {
     await enqueueDays(addDays(day, -7), day, { refresh: true });
+    await enqueueRawRange(addDays(day, -7), day, { refresh: true });
     console.log(`[SYNC][reports] daily queued ${addDays(day, -7)}..${day}`);
   } catch (error) {
     await getPool().query('DELETE FROM sync_schedule WHERE sync_date=$1', [day]);
@@ -29,6 +33,19 @@ async function scheduleBackfill() {
   const month = `${day.slice(0, 7)}-01`;
   const coverage = await rangeStatus(month, day, { enqueue: false });
   if (coverage.status !== 'ready') return;
+  const required = [
+    ...DATED_SOURCES.map(({ entity }) => datedType(entity)),
+    ...SNAPSHOT_SOURCES.map(datedType),
+  ];
+  const raw = await getPool().query(`SELECT data_type,count(*)::integer AS count FROM sync_days
+    WHERE sync_date BETWEEN $1 AND $2 AND status IN ('completed','failed') AND data_type=ANY($3)
+    GROUP BY data_type`, [month, day, required]);
+  const days = Math.round((Date.parse(`${day}T00:00:00Z`) - Date.parse(`${month}T00:00:00Z`)) / 86_400_000) + 1;
+  if (raw.rows.length !== required.length || raw.rows.some(row => row.count !== days)) return;
+  const catalogs = await getPool().query(`SELECT count(*)::integer AS count FROM sync_days
+    WHERE sync_date=$1 AND status IN ('completed','failed') AND data_type=ANY($2)`,
+  [day, CATALOG_SOURCES.map(datedType)]);
+  if (catalogs.rows[0].count !== CATALOG_SOURCES.length) return;
   const marker = await getPool().query(`INSERT INTO sync_backfill(sync_month) VALUES ($1)
     ON CONFLICT DO NOTHING RETURNING sync_month`, [month]);
   if (!marker.rowCount) return;
@@ -37,6 +54,7 @@ async function scheduleBackfill() {
     const from = new Date(Date.UTC(year, monthNumber - 4, 1)).toISOString().slice(0, 10);
     const to = addDays(month, -1);
     await enqueueDays(from, to);
+    await enqueueRawRange(from, to);
     console.log(`[SYNC][reports] background queued ${from}..${to}`);
   } catch (error) {
     await getPool().query('DELETE FROM sync_backfill WHERE sync_month=$1', [month]);
@@ -66,9 +84,16 @@ try {
         const start = Date.now();
         console.log(`[SYNC][reports][${day}] started attempt=${job.attempt}`);
         try {
-          const reports = await fetchReportDay(day);
-          await storeReports(day, reports, job.id);
-          console.log(`[SYNC][reports][${day}] completed fetched=${reports.length} durationMs=${Date.now() - start}`);
+          if (job.data_type === 'reports') {
+            const reports = await fetchReportDay(day);
+            await storeReports(day, reports, job.id);
+            console.log(`[SYNC][reports][${day}] completed fetched=${reports.length} durationMs=${Date.now() - start}`);
+          } else if (job.data_type.startsWith('raw:')) {
+            const source = job.data_type.slice(4);
+            const rows = await fetchRawSource(day, source);
+            await storeRaw(day, source, rows, job);
+            console.log(`[SYNC][${source}][${day}] completed fetched=${rows.length} durationMs=${Date.now() - start}`);
+          } else throw new Error(`Неизвестный тип задания ${job.data_type}`);
         } catch (error) {
           console.error(`[SYNC][reports][${day}] attempt=${job.attempt} error=${error.message}`);
           await failJob(job, error.message);

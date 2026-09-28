@@ -147,6 +147,7 @@ export function onecBalance(register, options = {}) {
   return onecRequest(path, {
     $format: "json",
     $top: options.top,
+    $skip: options.skip,
     $select: options.select,
   });
 }
@@ -171,6 +172,7 @@ export function onecTurnovers(register, options = {}) {
   return onecRequest(path, {
     $format: "json",
     $top: options.top,
+    $skip: options.skip,
     $select: options.select,
   });
 }
@@ -199,6 +201,7 @@ export function onecSliceLast(register, options = {}) {
   return onecRequest(path, {
     $format: "json",
     $top: options.top,
+    $skip: options.skip,
     $select: options.select,
   });
 }

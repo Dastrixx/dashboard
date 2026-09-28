@@ -46,7 +46,9 @@ import {
   salesChannelFromOrder,
 } from "./dashboard/sales-channels.mjs";
 import { addDays, businessDate, daysInRange } from './sync/ranges.mjs';
-import { enqueueDays, rangeStatus, readReports, syncHealth } from './sync/repository.mjs';
+import { enqueueDays, rangeStatus, rawJobsMissing, rawStatus, readRaw, readReports, syncHealth } from './sync/repository.mjs';
+import { enqueueRawRange } from './sync/enqueue-raw.mjs';
+import { RAW_TYPES } from './sync/sources.mjs';
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -104,11 +106,52 @@ app.get('/api/sync/status', async (request, response) => {
   } catch (error) { response.status(400).json({ message: error.message }); }
 });
 
+app.get('/api/sync/status-all', async (request, response) => {
+  try {
+    const from = String(request.query.from || '');
+    const to = String(request.query.to || '');
+    response.json({ reports: await rangeStatus(from, to, { enqueue: false }), raw: await rawStatus(from, to) });
+  } catch (error) { response.status(400).json({ message: error.message }); }
+});
+
+app.get('/api/sync/raw', async (request, response) => {
+  try {
+    if (request.auth.user.role !== 'owner') {
+      return response.status(403).json({ message: 'Доступно только владельцу' });
+    }
+    const source = String(request.query.source || '');
+    if (!RAW_TYPES.includes(`raw:${source}`) && source !== RETAIL_REPORT_ENTITY) {
+      return response.status(400).json({ message: 'Неизвестный источник 1С' });
+    }
+    const from = String(request.query.from || '');
+    const to = String(request.query.to || '');
+    daysInRange(from, to);
+    if (await rawJobsMissing(from, to)) await enqueueRawRange(from, to);
+    const limit = Math.min(1000, Math.max(1, Number(request.query.limit) || 100));
+    const offset = Math.max(0, Number(request.query.offset) || 0);
+    if (!Number.isInteger(limit) || !Number.isSafeInteger(offset)) {
+      return response.status(400).json({ message: 'Некорректная пагинация' });
+    }
+    const status = source === RETAIL_REPORT_ENTITY
+      ? await rangeStatus(from, to)
+      : (await rawStatus(from, to)).sources.find(item => item.source === source);
+    if (status?.status === 'failed' || status?.failedDays) {
+      return response.status(503).json({ status: 'failed', source, error: status.error || 'Ошибка загрузки 1С' });
+    }
+    if (status?.status === 'syncing' || (status && status.completedDays < status.totalDays)) {
+      return response.status(202).json({ status: 'syncing', source, completedDays: status.completedDays, totalDays: status.totalDays });
+    }
+    const result = await readRaw(source, from, to, limit, offset);
+    return response.json({ ...result, meta: { source, from, to, limit, offset } });
+  } catch (error) { return response.status(400).json({ message: error.message }); }
+});
+
 app.post('/api/sync/retry', async (request, response) => {
   try {
     const { from, to } = request.body || {};
     daysInRange(from, to);
     await enqueueDays(from, to);
+    if (request.body?.allSources) await enqueueRawRange(from, to, { retryNow: true });
     response.status(202).json(await rangeStatus(from, to));
   } catch (error) { response.status(400).json({ message: error.message }); }
 });
@@ -120,6 +163,11 @@ app.get('/api/dashboard/onec-reports', async (request, response, next) => {
     const { day } = businessDate();
     const from = String(request.query.from || addDays(day, -(Math.min(Math.max(Number(request.query.days) || 60, 1), 365) - 1)));
     const to = String(request.query.to || day);
+    if (request.query.from && request.query.to) {
+      if (await rawJobsMissing(from, to)) {
+        await enqueueRawRange(from, to);
+      }
+    }
     const coverage = await rangeStatus(from, to);
     if (coverage.status !== 'ready') {
       return response.status(coverage.status === 'failed' ? 503 : 202).json({

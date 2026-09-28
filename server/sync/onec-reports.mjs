@@ -3,6 +3,7 @@ import { RETAIL_REPORT_ENTITY, RETAIL_REPORT_SELECT } from '../dashboard/constan
 import { addDays } from './ranges.mjs';
 
 const MAX_PAGES = 2000;
+const monthCache = new Map();
 
 function isUnsupportedDateFilter(error) {
   return /Операция не разрешена в предложении|operation not allowed in (the )?where/i.test(String(error?.message));
@@ -16,23 +17,26 @@ function unique(items) {
   return items;
 }
 
-async function loadDay(day, { filterByDate }) {
+async function loadRange(from, toExclusive, { filterByDate }) {
   const size = Math.min(100, Math.max(2, Number(process.env.SYNC_ONEC_PAGE_SIZE || 50)));
-  const start = `${day}T00:00:00`;
-  const end = `${addDays(day, 1)}T00:00:00`;
+  const start = `${from}T00:00:00`;
+  const end = `${toExclusive}T00:00:00`;
   const items = [];
   let previousDate = null;
   let direction = null;
+  let offset = 0;
 
   for (let pageNumber = 0; pageNumber < MAX_PAGES; pageNumber += 1) {
     const page = await onecGet(RETAIL_REPORT_ENTITY, {
       $top: size,
-      $skip: pageNumber * size,
+      $skip: offset,
       $select: `${RETAIL_REPORT_SELECT},DeletionMark`,
       ...(filterByDate ? { $filter: `Date ge datetime'${start}' and Date lt datetime'${end}'` } : {}),
       $orderby: 'Date desc',
     });
     if (!Array.isArray(page)) throw new Error('1С вернула некорректную страницу отчётов');
+    if (!page.length) return unique(items);
+    offset += page.length;
 
     // Some 1C installations ignore the requested sort direction. Determine the
     // actual order before deciding that an older document ends the search.
@@ -63,17 +67,25 @@ async function loadDay(day, { filterByDate }) {
       }
       items.push(report);
     }
-    if (page.length < size) return unique(items);
   }
   throw new Error(`Превышен лимит ${MAX_PAGES} страниц 1С; день не отмечен как синхронизированный`);
 }
 
 export async function fetchReportDay(day) {
+  const month = `${day.slice(0, 7)}-01`;
+  const [year, number] = month.split('-').map(Number);
+  const nextMonth = new Date(Date.UTC(year, number, 1)).toISOString().slice(0, 10);
+  const key = `${process.env.ONEC_ODATA_URL}:${month}`;
+  const cached = monthCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.rows.filter(row => String(row.Date).slice(0, 10) === day);
   try {
-    return await loadDay(day, { filterByDate: true });
+    return await loadRange(day, addDays(day, 1), { filterByDate: true });
   } catch (error) {
     if (!isUnsupportedDateFilter(error)) throw error;
-    console.warn(`[SYNC][reports][${day}] 1С не поддерживает фильтр Date; сканируем страницы и проверяем порядок дат`);
-    return loadDay(day, { filterByDate: false });
+    console.warn(`[SYNC][reports][${day}] 1С не поддерживает фильтр Date; читаем месяц ${month} одним проходом`);
+    const rows = await loadRange(month, nextMonth, { filterByDate: false });
+    monthCache.clear();
+    monthCache.set(key, { rows, expiresAt: Date.now() + 30 * 60_000 });
+    return rows.filter(row => String(row.Date).slice(0, 10) === day);
   }
 }

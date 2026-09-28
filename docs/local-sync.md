@@ -32,6 +32,7 @@ ONEC_PAGE_SIZE=25
 SYNC_ONEC_PAGE_SIZE=1
 SYNC_REPORTS_FROM_DB=true
 SYNC_TIMEZONE=Asia/Almaty
+SYNC_AUTO_SCHEDULE=false
 ```
 
 Проверьте только наличие настройки, не выводя пароль в терминал:
@@ -98,7 +99,7 @@ npm run dev:full
 Поставьте в очередь два тестовых дня:
 
 ```bash
-npm run sync:range -- --from=2026-08-01 --to=2026-08-02
+npm run sync:range -- --from=2026-08-01 --to=2026-08-02 --reports-only
 ```
 
 `sync:range` только ставит задачи в очередь. Worker должен вывести `completed fetched=1` для каждого дня. `sync:verify` теперь ждёт завершения (до 15 минут), а затем сверяет источник с БД. Посмотрите строки в базе:
@@ -124,7 +125,7 @@ docker compose -f compose.sync.yaml exec postgres psql -U dashboard -d dashboard
 `pending` означает ожидание worker или более ранних задач. При `running` смотрите его лог; при `failed` смотрите `error`. После исправления адреса 1С и перезапуска worker можно сразу повторить ожидающие/неудачные дни, не дожидаясь `run_after`:
 
 ```powershell
-npm run sync:range -- --from=2026-08-01 --to=2026-08-02 --retry-now
+npm run sync:range -- --from=2026-08-01 --to=2026-08-02 --reports-only --retry-now
 ```
 
 API защищён авторизацией. Создайте локального пользователя через `npm run auth:create-user` и войдите в интерфейс `http://localhost:5173/login`. Затем откройте в той же вкладке `http://localhost:4000/api/sync/health` и `http://localhost:4000/api/dashboard/onec-reports?from=2026-08-01&to=2026-08-02&references=false`. Готовый диапазон вернёт HTTP 200 с двумя документами и `cache: postgres`.

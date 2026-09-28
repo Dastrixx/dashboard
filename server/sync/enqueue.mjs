@@ -1,6 +1,7 @@
 import { closePool } from './db.mjs';
 import { enqueueDays } from './repository.mjs';
 import { addDays, businessDate } from './ranges.mjs';
+import { enqueueRawRange } from './enqueue-raw.mjs';
 
 const args = Object.fromEntries(process.argv.slice(2).filter(item => item.startsWith('--') && item.includes('='))
   .map(item => item.slice(2).split('=')));
@@ -17,5 +18,9 @@ if (process.argv.includes('--initial')) {
 if (process.argv.includes('--refresh')) refresh = true;
 try {
   const count = await enqueueDays(from, to, { refresh, retryNow: process.argv.includes('--retry-now') });
+  if (!process.argv.includes('--reports-only')) {
+    await enqueueRawRange(from, to, { refresh, retryNow: process.argv.includes('--retry-now') });
+    console.log(`[SYNC][raw] queued all sources ${from}..${to}`);
+  }
   console.log(`[SYNC][reports] queued ${count} days ${from}..${to}`);
 } finally { await closePool(); }
