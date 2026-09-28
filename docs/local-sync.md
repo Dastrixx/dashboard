@@ -46,6 +46,19 @@ node --env-file-if-exists=.env -e "console.log('DATABASE_URL:', Boolean(process.
 docker compose -f compose.sync.yaml ps
 ```
 
+Если `sync:verify` сообщает `ECONNREFUSED 127.0.0.1:5432`, на этом адресе нет доступного PostgreSQL. Выполните в корне проекта:
+
+```powershell
+docker info
+docker compose -f compose.sync.yaml config
+docker compose -f compose.sync.yaml up -d postgres
+docker compose -f compose.sync.yaml ps -a
+docker compose -f compose.sync.yaml logs --tail=100 postgres
+Test-NetConnection 127.0.0.1 -Port 5432
+```
+
+В `ps -a` нужен контейнер `postgres` со статусом `running (healthy)` и портом `127.0.0.1:5432->5432/tcp`; у `Test-NetConnection` ожидается `TcpTestSucceeded : True`. Если Docker Desktop не запущен, запустите его перед `up -d`. Если контейнер завершился, причину покажут `logs`. При ошибке публикации занятого порта 5432 измените *левую* часть строки `ports` в `compose.sync.yaml` на `"127.0.0.1:5433:5432"`, затем укажите порт `5433` в `DATABASE_URL` файла `.env` и повторите `up -d`.
+
 Пароль `dashboard_local_only` предназначен только для локальной тестовой базы. При запуске на VDS создайте другой пароль и не публикуйте `.env`.
 
 ## 2. Миграция и фоновые процессы
