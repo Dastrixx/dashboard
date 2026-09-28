@@ -25,7 +25,8 @@ const server = createServer((request, response) => {
   const start = filter.match(/Date ge datetime'([^']+)'/)?.[1];
   const end = filter.match(/Date lt datetime'([^']+)'/)?.[1];
   const items = rows.filter(row => (!start || row.Date >= start) && (!end || row.Date < end))
-    .sort((a, b) => b.Date.localeCompare(a.Date));
+    .sort((a, b) => process.env.MOCK_ONEC_SORT_ASC === 'true'
+      ? a.Date.localeCompare(b.Date) : b.Date.localeCompare(a.Date));
   const skip = Number(url.searchParams.get('$skip') || 0);
   const top = Number(url.searchParams.get('$top') || 100);
   response.writeHead(200, { 'Content-Type': 'application/json' });
