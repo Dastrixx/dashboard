@@ -29,6 +29,7 @@ try {
     const matched = JSON.stringify(expected) === JSON.stringify(actual);
     if (!matched) differences += 1;
     console.log(`[VERIFY][reports][${day}] ${matched ? 'OK' : 'DIFFERENT'} 1C=${expected.count}/${expected.net}/${expected.returns}/${expected.lines} DB=${actual.count}/${actual.net}/${actual.returns}/${actual.lines}`);
+    if (matched && expected.count === 0) console.warn(`[VERIFY][reports][${day}] ВНИМАНИЕ: источник и БД пусты. Проверьте дату и доступную базу 1С через npm run sync:probe -- --from=${day} --to=${day}`);
   }
   if (differences) process.exitCode = 1;
 } finally { await closePool(); }
