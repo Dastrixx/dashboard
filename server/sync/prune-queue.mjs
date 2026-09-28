@@ -1,10 +1,10 @@
 import { closePool, getPool } from './db.mjs';
-import { addDays, businessDate, daysInRange } from './ranges.mjs';
+import { businessDate, daysInRange } from './ranges.mjs';
 
 const args = Object.fromEntries(process.argv.slice(2).filter(arg => arg.startsWith('--') && arg.includes('='))
   .map(arg => arg.slice(2).split('=')));
 if (Boolean(args.from) !== Boolean(args.to)) throw new Error('Укажите оба параметра: --from и --to');
-const from = args.from || addDays(businessDate().day, -29);
+const from = args.from || `${businessDate().day.slice(0, 7)}-01`;
 const to = args.to || businessDate().day;
 daysInRange(from, to);
 const client = await getPool().connect();

@@ -9,7 +9,7 @@ let from = args.from;
 let to = args.to;
 let refresh = false;
 if (process.argv.includes('--initial')) {
-  from = addDays(day, -29);
+  from = `${day.slice(0, 7)}-01`;
   to = day;
 } else if (process.argv.includes('--daily')) {
   from = addDays(day, -7); to = day; refresh = true;

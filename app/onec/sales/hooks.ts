@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   API_URL,
   dateRangeQuery,
+  monthToDateRange,
   PERIODS,
   previousDateRange,
   rollingDateRange,
@@ -24,7 +25,6 @@ import type {
   SalesDateRange,
 } from "./types";
 
-const SALES_HISTORY_DAYS = 30;
 const SALES_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 function salesHistoryQuery(range: SalesDateRange) {
@@ -52,7 +52,7 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
   const [syncProgress, setSyncProgress] = useState('');
 
   async function retryReports() {
-    const range = dateRange || rollingDateRange(SALES_HISTORY_DAYS);
+    const range = dateRange || monthToDateRange();
     await Promise.all([range, previousDateRange(range)].map(item =>
       fetch(`${API_URL}/api/sync/retry`, {
         method: 'POST', credentials: 'include',
@@ -65,7 +65,7 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
   useEffect(() => {
     const controller = new AbortController();
     let refreshTimer: number | undefined;
-    const currentRange = dateRange || rollingDateRange(SALES_HISTORY_DAYS);
+    const currentRange = dateRange || monthToDateRange();
     const currentQuery = salesHistoryQuery(currentRange);
     const previousQuery = salesHistoryQuery(previousDateRange(currentRange));
 
@@ -129,22 +129,29 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
             controller.signal, setSyncProgress,
           );
         };
-        const [current, previous] = await Promise.all([
-          loadRange(currentQuery),
-          loadRange(previousQuery),
-        ]);
+        const current = await loadRange(currentQuery);
 
         if (controller.signal.aborted) return;
 
-        const reportsByKey = new Map<string, OnecRetailReport>();
-        [...(current.items || []), ...(previous.items || [])]
-          .filter((report) => report.Posted)
-          .forEach((report) => reportsByKey.set(report.Ref_Key, report));
-        setReports([...reportsByKey.values()]);
+        setReports((current.items || []).filter((report) => report.Posted));
         setLoadMeta(current.meta);
         setAnalysisTimestamp(Date.now());
         setLoading(false);
-        await loadReferences();
+        void loadReferences();
+
+        try {
+          const previous = await loadRange(previousQuery);
+          if (controller.signal.aborted) return;
+
+          const reportsByKey = new Map<string, OnecRetailReport>();
+          [...(current.items || []), ...(previous.items || [])]
+            .filter((report) => report.Posted)
+            .forEach((report) => reportsByKey.set(report.Ref_Key, report));
+          setReports([...reportsByKey.values()]);
+          setAnalysisTimestamp(Date.now());
+        } catch (loadError) {
+          if (!isAbortError(loadError)) setSyncProgress('Не удалось загрузить сравнение с предыдущим периодом');
+        }
       } catch (loadError) {
         if (controller.signal.aborted || isAbortError(loadError)) return;
 
@@ -202,7 +209,7 @@ export function useCheckAnalytics(
       try {
         setLoading(true);
         setError("");
-        const range = dateRange || rollingDateRange(PERIODS[period].days);
+        const range = dateRange || (period === 'month' ? monthToDateRange() : rollingDateRange(PERIODS[period].days));
         const query = new URLSearchParams(dateRangeQuery(range));
         query.set("includePrevious", "false");
         const analytics = await loadCheckAnalytics(query.toString());
@@ -246,7 +253,7 @@ export function useMarginAnalytics(
       try {
         setLoading(true);
         setError("");
-        const range = dateRange || rollingDateRange(PERIODS[period].days);
+        const range = dateRange || (period === 'month' ? monthToDateRange() : rollingDateRange(PERIODS[period].days));
         const query = new URLSearchParams(dateRangeQuery(range));
         query.set("includePrevious", "false");
         const response = await fetch(

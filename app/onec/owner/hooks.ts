@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { API_URL } from "../shared";
 import { loadCheckAnalytics } from "../sales/check-api";
 import { fetchSyncedJson } from '../sales/sync-fetch';
-import { previousDateRange } from "../sales/config";
+import { monthToDateRange, previousDateRange } from "../sales/config";
 import type {
   CheckAnalytics,
   OnecCategoryReference,
@@ -77,7 +77,7 @@ export function useOwnerOverview(
   const [retryKey, setRetryKey] = useState(0);
 
   const effectiveRange = useMemo(
-    () => dateRange || rollingDateRange(period, refreshedAt),
+    () => dateRange || (period === 30 ? monthToDateRange(new Date(refreshedAt)) : rollingDateRange(period, refreshedAt)),
     [dateRange, period, refreshedAt],
   );
 
@@ -96,16 +96,21 @@ export function useOwnerOverview(
             controller.signal, setSyncProgress,
           );
         };
-        const [current, previous] = await Promise.all([
-          loadRange(effectiveRange),
-          loadRange(previousDateRange(effectiveRange)),
-        ]);
+        const current = await loadRange(effectiveRange);
         if (controller.signal.aborted) return;
-        const reportsByKey = new Map<string, OnecRetailReport>();
-        [...(current.items || []), ...(previous.items || [])].forEach(
-          (report) => reportsByKey.set(report.Ref_Key, report),
-        );
-        setReports([...reportsByKey.values()]);
+        setReports(current.items || []);
+        setReportsLoading(false);
+        try {
+          const previous = await loadRange(previousDateRange(effectiveRange));
+          if (controller.signal.aborted) return;
+          const reportsByKey = new Map<string, OnecRetailReport>();
+          [...(current.items || []), ...(previous.items || [])].forEach(
+            (report) => reportsByKey.set(report.Ref_Key, report),
+          );
+          setReports([...reportsByKey.values()]);
+        } catch (error) {
+          if (!isAbortError(error)) setSyncProgress('Не удалось загрузить сравнение с предыдущим периодом');
+        }
       } catch (error) {
         if (isAbortError(error)) return;
         setReportsError(

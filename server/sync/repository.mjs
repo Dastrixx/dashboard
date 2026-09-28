@@ -47,12 +47,12 @@ export async function rangeStatus(from, to, { enqueue = true } = {}) {
   };
 }
 
-export async function claimJob() {
+export async function claimJob(preferredFrom, preferredTo) {
   const result = await getPool().query(`WITH next AS (
     SELECT id FROM sync_jobs WHERE status='pending' AND run_after <= now()
-    ORDER BY run_after, id FOR UPDATE SKIP LOCKED LIMIT 1
+    ORDER BY CASE WHEN sync_date BETWEEN $1 AND $2 THEN 0 ELSE 1 END, run_after, id FOR UPDATE SKIP LOCKED LIMIT 1
   ) UPDATE sync_jobs j SET status='running', attempt=attempt+1, started_at=now()
-    FROM next WHERE j.id=next.id RETURNING j.*, j.sync_date::text AS day`);
+    FROM next WHERE j.id=next.id RETURNING j.*, j.sync_date::text AS day`, [preferredFrom, preferredTo]);
   const job = result.rows[0];
   if (job) await getPool().query(`UPDATE sync_days SET status='running', started_at=now(), completed_at=NULL, error=NULL
     WHERE data_type=$1 AND sync_date=$2`, [job.data_type, job.day]);

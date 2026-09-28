@@ -42,6 +42,7 @@ export function OnecOverview({
 
   return (
     <div className="page-stack owner-overview">
+      {state.syncProgress && <p role="status">{state.syncProgress}</p>}
       <section className="onec-source-panel owner-source-panel">
         <div>
           <span className="onec-source-kicker">Реальные данные 1С</span>

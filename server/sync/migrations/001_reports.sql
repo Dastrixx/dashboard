@@ -55,3 +55,4 @@ CREATE TABLE IF NOT EXISTS sync_jobs (
 );
 CREATE INDEX IF NOT EXISTS sync_jobs_next_idx ON sync_jobs (run_after, id) WHERE status = 'pending';
 CREATE TABLE IF NOT EXISTS sync_schedule (sync_date date PRIMARY KEY, scheduled_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS sync_backfill (sync_month date PRIMARY KEY, scheduled_at timestamptz NOT NULL DEFAULT now());

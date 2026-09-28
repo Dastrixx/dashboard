@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { AbcAnalysis } from "./abc-analysis";
 import { buildSalesAnalytics } from "./analytics";
 import { CheckAnalyticsPanel } from "./check-analytics-panel";
-import { rollingDateRange } from "./config";
+import { monthToDateRange } from "./config";
 import { useCheckAnalytics, useMarginAnalytics, useSalesData } from "./hooks";
 import {
   ReferenceSkeleton,
@@ -14,7 +14,7 @@ import {
 import { ProductRanking } from "./product-ranking";
 import type { AnalyticsPeriod, SalesDateRange } from "./types";
 
-const DEFAULT_SALES_RANGE = rollingDateRange(30);
+const DEFAULT_SALES_RANGE = monthToDateRange();
 
 function LoadingState({ progress }: { progress?: string }) {
   return (
@@ -66,6 +66,10 @@ export function OnecSales() {
   const sales = useSalesData(dateRange);
   const checks = useCheckAnalytics(period, dateRange);
   const margin = useMarginAnalytics(period, dateRange);
+  const effectiveRange = useMemo(
+    () => dateRange || (period === 'month' ? monthToDateRange() : null),
+    [dateRange, period],
+  );
 
   const selectPeriod = (value: AnalyticsPeriod) => {
     setPeriod(value);
@@ -85,10 +89,10 @@ export function OnecSales() {
         sales.categories,
         period,
         sales.analysisTimestamp,
-        dateRange,
+        effectiveRange,
       ),
     [
-      dateRange,
+      effectiveRange,
       period,
       sales.analysisTimestamp,
       sales.categories,
@@ -110,6 +114,7 @@ export function OnecSales() {
         referencesReady ? "" : "references-pending"
       }`}
     >
+      {sales.syncProgress && <p role="status">{sales.syncProgress}</p>}
       <SalesSummary
         analytics={analytics}
         period={period}
@@ -136,14 +141,14 @@ export function OnecSales() {
         analytics={checks.data}
         loading={checks.loading}
         error={checks.error}
-        dateRange={dateRange}
+        dateRange={effectiveRange}
         reportRevenue={analytics.revenue}
       />
 
       <RevenueAnalysis
         analytics={analytics}
         period={period}
-        dateRange={dateRange}
+        dateRange={effectiveRange}
       />
 
       {sales.referencesLoading && <ReferenceSkeleton />}
@@ -153,7 +158,7 @@ export function OnecSales() {
         products={sales.products}
         categories={sales.categories}
         anchorTimestamp={sales.analysisTimestamp}
-        dateRange={dateRange}
+        dateRange={effectiveRange}
       />
 
       <AbcAnalysis
