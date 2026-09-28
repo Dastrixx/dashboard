@@ -1,4 +1,6 @@
 import type { SellerReference } from "../types";
+import { SalesDateFilter } from "../sales/date-filter";
+import type { SalesDateRange } from "../sales/types";
 import { CHANNEL_OPTIONS, PERIOD_OPTIONS } from "./config";
 import type { Period, SalesChannel } from "./types";
 
@@ -7,9 +9,16 @@ type Props = {
   storeKey: string;
   period: Period;
   channel: SalesChannel;
+  dateFrom: string;
+  dateTo: string;
+  dateRange: SalesDateRange;
+  canApplyDateRange: boolean;
   onStoreChange: (value: string) => void;
   onPeriodChange: (value: Period) => void;
   onChannelChange: (value: SalesChannel) => void;
+  onDateFromChange: (value: string) => void;
+  onDateToChange: (value: string) => void;
+  onApplyDateRange: () => void;
 };
 
 export function TeamHeader({
@@ -17,9 +26,16 @@ export function TeamHeader({
   storeKey,
   period,
   channel,
+  dateFrom,
+  dateTo,
+  dateRange,
+  canApplyDateRange,
   onStoreChange,
   onPeriodChange,
   onChannelChange,
+  onDateFromChange,
+  onDateToChange,
+  onApplyDateRange,
 }: Props) {
   return (
     <section className="team-dashboard-head">
@@ -39,6 +55,15 @@ export function TeamHeader({
           onChange={onStoreChange}
         />
         <PeriodFilter value={period} onChange={onPeriodChange} />
+        <SalesDateFilter
+          from={dateFrom}
+          to={dateTo}
+          appliedRange={dateRange}
+          canApply={canApplyDateRange}
+          onFromChange={onDateFromChange}
+          onToChange={onDateToChange}
+          onApply={onApplyDateRange}
+        />
         <ChannelFilter value={channel} onChange={onChannelChange} />
       </div>
     </section>
