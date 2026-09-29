@@ -17,7 +17,7 @@ export const compactMoney = new Intl.NumberFormat("ru-RU", {
 
 export const periodLabel: Record<Period, string> = {
   7: "7 дней",
-  30: "30 дней",
+  30: "текущий месяц",
   90: "90 дней",
 };
 

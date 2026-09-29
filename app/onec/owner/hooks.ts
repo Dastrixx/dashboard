@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { API_URL } from "../shared";
 import { loadCheckAnalytics } from "../sales/check-api";
-import { previousDateRange } from "../sales/config";
+import { fetchSyncedJson } from '../sales/sync-fetch';
+import { monthToDateRange, previousDateRange } from "../sales/config";
 import type {
   CheckAnalytics,
   OnecCategoryReference,
@@ -24,14 +25,6 @@ const OWNER_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
-}
-
-async function readJson<T>(response: Response): Promise<T> {
-  const payload = (await response.json()) as T & { message?: string };
-  if (!response.ok) {
-    throw new Error(payload.message || `Ошибка HTTP ${response.status}`);
-  }
-  return payload;
 }
 
 function formatQueryDate(date: Date) {
@@ -72,15 +65,20 @@ export function useOwnerOverview(
   const [referencesError, setReferencesError] = useState("");
   const [checksError, setChecksError] = useState("");
   const [marginError, setMarginError] = useState("");
+  const [syncProgress, setSyncProgress] = useState('');
+  const [retryKey, setRetryKey] = useState(0);
 
   const effectiveRange = useMemo(
-    () => dateRange || rollingDateRange(period, refreshedAt),
+    () => dateRange || (period === 30 ? monthToDateRange(new Date(refreshedAt)) : rollingDateRange(period, refreshedAt)),
     [dateRange, period, refreshedAt],
   );
 
   useEffect(() => {
     const controller = new AbortController();
     let refreshTimer: number | undefined;
+    let reportsPartiallyLoaded = false;
+    let checksPartiallyLoaded = false;
+    let marginPartiallyLoaded = false;
 
     async function loadReports() {
       try {
@@ -88,29 +86,37 @@ export function useOwnerOverview(
         setReportsError("");
         const loadRange = async (range: OwnerDateRange) => {
           const reportQuery = new URLSearchParams(range);
-          const response = await fetch(
+          return fetchSyncedJson<OwnerReportsResponse>(
             `${API_URL}/api/dashboard/onec-reports?${reportQuery}&references=false`,
-            { credentials: "include", signal: controller.signal },
+            controller.signal, setSyncProgress,
+            range === effectiveRange ? partial => {
+              if (controller.signal.aborted) return;
+              reportsPartiallyLoaded = true;
+              setReports(partial.items || []);
+              setReportsLoading(false);
+            } : undefined,
           );
-          return readJson<OwnerReportsResponse>(response);
         };
-        const [current, previous] = await Promise.all([
-          loadRange(effectiveRange),
-          loadRange(previousDateRange(effectiveRange)),
-        ]);
+        const current = await loadRange(effectiveRange);
         if (controller.signal.aborted) return;
-        const reportsByKey = new Map<string, OnecRetailReport>();
-        [...(current.items || []), ...(previous.items || [])].forEach(
-          (report) => reportsByKey.set(report.Ref_Key, report),
-        );
-        setReports([...reportsByKey.values()]);
+        setReports(current.items || []);
+        setReportsLoading(false);
+        try {
+          const previous = await loadRange(previousDateRange(effectiveRange));
+          if (controller.signal.aborted) return;
+          const reportsByKey = new Map<string, OnecRetailReport>();
+          [...(current.items || []), ...(previous.items || [])].forEach(
+            (report) => reportsByKey.set(report.Ref_Key, report),
+          );
+          setReports([...reportsByKey.values()]);
+        } catch (error) {
+          if (!isAbortError(error)) setSyncProgress('Не удалось загрузить сравнение с предыдущим периодом');
+        }
       } catch (error) {
         if (isAbortError(error)) return;
-        setReportsError(
-          error instanceof Error
-            ? error.message
-            : "Не удалось загрузить отчёты 1С",
-        );
+        const message = error instanceof Error ? error.message : "Не удалось загрузить отчёты 1С";
+        if (reportsPartiallyLoaded) setSyncProgress(`Часть отчётов доступна. ${message}`);
+        else setReportsError(message);
       } finally {
         if (!controller.signal.aborted) setReportsLoading(false);
       }
@@ -124,11 +130,10 @@ export function useOwnerOverview(
           from: effectiveRange.from,
           to: effectiveRange.to,
         });
-        const response = await fetch(
+        const payload = await fetchSyncedJson<OwnerReportsResponse>(
           `${API_URL}/api/dashboard/onec-reports?${reportQuery}&references=only`,
-          { credentials: "include", signal: controller.signal },
+          controller.signal,
         );
-        const payload = await readJson<OwnerReportsResponse>(response);
         if (controller.signal.aborted) return;
         setProducts(
           Array.isArray(payload.references?.products)
@@ -161,20 +166,22 @@ export function useOwnerOverview(
           to: effectiveRange.to,
           includePrevious: "false",
         });
-        const response = await fetch(
+        const payload = await fetchSyncedJson<MarginAnalyticsResponse>(
           `${API_URL}/api/dashboard/onec-margin?${query}`,
-          { signal: controller.signal, credentials: "include" },
+          controller.signal, undefined, partial => {
+            if (controller.signal.aborted) return;
+            marginPartiallyLoaded = true;
+            setMargin(partial.items || null);
+            setMarginLoading(false);
+          },
         );
-        const payload = await readJson<MarginAnalyticsResponse>(response);
         setMargin(payload.items || null);
       } catch (error) {
         if (isAbortError(error)) return;
-        setMargin(null);
-        setMarginError(
-          error instanceof Error
-            ? error.message
-            : "Не удалось загрузить маржу 1С",
-        );
+        if (!marginPartiallyLoaded) {
+          setMargin(null);
+          setMarginError(error instanceof Error ? error.message : "Не удалось загрузить маржу 1С");
+        }
       } finally {
         if (!controller.signal.aborted) setMarginLoading(false);
       }
@@ -189,19 +196,22 @@ export function useOwnerOverview(
           to: effectiveRange.to,
           includePrevious: "false",
         });
-        const analytics = await loadCheckAnalytics(query.toString());
+        const analytics = await loadCheckAnalytics(query.toString(), controller.signal, partial => {
+          if (controller.signal.aborted) return;
+          checksPartiallyLoaded = true;
+          setChecks(partial);
+          setChecksLoading(false);
+        });
 
         if (controller.signal.aborted) return;
 
         setChecks(analytics);
       } catch (error) {
         if (isAbortError(error)) return;
-        setChecks(null);
-        setChecksError(
-          error instanceof Error
-            ? error.message
-            : "Не удалось загрузить чеки 1С",
-        );
+        if (!checksPartiallyLoaded) {
+          setChecks(null);
+          setChecksError(error instanceof Error ? error.message : "Не удалось загрузить чеки 1С");
+        }
       } finally {
         if (!controller.signal.aborted) setChecksLoading(false);
       }
@@ -225,7 +235,17 @@ export function useOwnerOverview(
       controller.abort();
       if (refreshTimer) window.clearTimeout(refreshTimer);
     };
-  }, [effectiveRange]);
+  }, [effectiveRange, retryKey]);
+
+  async function retryReports() {
+    await Promise.all([effectiveRange, previousDateRange(effectiveRange)].map(range =>
+      fetch(`${API_URL}/api/sync/retry`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(range),
+      }),
+    ));
+    setRetryKey(value => value + 1);
+  }
 
   const analytics = useMemo(
     () =>
@@ -251,5 +271,7 @@ export function useOwnerOverview(
     margin,
     marginLoading,
     marginError,
+    syncProgress,
+    retryReports,
   };
 }

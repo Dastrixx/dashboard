@@ -14,6 +14,11 @@
 
 Нужен Node.js 22+.
 
+Локальная проверка PostgreSQL и первого этапа фоновой синхронизации:
+[docs/local-sync.md](docs/local-sync.md). Развёртывание worker на VDS:
+[docs/background-sync.md](docs/background-sync.md). Синхронизация пока охватывает
+только отчёты о продажах; другие источники dashboard всё ещё читаются из 1С.
+
 ```bash
 npm install
 npm run dev:full

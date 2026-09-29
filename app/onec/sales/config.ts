@@ -26,6 +26,10 @@ export function rollingDateRange(
   };
 }
 
+export function monthToDateRange(now = new Date()): SalesDateRange {
+  return { from: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`, to: formatQueryDate(now) };
+}
+
 export function dateRangeQuery(range: SalesDateRange) {
   return new URLSearchParams({
     from: range.from,
@@ -54,7 +58,7 @@ export const PERIODS: Record<
 > = {
   day: { label: "День", days: 1, caption: "за день" },
   week: { label: "Неделя", days: 7, caption: "за неделю" },
-  month: { label: "Месяц", days: 30, caption: "за 30 дней" },
+  month: { label: "Месяц", days: 30, caption: "за текущий месяц" },
 };
 
 export const money = new Intl.NumberFormat("ru-RU", {

@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { AbcAnalysis } from "./abc-analysis";
 import { buildSalesAnalytics } from "./analytics";
 import { CheckAnalyticsPanel } from "./check-analytics-panel";
-import { rollingDateRange } from "./config";
+import { monthToDateRange } from "./config";
 import { useCheckAnalytics, useMarginAnalytics, useSalesData } from "./hooks";
 import {
   ReferenceSkeleton,
@@ -14,29 +14,30 @@ import {
 import { ProductRanking } from "./product-ranking";
 import type { AnalyticsPeriod, SalesDateRange } from "./types";
 
-const DEFAULT_SALES_RANGE = rollingDateRange(30);
+const DEFAULT_SALES_RANGE = monthToDateRange();
 
-function LoadingState() {
+function LoadingState({ progress }: { progress?: string }) {
   return (
     <div className="page-stack">
       <section className="onec-state panel">
         <span className="onec-spinner" />
         <div>
           <strong>Формируем аналитику из 1С</strong>
-          <p>Загружаем отчёты, номенклатуру и категории…</p>
+          <p>{progress || 'Загружаем отчёты, номенклатуру и категории…'}</p>
         </div>
       </section>
     </div>
   );
 }
 
-function ErrorState({ message }: { message: string }) {
+function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div className="page-stack">
       <section className="onec-state onec-error panel">
         <div>
           <strong>Не удалось получить данные 1С</strong>
           <p>{message}</p>
+          <button type="button" onClick={onRetry}>Повторить</button>
         </div>
       </section>
     </div>
@@ -65,6 +66,10 @@ export function OnecSales() {
   const sales = useSalesData(dateRange);
   const checks = useCheckAnalytics(period, dateRange);
   const margin = useMarginAnalytics(period, dateRange);
+  const effectiveRange = useMemo(
+    () => dateRange || (period === 'month' ? monthToDateRange() : null),
+    [dateRange, period],
+  );
 
   const selectPeriod = (value: AnalyticsPeriod) => {
     setPeriod(value);
@@ -84,10 +89,10 @@ export function OnecSales() {
         sales.categories,
         period,
         sales.analysisTimestamp,
-        dateRange,
+        effectiveRange,
       ),
     [
-      dateRange,
+      effectiveRange,
       period,
       sales.analysisTimestamp,
       sales.categories,
@@ -96,8 +101,8 @@ export function OnecSales() {
     ],
   );
 
-  if (sales.loading) return <LoadingState />;
-  if (sales.error) return <ErrorState message={sales.error} />;
+  if (sales.loading) return <LoadingState progress={sales.syncProgress} />;
+  if (sales.error) return <ErrorState message={sales.error} onRetry={() => { void sales.retryReports(); }} />;
   if (!analytics) return <EmptyState />;
 
   const referencesReady =
@@ -109,6 +114,7 @@ export function OnecSales() {
         referencesReady ? "" : "references-pending"
       }`}
     >
+      {sales.syncProgress && <p role="status">{sales.syncProgress}</p>}
       <SalesSummary
         analytics={analytics}
         period={period}
@@ -135,14 +141,14 @@ export function OnecSales() {
         analytics={checks.data}
         loading={checks.loading}
         error={checks.error}
-        dateRange={dateRange}
+        dateRange={effectiveRange}
         reportRevenue={analytics.revenue}
       />
 
       <RevenueAnalysis
         analytics={analytics}
         period={period}
-        dateRange={dateRange}
+        dateRange={effectiveRange}
       />
 
       {sales.referencesLoading && <ReferenceSkeleton />}
@@ -152,7 +158,7 @@ export function OnecSales() {
         products={sales.products}
         categories={sales.categories}
         anchorTimestamp={sales.analysisTimestamp}
-        dateRange={dateRange}
+        dateRange={effectiveRange}
       />
 
       <AbcAnalysis
@@ -170,6 +176,8 @@ export function OnecSales() {
             ? "из кэша"
             : sales.loadMeta?.cache === "shared"
               ? "общий запрос"
+              : sales.loadMeta?.cache === "postgres"
+                ? "из базы данных"
               : "из 1С"}
           {typeof sales.loadMeta?.durationMs === "number"
             ? ` · ${sales.loadMeta.durationMs} мс`

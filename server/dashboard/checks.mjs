@@ -305,6 +305,33 @@ export function buildCheckAnalytics(
   };
 }
 
+export function summarizeStoredCheckRange(checks, from, to, certificatePaymentKeys = new Set(), includePrevious = false) {
+  const fromTimestamp = parseOnecDateTime(`${from}T00:00:00`);
+  const toTimestamp = parseOnecDateTime(`${to}T23:59:59`);
+  const duration = toTimestamp - fromTimestamp + 1;
+  const current = checks.filter(check => isCompletedCheck(check) &&
+    parseOnecDateTime(check.Date) >= fromTimestamp && parseOnecDateTime(check.Date) <= toTimestamp);
+  const previous = includePrevious ? checks.filter(check => isCompletedCheck(check) &&
+    parseOnecDateTime(check.Date) >= fromTimestamp - duration &&
+    parseOnecDateTime(check.Date) < fromTimestamp) : [];
+  const latestTimestamp = current.reduce((latest, check) => Math.max(latest, parseOnecDateTime(check.Date)), 0);
+  const days = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS) + 1;
+  return {
+    current: summarizeChecks(current, certificatePaymentKeys),
+    previous: summarizeChecks(previous, certificatePaymentKeys),
+    series: buildBuckets(current, fromTimestamp, toTimestamp + 1, days),
+    periodStart: new Date(fromTimestamp).toISOString(),
+    periodEnd: new Date(toTimestamp).toISOString(),
+    latestDate: latestTimestamp ? new Date(latestTimestamp).toISOString() : null,
+    loaded: current.length,
+    truncated: false,
+    dataAvailable: true,
+    seriesAvailable: true,
+    documentDetailsAvailable: certificatePaymentKeys.size > 0,
+    source: CHECK_ENTITY,
+  };
+}
+
 async function loadCertificatePaymentKeys() {
   const now = Date.now();
 

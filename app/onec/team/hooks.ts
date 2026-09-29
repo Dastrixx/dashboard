@@ -35,6 +35,7 @@ export function useTeamData({
 
   useEffect(() => {
     const controller = new AbortController();
+    let receivedPartial = false;
 
     async function load() {
       try {
@@ -45,6 +46,12 @@ export function useTeamData({
         const result = await fetchTeamData(
           { storeKey, channel, dateRange },
           controller.signal,
+          partial => {
+            if (controller.signal.aborted) return;
+            receivedPartial = true;
+            setPayload(partial);
+            setLoading(false);
+          },
         );
 
         setPayload(result.payload);
@@ -52,9 +59,9 @@ export function useTeamData({
         setMarginError(result.marginError);
       } catch (cause) {
         if (!isAbortError(cause)) {
-          setError(
-            errorMessage(cause, "Не удалось получить продажи из 1С"),
-          );
+          const message = errorMessage(cause, "Не удалось получить продажи из 1С");
+          if (receivedPartial) setMarginError(message);
+          else setError(message);
         }
       } finally {
         if (!controller.signal.aborted) {

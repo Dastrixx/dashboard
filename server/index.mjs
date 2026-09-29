@@ -38,6 +38,7 @@ import {
 import {
   loadCheckAnalytics,
   loadCheckAnalyticsRange,
+  summarizeStoredCheckRange,
 } from "./dashboard/checks.mjs";
 import { loadMarginPeriod } from "./dashboard/margin-loader.mjs";
 import { summarizeMarginRows } from "./dashboard/margin.mjs";
@@ -45,6 +46,11 @@ import {
   parseSalesChannel,
   salesChannelFromOrder,
 } from "./dashboard/sales-channels.mjs";
+import { addDays, businessDate, daysInRange } from './sync/ranges.mjs';
+import { enqueueDays, enqueueMissingRaw, rangeStatus, rawJobsMissing, rawStatus, readCatalogSnapshot, readCompletedRaw, readRaw, readReports, syncHealth } from './sync/repository.mjs';
+import { enqueueRawRange } from './sync/enqueue-raw.mjs';
+import { RAW_TYPES } from './sync/sources.mjs';
+import { storedConsultants, storedMargin } from './sync/dashboard-view.mjs';
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -89,6 +95,319 @@ app.use(
 
 app.get("/api/dashboard", (_request, response) => {
   response.json(dashboardData);
+});
+
+app.get('/api/sync/health', async (_request, response) => {
+  try { response.json(await syncHealth()); }
+  catch (error) { response.status(503).json({ message: error.message }); }
+});
+
+app.get('/api/sync/status', async (request, response) => {
+  try {
+    response.json(await rangeStatus(String(request.query.from || ''), String(request.query.to || '')));
+  } catch (error) { response.status(400).json({ message: error.message }); }
+});
+
+app.get('/api/sync/status-all', async (request, response) => {
+  try {
+    const from = String(request.query.from || '');
+    const to = String(request.query.to || '');
+    response.json({ reports: await rangeStatus(from, to, { enqueue: false }), raw: await rawStatus(from, to) });
+  } catch (error) { response.status(400).json({ message: error.message }); }
+});
+
+app.get('/api/sync/raw', async (request, response) => {
+  try {
+    if (request.auth.user.role !== 'owner') {
+      return response.status(403).json({ message: 'Доступно только владельцу' });
+    }
+    const source = String(request.query.source || '');
+    if (!RAW_TYPES.includes(`raw:${source}`) && source !== RETAIL_REPORT_ENTITY) {
+      return response.status(400).json({ message: 'Неизвестный источник 1С' });
+    }
+    const from = String(request.query.from || '');
+    const to = String(request.query.to || '');
+    daysInRange(from, to);
+    if (await rawJobsMissing(from, to)) await enqueueRawRange(from, to);
+    const limit = Math.min(1000, Math.max(1, Number(request.query.limit) || 100));
+    const offset = Math.max(0, Number(request.query.offset) || 0);
+    if (!Number.isInteger(limit) || !Number.isSafeInteger(offset)) {
+      return response.status(400).json({ message: 'Некорректная пагинация' });
+    }
+    const status = source === RETAIL_REPORT_ENTITY
+      ? await rangeStatus(from, to)
+      : (await rawStatus(from, to)).sources.find(item => item.source === source);
+    if (status?.status === 'failed' || status?.failedDays) {
+      return response.status(503).json({ status: 'failed', source, error: status.error || 'Ошибка загрузки 1С' });
+    }
+    if (status?.status === 'syncing' || (status && status.completedDays < status.totalDays)) {
+      return response.status(202).json({ status: 'syncing', source, completedDays: status.completedDays, totalDays: status.totalDays });
+    }
+    const result = await readRaw(source, from, to, limit, offset);
+    return response.json({ ...result, meta: { source, from, to, limit, offset } });
+  } catch (error) { return response.status(400).json({ message: error.message }); }
+});
+
+app.post('/api/sync/retry', async (request, response) => {
+  try {
+    const { from, to } = request.body || {};
+    daysInRange(from, to);
+    await enqueueDays(from, to);
+    if (request.body?.allSources) await enqueueRawRange(from, to, { retryNow: true });
+    response.status(202).json(await rangeStatus(from, to));
+  } catch (error) { response.status(400).json({ message: error.message }); }
+});
+
+// Roll out per route. Existing calculations remain available until their inputs are migrated.
+app.get('/api/dashboard/onec-reports', async (request, response, next) => {
+  if (process.env.SYNC_REPORTS_FROM_DB !== 'true' || !['false', 'only'].includes(request.query.references)) return next();
+  try {
+    const { day } = businessDate();
+    const from = String(request.query.from || addDays(day, -(Math.min(Math.max(Number(request.query.days) || 60, 1), 365) - 1)));
+    const to = String(request.query.to || day);
+    if (request.query.from && request.query.to) {
+      if (await rawJobsMissing(from, to)) {
+        await enqueueRawRange(from, to);
+      }
+    }
+    const coverage = await rangeStatus(from, to);
+    if (request.query.references === 'only') {
+      const sources = ['Catalog_Номенклатура', 'Catalog_Склады', 'Catalog_ВидыНоменклатуры'];
+      const [productSnapshot, warehouseSnapshot, kindSnapshot] = await Promise.all(
+        sources.map(source => readCatalogSnapshot(source, to)),
+      );
+      const completed = [productSnapshot, warehouseSnapshot, kindSnapshot].filter(item => item.day).length;
+      if (completed !== sources.length) {
+        const failed = (await rawStatus(to, to)).sources.find(item =>
+          sources.includes(item.source) && item.failedDays &&
+          ![productSnapshot, warehouseSnapshot, kindSnapshot][sources.indexOf(item.source)].day);
+        return response.status(failed ? 503 : 202).json({ status: failed ? 'failed' : 'syncing',
+          completedDays: completed, totalDays: sources.length,
+          message: failed?.error || 'Загружаем справочники товаров и складов из 1С...' });
+      }
+      const reports = await readReports(from, to);
+      const productKeys = new Set(reports.flatMap(report =>
+        [...(report.Товары || []), ...(report.ВозвращенныеТовары || [])].map(line => line.Номенклатура_Key)));
+      const warehouseKeys = new Set(reports.flatMap(report =>
+        [...(report.Товары || []), ...(report.ВозвращенныеТовары || [])].map(line => line.Склад_Key)));
+      const productByKey = new Map(productSnapshot.items.map(item => [item.Ref_Key, item]));
+      const rawProducts = [...productKeys].map(key => productByKey.get(key)).filter(Boolean);
+      const warehouses = warehouseSnapshot.items.filter(item => warehouseKeys.has(item.Ref_Key));
+      const subcategories = [...new Set(rawProducts.map(item => item.Parent_Key))]
+        .map(key => productByKey.get(key)).filter(Boolean);
+      const productKinds = kindSnapshot.items;
+      return response.json({ items: [],
+        references: { products: enrichProductsWithBusinessCategories(rawProducts, productKinds, subcategories),
+          warehouses, categories: publicBusinessCategories(), productKinds, subcategories },
+        meta: { from, to, cache: 'postgres', loaded: reports.length,
+          referencesLoaded: true, catalogDates: [productSnapshot.day, warehouseSnapshot.day, kindSnapshot.day],
+          ...coverage },
+      });
+    }
+    if (coverage.status !== 'ready' && coverage.completedDays === 0) {
+      return response.status(coverage.status === 'failed' ? 503 : 202).json({
+        ...coverage,
+        message: coverage.status === 'failed'
+          ? 'Не удалось загрузить данные за выбранный период. Повторить'
+          : 'Загружаем данные за выбранный период из 1С...',
+      });
+    }
+    const items = await readReports(from, to);
+    const normalized = items.map(report => ({ ...report, Date: normalizeOnecDateTime(report.Date) }));
+    return response.json({ ...coverage,
+      message: coverage.status === 'ready' ? undefined
+        : `Показаны загруженные дни: ${coverage.completedDays} из ${coverage.totalDays}`,
+      items: normalized, references: { products: [], warehouses: [], categories: [] },
+      meta: { from, to, loaded: items.length, cache: 'postgres', referencesLoaded: false,
+        latestDate: normalized[0]?.Date || null, truncated: false, ...coverage } });
+  } catch (error) {
+    return response.status(error.message?.includes('диапазон') ? 400 : 503).json({ message: error.message });
+  }
+});
+
+app.get('/api/dashboard/onec-check-analytics', async (request, response, next) => {
+  if (process.env.SYNC_REPORTS_FROM_DB !== 'true') return next();
+  try {
+    const { day } = businessDate();
+    const days = [1, 7, 30, 90].includes(Number(request.query.days)) ? Number(request.query.days) : 30;
+    const from = String(request.query.from || addDays(day, 1 - days));
+    const to = String(request.query.to || day);
+    daysInRange(from, to);
+    const source = 'Document_ЧекККМ';
+    const includePrevious = request.query.includePrevious !== 'false';
+    const length = daysInRange(from, to).length;
+    const previousTo = addDays(from, -1);
+    const previousFrom = addDays(from, -length);
+    await enqueueMissingRaw(source, from, to);
+    if (includePrevious) await enqueueMissingRaw(source, previousFrom, previousTo);
+    const coverage = (await rawStatus(from, to)).sources.find(item => item.source === source);
+    if (!coverage.completedDays) return response.status(coverage.failedDays ? 503 : 202).json({
+      status: coverage.failedDays ? 'failed' : 'syncing',
+      message: coverage.error || 'Загружаем чеки из 1С...',
+      completedDays: 0, totalDays: coverage.totalDays,
+    });
+    const [checks, paymentKinds, previousCoverage] = await Promise.all([
+      readCompletedRaw(source, from, to),
+      readCatalogSnapshot('Catalog_ВидыОплатЧекаККМ', to),
+      includePrevious ? rawStatus(previousFrom, previousTo).then(result => result.sources.find(item => item.source === source)) : null,
+    ]);
+    const certificateKeys = new Set(paymentKinds.items.filter(item =>
+      /сертификат/i.test(`${item.Description || ''} ${item.ТипОплаты || ''}`)).map(item => item.Ref_Key));
+    const previousChecks = previousCoverage?.completedDays
+      ? await readCompletedRaw(source, previousFrom, previousTo) : [];
+    const analytics = summarizeStoredCheckRange([...previousChecks, ...checks], from, to, certificateKeys, includePrevious);
+    if (analytics.current.totalChecks === 0 && (await readReports(from, to)).length > 0) {
+      analytics.dataAvailable = false;
+      analytics.unavailableReason = 'В отчётах есть продажи, но чеки этого периода не найдены в OData 1С';
+    }
+    const completed = coverage.completedDays + (previousCoverage?.completedDays || 0);
+    const total = coverage.totalDays + (previousCoverage?.totalDays || 0);
+    const status = coverage.failedDays || previousCoverage?.failedDays ? 'failed'
+      : completed < total ? 'syncing' : 'ready';
+    return response.json({ items: analytics,
+      status, completedDays: completed, totalDays: total,
+      message: status === 'ready' ? undefined : `Показаны чеки за ${completed} из ${total} дней`,
+      meta: { from, to, source: 'postgres', loaded: analytics.loaded, ...coverage },
+    });
+  } catch (error) { return response.status(503).json({ message: error.message }); }
+});
+
+app.get('/api/dashboard/onec-consultants', async (request, response, next) => {
+  if (process.env.SYNC_REPORTS_FROM_DB !== 'true') return next();
+  try {
+    const { day } = businessDate();
+    const days = [1, 7, 30, 90].includes(Number(request.query.days)) ? Number(request.query.days) : 30;
+    const from = addDays(day, 1 - days);
+    const source = 'Document_ЧекККМ';
+    await enqueueMissingRaw(source, from, day);
+    const coverage = (await rawStatus(from, day)).sources.find(item => item.source === source);
+    const reportsCoverage = await rangeStatus(from, day);
+    if (!coverage.completedDays && !reportsCoverage.completedDays) {
+      return response.status(coverage.failedDays ? 503 : 202).json({
+        status: coverage.failedDays ? 'failed' : 'syncing',
+        message: coverage.error || 'Загружаем продажи продавцов...',
+        completedDays: 0, totalDays: days,
+      });
+    }
+    const [checks, reports, sellers, stores] = await Promise.all([
+      readCompletedRaw(source, from, day), readReports(from, day),
+      readCatalogSnapshot('Catalog_ФизическиеЛица', day),
+      readCatalogSnapshot('Catalog_Магазины', day),
+    ]);
+    const { items, source: dataSource } = storedConsultants(checks, reports, parseSalesChannel(request.query.channel));
+    const latestDate = [...checks, ...reports].map(item => item.Date).filter(Boolean).sort().at(-1) || null;
+    const status = coverage.failedDays ? 'failed' : coverage.completedDays < days ? 'syncing' : 'ready';
+    return response.json({ items, references: { sellers: sellers.items, stores: stores.items },
+      status, completedDays: coverage.completedDays, totalDays: days,
+      message: status === 'ready' ? undefined : `Продажи продавцов: чеки за ${coverage.completedDays} из ${days} дней`,
+      meta: { days, loaded: items.length, source: dataSource, latestDate, cache: 'postgres',
+        catalogDates: [sellers.day, stores.day], ...coverage },
+    });
+  } catch (error) { return response.status(503).json({ message: error.message }); }
+});
+
+app.get('/api/dashboard/onec-margin', async (request, response, next) => {
+  if (process.env.SYNC_REPORTS_FROM_DB !== 'true') return next();
+  try {
+    const { day } = businessDate();
+    const days = [1, 7, 30, 90].includes(Number(request.query.days)) ? Number(request.query.days) : 30;
+    const from = String(request.query.from || addDays(day, 1 - days));
+    const to = String(request.query.to || day);
+    const length = daysInRange(from, to).length;
+    const source = 'AccumulationRegister_Продажи_RecordType';
+    const includePrevious = request.query.includePrevious !== 'false';
+    const previousTo = addDays(from, -1);
+    const previousFrom = addDays(from, -length);
+    await enqueueMissingRaw(source, from, to);
+    if (includePrevious) await enqueueMissingRaw(source, previousFrom, previousTo);
+    const coverage = (await rawStatus(from, to)).sources.find(item => item.source === source);
+    if (!coverage.completedDays) return response.status(coverage.failedDays ? 503 : 202).json({
+      status: coverage.failedDays ? 'failed' : 'syncing', message: coverage.error || 'Загружаем движения продаж...',
+      completedDays: 0, totalDays: length,
+    });
+    const channel = parseSalesChannel(request.query.channel);
+    const storeKey = String(request.query.storeKey || 'all');
+    const current = storedMargin(await readCompletedRaw(source, from, to), storeKey, channel);
+    const previousCoverage = includePrevious
+      ? (await rawStatus(previousFrom, previousTo)).sources.find(item => item.source === source) : null;
+    const previous = previousCoverage?.completedDays
+      ? storedMargin(await readCompletedRaw(source, previousFrom, previousTo), storeKey, channel)
+      : storedMargin([], storeKey, channel);
+    const complete = coverage.completedDays + (previousCoverage?.completedDays || 0);
+    const total = length * (includePrevious ? 2 : 1);
+    const status = coverage.failedDays || previousCoverage?.failedDays ? 'failed'
+      : complete < total ? 'syncing' : 'ready';
+    return response.json({ items: { current, previous }, status,
+      completedDays: complete, totalDays: total,
+      message: status === 'ready' ? undefined : `Маржа: движения за ${complete} из ${total} дней`,
+      meta: { from, to, source: 'postgres', costSource: current.costSource,
+        previousReady: !includePrevious || previousCoverage?.completedDays === length, ...coverage },
+    });
+  } catch (error) { return response.status(503).json({ message: error.message }); }
+});
+
+app.get('/api/dashboard/onec-stock', async (request, response, next) => {
+  if (process.env.SYNC_REPORTS_FROM_DB !== 'true') return next();
+  try {
+    const { day } = request.query.period
+      ? businessDate(new Date(String(request.query.period))) : businessDate();
+    daysInRange(day, day);
+    const from = `${day.slice(0, 7)}-01`;
+    const snapshotSource = 'Balance_ТоварыНаСкладах';
+    await enqueueMissingRaw(snapshotSource, day, day);
+    const [snapshot, productSnapshot, warehouseSnapshot, supplierSnapshot, kindSnapshot] = await Promise.all([
+      readCatalogSnapshot(snapshotSource, day), readCatalogSnapshot('Catalog_Номенклатура', day),
+      readCatalogSnapshot('Catalog_Склады', day), readCatalogSnapshot('Catalog_Контрагенты', day),
+      readCatalogSnapshot('Catalog_ВидыНоменклатуры', day),
+    ]);
+    if (!snapshot.day || !productSnapshot.day || !warehouseSnapshot.day || !kindSnapshot.day) {
+      const failed = (await rawStatus(day, day)).sources.find(item => item.failedDays &&
+        [snapshotSource, 'Catalog_Номенклатура', 'Catalog_Склады', 'Catalog_ВидыНоменклатуры'].includes(item.source));
+      return response.status(failed ? 503 : 202).json({ status: failed ? 'failed' : 'syncing',
+        message: failed?.error || 'Загружаем остатки и справочники из 1С...',
+        completedDays: Number(Boolean(snapshot.day)), totalDays: 1 });
+    }
+    const operationSources = ['Document_ПоступлениеТоваров', 'Document_СписаниеТоваров', 'Document_ПересчетТоваров'];
+    const operationRows = await Promise.all(operationSources.map(async source => {
+      await enqueueMissingRaw(source, from, day);
+      return readCompletedRaw(source, from, day);
+    }));
+    const [receipts, writeOffs, recounts] = operationRows.map((rows, index) =>
+      rows.filter(item => item.Posted && !item.DeletionMark)
+        .sort((a, b) => String(b.Date).localeCompare(String(a.Date)))
+        .slice(0, index === 0 ? 60 : 30));
+    const balances = snapshot.items.slice(0, Math.min(10000, Math.max(1, Number(request.query.top) || 5000)));
+    const reportRows = await readReports(from, day);
+    const reportLines = reportRows.flatMap(report =>
+      [...(report.Товары || []), ...(report.ВозвращенныеТовары || [])]);
+    const productKeys = new Set([...balances.map(item => item.Номенклатура_Key),
+      ...reportLines.map(line => line.Номенклатура_Key),
+      ...[...receipts, ...writeOffs, ...recounts].flatMap(item =>
+        (item.Товары || []).map(line => line.Номенклатура_Key))]);
+    const warehouseKeys = new Set([...balances.map(item => item.Склад_Key), ...reportLines.map(line => line.Склад_Key),
+      ...[...receipts, ...writeOffs, ...recounts].map(item => item.Склад_Key)]);
+    const productByKey = new Map(productSnapshot.items.map(item => [item.Ref_Key, item]));
+    const rawProducts = [...productKeys].map(key => productByKey.get(key)).filter(Boolean);
+    const subcategories = [...new Set(rawProducts.map(item => item.Parent_Key))]
+      .map(key => productByKey.get(key)).filter(Boolean);
+    const products = enrichProductsWithBusinessCategories(rawProducts, kindSnapshot.items, subcategories);
+    const suppliers = supplierSnapshot.items.filter(item => receipts.some(row => row.Контрагент_Key === item.Ref_Key));
+    const coverage = await rawStatus(from, day);
+    const pending = operationSources.map(source => coverage.sources.find(item => item.source === source))
+      .filter(item => item.completedDays < item.totalDays);
+    const latestOperationDate = [...receipts, ...writeOffs, ...recounts].map(item => item.Date).sort().at(-1) || null;
+    return response.json({ items: balances,
+      references: { products, warehouses: warehouseSnapshot.items.filter(item => warehouseKeys.has(item.Ref_Key)),
+        categories: publicBusinessCategories(), productKinds: kindSnapshot.items, subcategories, suppliers },
+      operations: { receipts, writeOffs, recounts },
+      status: pending.some(item => item.failedDays) ? 'failed' : pending.length ? 'syncing' : 'ready',
+      completedDays: operationSources.length - pending.length, totalDays: operationSources.length,
+      message: pending.length ? `Остатки готовы; операции: ${operationSources.length - pending.length} из ${operationSources.length} источников` : undefined,
+      meta: { loaded: balances.length, asOf: snapshot.day, balancePeriod: snapshot.day,
+        latestOperationDate, operationFreshness: describeDataFreshness(latestOperationDate),
+        source: 'postgres', operationErrors: {}, snapshotDay: snapshot.day },
+    });
+  } catch (error) { return response.status(503).json({ message: error.message }); }
 });
 app.get("/api/dashboard/team-plan", (request, response) => {
   const period = [1, 7, 30].includes(Number(request.query.period))

@@ -80,4 +80,6 @@ export type OwnerOverviewState = {
   margin: MarginAnalytics | null;
   marginLoading: boolean;
   marginError: string;
+  syncProgress: string;
+  retryReports: () => Promise<void>;
 };
