@@ -205,35 +205,40 @@ async function loadRawMarginRows(startDate, endDate) {
   }));
 }
 
+export function marginTurnoverOptions(startDate, endDate, storeKey, channel) {
+  const dimensions = [
+    ...(storeKey === "all" ? [] : ["Магазин"]),
+    ...(channel === "all" ? [] : ["ЗаказПокупателя"]),
+  ];
+  const maxGroups = dimensions.length === 0
+    ? 1
+    : channel === "all" ? 1_000 : MAX_GROUPED_ROWS;
+  return {
+    startPeriod: startDate,
+    endPeriod: endDate,
+    dimensions: dimensions.join(","),
+    top: maxGroups + 1,
+    select: [
+      ...(storeKey === "all" ? [] : ["Магазин_Key"]),
+      ...(channel === "all" ? [] : ["ЗаказПокупателя_Key"]),
+      "СтоимостьTurnover",
+      "СтоимостьБезСкидокTurnover",
+      "ор_СебестоимостьTurnover",
+    ].join(","),
+  };
+}
+
 export async function loadMarginPeriod(
   startDate,
   endDate,
   storeKey = "all",
   channel = "all",
 ) {
-  const dimensions = [
-    "Магазин",
-    "Склад",
-    "Номенклатура",
-    "Характеристика",
-    ...(channel === "all" ? [] : ["ЗаказПокупателя"]),
-  ];
-  const rows = await onecTurnovers(SALES_REGISTER, {
-    startPeriod: startDate,
-    endPeriod: endDate,
-    dimensions: dimensions.join(","),
-    top: MAX_GROUPED_ROWS,
-    select: [
-      "Магазин_Key",
-      "Склад_Key",
-      "Номенклатура_Key",
-      "Характеристика_Key",
-      ...(channel === "all" ? [] : ["ЗаказПокупателя_Key"]),
-      "СтоимостьTurnover",
-      "СтоимостьБезСкидокTurnover",
-      "ор_СебестоимостьTurnover",
-    ].join(","),
-  });
+  const options = marginTurnoverOptions(startDate, endDate, storeKey, channel);
+  const rows = await onecTurnovers(SALES_REGISTER, options);
+  if (rows.length >= options.top) {
+    throw new Error("Слишком много групп оборотов для расчёта маржи");
+  }
   const scopedRows = filterRows(rows, storeKey, channel);
   const summary = summarizeMarginRows(scopedRows);
 

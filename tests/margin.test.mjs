@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { summarizeMarginWithSnapshotCosts } from "../server/dashboard/margin-loader.mjs";
+import { marginTurnoverOptions, summarizeMarginWithSnapshotCosts } from "../server/dashboard/margin-loader.mjs";
 import { summarizeMarginRows } from "../server/dashboard/margin.mjs";
 import { buildOnecSliceLastPath } from "../server/onec.mjs";
 
@@ -15,6 +15,16 @@ test("SliceLast вызывается у RecordType регистра сведен
     path,
     /^InformationRegister_СебестоимостьНоменклатуры_RecordType\/SliceLast\(/,
   );
+});
+
+test("general margin queries one aggregate without grouping by store", () => {
+  const options = marginTurnoverOptions(new Date(0), new Date(1), "all", "all");
+  assert.equal(options.dimensions, "");
+  assert.equal(options.top, 2);
+  assert.doesNotMatch(options.select, /Магазин_Key/);
+  const scoped = marginTurnoverOptions(new Date(0), new Date(1), "store-key", "all");
+  assert.equal(scoped.dimensions, "Магазин");
+  assert.match(scoped.select, /Магазин_Key/);
 });
 
 test("margin uses every turnover row", () => {

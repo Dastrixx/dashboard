@@ -125,10 +125,8 @@ export function useSalesData(dateRange?: SalesDateRange | null) {
           }
           return data;
         };
-        const [current, previous] = await Promise.all([
-          loadRange(currentQuery),
-          loadRange(previousQuery),
-        ]);
+        const current = await loadRange(currentQuery);
+        const previous = await loadRange(previousQuery);
 
         if (controller.signal.aborted) return;
 
