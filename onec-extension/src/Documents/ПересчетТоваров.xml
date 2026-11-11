@@ -1,0 +1,34 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.17">
+	<Document uuid="039be2d0-3ae0-5e6c-8022-df0df8352b60">
+		<InternalInfo>
+			<xr:GeneratedType name="DocumentObject.ПересчетТоваров" category="Object">
+				<xr:TypeId>22fd3fde-f90d-51d2-adc0-880ab48cee7f</xr:TypeId>
+				<xr:ValueId>b0d85757-d381-5b7d-9864-5b5fed4e918f</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="DocumentRef.ПересчетТоваров" category="Ref">
+				<xr:TypeId>ab480e21-2348-53fc-b0e3-28d063b9359b</xr:TypeId>
+				<xr:ValueId>42ebc424-7226-555e-8b5d-0f2ed674f779</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="DocumentSelection.ПересчетТоваров" category="Selection">
+				<xr:TypeId>7e25803e-24ff-5a93-a876-93f671d1222a</xr:TypeId>
+				<xr:ValueId>315d7c56-f30f-5879-8d28-eb10bf815261</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="DocumentList.ПересчетТоваров" category="List">
+				<xr:TypeId>49856ecf-cfae-58ab-b30f-8cb2a0219a85</xr:TypeId>
+				<xr:ValueId>f2ccc447-91f1-5c5a-a7fa-516db63e34ac</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="DocumentManager.ПересчетТоваров" category="Manager">
+				<xr:TypeId>8f696106-3429-5b6d-b780-4a8a1d158b3c</xr:TypeId>
+				<xr:ValueId>5b9bbdc1-55ff-57e6-8a13-06154dea065f</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<ObjectBelonging>Adopted</ObjectBelonging>
+			<Name>ПересчетТоваров</Name>
+			<Comment/>
+			<ExtendedConfigurationObject>f3a40be4-b0ac-41b6-bdeb-f24b5a74cd2c</ExtendedConfigurationObject>
+		</Properties>
+		<ChildObjects/>
+	</Document>
+</MetaDataObject>

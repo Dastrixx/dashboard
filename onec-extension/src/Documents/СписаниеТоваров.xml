@@ -1,0 +1,34 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.17">
+	<Document uuid="bfb4f6ba-f256-5169-adf4-18c1605004bf">
+		<InternalInfo>
+			<xr:GeneratedType name="DocumentObject.СписаниеТоваров" category="Object">
+				<xr:TypeId>eff93bf3-9676-5b38-b7b1-63fe2e81c2f7</xr:TypeId>
+				<xr:ValueId>4e4b8ef4-3920-55c8-be90-b1047889fe7e</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="DocumentRef.СписаниеТоваров" category="Ref">
+				<xr:TypeId>44a802d0-7e58-5480-a03a-a8526bab274c</xr:TypeId>
+				<xr:ValueId>a6236fbc-4daa-51ee-a912-b89095601515</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="DocumentSelection.СписаниеТоваров" category="Selection">
+				<xr:TypeId>d296b372-51a2-5e32-b6ba-a66a4322192c</xr:TypeId>
+				<xr:ValueId>d5f90f17-c3ec-5888-a73a-70066dff1708</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="DocumentList.СписаниеТоваров" category="List">
+				<xr:TypeId>bab73216-086c-5f62-a093-101f8ffb2235</xr:TypeId>
+				<xr:ValueId>be794ec2-1fc3-5246-8303-197e33584807</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="DocumentManager.СписаниеТоваров" category="Manager">
+				<xr:TypeId>a2c91940-16a9-5d2c-b858-395e7727b2aa</xr:TypeId>
+				<xr:ValueId>cf03e730-8535-5838-b42e-adc129a60de4</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<ObjectBelonging>Adopted</ObjectBelonging>
+			<Name>СписаниеТоваров</Name>
+			<Comment/>
+			<ExtendedConfigurationObject>a376dbf0-beef-4ba6-8e94-69ecc1c4e8c4</ExtendedConfigurationObject>
+		</Properties>
+		<ChildObjects/>
+	</Document>
+</MetaDataObject>
