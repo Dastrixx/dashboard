@@ -3,7 +3,7 @@ import { odataHsEnabled, odataHsRequest } from "./onec-odata-hs.mjs";
 
 function getConfig() {
   return {
-    baseUrl: process.env.ONEC_ODATA_URL?.replace(/\/$/, ""),
+    baseUrl: process.env.ONEC_HS_URL?.replace(/\/$/, ""),
     username: process.env.ONEC_USER,
     password: process.env.ONEC_PASSWORD,
     timeoutMs: Number(process.env.ONEC_TIMEOUT_MS || 30_000),
