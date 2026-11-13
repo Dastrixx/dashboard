@@ -1,4 +1,5 @@
 import { toOdataDateTime } from "./dashboard/utils.mjs";
+import { odataHsEnabled, odataHsRequest } from "./onec-odata-hs.mjs";
 
 function getConfig() {
   return {
@@ -19,6 +20,10 @@ function getAuthorization(username, password) {
 }
 
 async function onecRequest(path, params = {}, accept = "application/json") {
+  // Если задан ONEC_HS_URL, данные берутся из HTTP-сервиса расширения 1С
+  // «dashboard» (onec-extension/) вместо OData. Без переменной — OData, как раньше.
+  if (odataHsEnabled()) return odataHsRequest(path, params);
+
   const { baseUrl, username, password, timeoutMs, retries } = getConfig();
 
   if (!baseUrl || !username || !password) {

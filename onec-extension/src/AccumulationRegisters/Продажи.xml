@@ -1,0 +1,38 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.17">
+	<AccumulationRegister uuid="1533f404-28d3-5aa7-9c17-ac9f00957be5">
+		<InternalInfo>
+			<xr:GeneratedType name="AccumulationRegisterRecord.Продажи" category="Record">
+				<xr:TypeId>92817855-843e-52bd-8785-cf4c55ae65cd</xr:TypeId>
+				<xr:ValueId>a259f36e-ae3b-5034-90c6-4ad4b73157c0</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccumulationRegisterManager.Продажи" category="Manager">
+				<xr:TypeId>d8fe126e-01f8-59e6-b007-4a76143aff31</xr:TypeId>
+				<xr:ValueId>6812ee06-83f9-5b5c-961d-864a179c1325</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccumulationRegisterSelection.Продажи" category="Selection">
+				<xr:TypeId>1cbc9bdf-888b-5654-b63d-72bd402da66b</xr:TypeId>
+				<xr:ValueId>085f3e1a-8e3a-5875-8812-f6a48912ec2f</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccumulationRegisterList.Продажи" category="List">
+				<xr:TypeId>b23b568e-584a-5c32-90a3-0888fbee4456</xr:TypeId>
+				<xr:ValueId>f418b3b0-9e8b-5f8c-8c80-b42c16b09686</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccumulationRegisterRecordSet.Продажи" category="RecordSet">
+				<xr:TypeId>d06ec7aa-970b-5181-8862-59c3b1a849cd</xr:TypeId>
+				<xr:ValueId>a0e824f2-5639-5e6f-a6e5-151f036914b2</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccumulationRegisterRecordKey.Продажи" category="RecordKey">
+				<xr:TypeId>65b5e498-91d3-5163-95f7-c20ff0c9a83e</xr:TypeId>
+				<xr:ValueId>40b0e44c-d64d-57b5-9508-7abbd513ac7a</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<ObjectBelonging>Adopted</ObjectBelonging>
+			<Name>Продажи</Name>
+			<Comment/>
+			<ExtendedConfigurationObject>7dbda725-9b76-42b3-988a-834b6b485a1e</ExtendedConfigurationObject>
+		</Properties>
+		<ChildObjects/>
+	</AccumulationRegister>
+</MetaDataObject>

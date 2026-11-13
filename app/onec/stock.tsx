@@ -24,6 +24,7 @@ export function OnecStock() {
   const [payload, setPayload] = useState<StockPayload>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [period, setPeriod] = useState("");
   const [warehouseMode, setWarehouseMode] = useState("all");
   const [warehouseKey, setWarehouseKey] = useState("all");
   const [category, setCategory] = useState("all");
@@ -41,8 +42,12 @@ export function OnecStock() {
       try {
         setLoading(true);
         setError("");
+        const query = new URLSearchParams({ top: "5000" });
+        if (period) {
+          query.set("period", new Date(`${period}T23:59:59`).toISOString());
+        }
         const response = await fetch(
-          `${API_URL}/api/dashboard/onec-stock?top=5000`,
+          `${API_URL}/api/dashboard/onec-stock?${query}`,
           { signal: controller.signal, credentials: "include" },
         );
         const data = (await response.json()) as StockPayload;
@@ -69,7 +74,7 @@ export function OnecStock() {
 
     load();
     return () => controller.abort();
-  }, []);
+  }, [period]);
 
   const view = useMemo(() => {
     const balances = payload.items || [];
@@ -114,6 +119,8 @@ export function OnecStock() {
         subcategoryKey: string;
         subcategory: string;
         quantity: number;
+        quantityWarehouse: number;
+        quantityStore: number;
         reserved: number;
         cost: number;
         locations: Set<string>;
@@ -141,10 +148,19 @@ export function OnecStock() {
           subcategoryKey,
           subcategory: product?.Subcategory || "Без подкатегории",
           quantity: 0,
+          quantityWarehouse: 0,
+          quantityStore: 0,
           reserved: 0,
           cost: 0,
           locations: new Set<string>(),
         };
+        const warehouseKind = warehouses.get(item.Склад_Key)?.ТипСклада || "";
+        const balanceQuantity = Number(item.КоличествоBalance || 0);
+        if (warehouseKind === "СкладскоеПомещение") {
+          current.quantityWarehouse += balanceQuantity;
+        } else if (warehouseKind === "ТорговыйЗал") {
+          current.quantityStore += balanceQuantity;
+        }
         current.quantity += Number(item.КоличествоBalance || 0);
         current.reserved += Number(item.РезервBalance || 0);
         current.cost += Number(item.ор_СебестоимостьBalance || 0);
@@ -293,21 +309,27 @@ export function OnecStock() {
         ),
       receiptChart,
       maxReceiptSku,
-      recentReceipts: receipts.slice(0, 5).map((document) => ({
-        ...document,
-        supplier:
-          suppliers.get(document.Контрагент_Key || "")?.НаименованиеПолное ||
-          suppliers.get(document.Контрагент_Key || "")?.Description ||
-          "Поставщик не указан",
-        warehouse:
-          warehouses.get(document.Склад_Key || "")?.Description ||
-          "Склад не указан",
-        sku: new Set(
-          (document.Товары || [])
-            .map((line) => line.Номенклатура_Key)
-            .filter(Boolean),
-        ).size,
-      })),
+      recentReceipts: [...receipts]
+        .sort(
+          (left, right) =>
+            new Date(right.Date).getTime() - new Date(left.Date).getTime(),
+        )
+        .slice(0, 5)
+        .map((document) => ({
+          ...document,
+          supplier:
+            suppliers.get(document.Контрагент_Key || "")?.НаименованиеПолное ||
+            suppliers.get(document.Контрагент_Key || "")?.Description ||
+            "Поставщик не указан",
+          warehouse:
+            warehouses.get(document.Склад_Key || "")?.Description ||
+            "Склад не указан",
+          sku: new Set(
+            (document.Товары || [])
+              .map((line) => line.Номенклатура_Key)
+              .filter(Boolean),
+          ).size,
+        })),
       writeOffRows,
       recountRows,
     };
@@ -321,9 +343,25 @@ export function OnecStock() {
     search,
   ]);
 
+  const periodControl = (
+    <label className="stock-warehouse-select">
+      <span>Остатки на дату</span>
+      <input
+        max={new Date().toLocaleDateString("sv-SE")}
+        onChange={(event) => {
+          setPeriod(event.target.value);
+          setPage(1);
+        }}
+        type="date"
+        value={period}
+      />
+    </label>
+  );
+
   if (loading || error || !(payload.items || []).length) {
     return (
       <div className="page-stack">
+        {periodControl}
         <DataState
           loading={loading}
           error={error}
@@ -374,6 +412,7 @@ export function OnecStock() {
           </p>
         </div>
         <div className="stock-warehouse-controls">
+          {periodControl}
           <label className="stock-warehouse-select">
             <span>Выберите склад</span>
             <select
@@ -534,10 +573,11 @@ export function OnecStock() {
               <tr>
                 <th>Артикул</th>
                 <th>Товар</th>
+                <th>Остаток: склад</th>
+                <th>Остаток: магазин</th>
                 <th>Расположение</th>
                 <th>Категория</th>
                 <th>Подкатегория</th>
-                <th>Остаток</th>
                 <th>Резерв</th>
                 <th>Доступно</th>
                 <th>Статус</th>
@@ -553,10 +593,11 @@ export function OnecStock() {
                   <td>
                     <strong>{item.name}</strong>
                   </td>
+                  <td>{number.format(item.quantityWarehouse)}</td>
+                  <td>{number.format(item.quantityStore)}</td>
                   <td>{item.locations}</td>
                   <td>{item.category}</td>
                   <td>{item.subcategory}</td>
-                  <td>{number.format(item.quantity)}</td>
                   <td>{number.format(item.reserved)}</td>
                   <td>
                     <strong>{number.format(item.available)}</strong>
